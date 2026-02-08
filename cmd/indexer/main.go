@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -388,6 +389,17 @@ func main() {
 	// 3. 初始化组件
 	fetcher := engine.NewFetcher(rpcPool, 10)     // 10 workers, 100 rps limit
 	processor := engine.NewProcessor(db, rpcPool) // 传入RPC池用于reorg恢复
+
+	// Set watched addresses for contract monitoring
+	if watchAddresses := os.Getenv("WATCH_ADDRESSES"); watchAddresses != "" {
+		// Parse comma-separated addresses
+		addresses := strings.Split(watchAddresses, ",")
+		fetcher.SetWatchedAddresses(addresses)
+		engine.Logger.Info("watched_addresses_configured",
+			slog.Int("count", len(addresses)),
+			slog.String("addresses", watchAddresses),
+		)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup

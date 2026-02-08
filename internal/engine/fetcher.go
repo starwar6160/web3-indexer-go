@@ -34,6 +34,9 @@ type Fetcher struct {
 	pauseMu   sync.Mutex
 	pauseCond *sync.Cond
 	paused    bool
+
+	// Watched addresses for contract monitoring
+	watchedAddresses []common.Address
 }
 
 func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
@@ -67,6 +70,16 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency int, rps int, burst int) 
 	}
 	f.pauseCond = sync.NewCond(&f.pauseMu)
 	return f
+}
+
+// SetWatchedAddresses sets the contract addresses to monitor for Transfer events
+func (f *Fetcher) SetWatchedAddresses(addresses []string) {
+	f.watchedAddresses = make([]common.Address, 0, len(addresses))
+	for _, addr := range addresses {
+		if addr != "" {
+			f.watchedAddresses = append(f.watchedAddresses, common.HexToAddress(addr))
+		}
+	}
 }
 
 func (f *Fetcher) Start(ctx context.Context, wg *sync.WaitGroup) {
@@ -172,11 +185,22 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	}
 
 	// 获取该区块的日志（Transfer事件）
-	logs, err := f.pool.FilterLogs(ctx, ethereum.FilterQuery{
+	// 如果有监听的地址，只获取这些地址的日志；否则获取所有Transfer事件
+	filterQuery := ethereum.FilterQuery{
 		FromBlock: bn,
 		ToBlock:   bn,
 		Topics:    [][]common.Hash{{TransferEventHash}},
-	})
+	}
+
+	if len(f.watchedAddresses) > 0 {
+		filterQuery.Addresses = f.watchedAddresses
+		Logger.Debug("fetcher_filtering_logs",
+			slog.String("block", bn.String()),
+			slog.Int("watched_addresses_count", len(f.watchedAddresses)),
+		)
+	}
+
+	logs, err := f.pool.FilterLogs(ctx, filterQuery)
 	if err != nil {
 		// 日志获取失败不阻塞区块处理，但记录详细错误信息
 		Logger.Warn("logs_fetch_failed",

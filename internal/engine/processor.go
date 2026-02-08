@@ -165,9 +165,19 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	}
 
 	// 3. 处理 Transfer 事件（如果日志中有）
-	for _, vLog := range data.Logs {
+	if len(data.Logs) > 0 {
+		log.Printf("🔍 Block %s contains %d logs, scanning for Transfer events...", blockNum.String(), len(data.Logs))
+	}
+
+	for i, vLog := range data.Logs {
+		log.Printf("  📋 Log %d: Contract=%s, Topics=%d, Data=%d bytes",
+			i, vLog.Address.Hex(), len(vLog.Topics), len(vLog.Data))
+
 		transfer := p.ExtractTransfer(vLog)
 		if transfer != nil {
+			log.Printf("  🎯 Found Transfer event! From=%s To=%s Amount=%s",
+				transfer.From, transfer.To, transfer.Amount.String())
+
 			_, err = tx.NamedExecContext(ctx, `
 				INSERT INTO transfers 
 				(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
@@ -182,6 +192,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			if err != nil {
 				return fmt.Errorf("failed to insert transfer at block %s: %w", blockNum.String(), err)
 			}
+			log.Printf("  ✅ Transfer saved to DB: Block=%s TxHash=%s", blockNum.String(), transfer.TxHash)
 		}
 	}
 
