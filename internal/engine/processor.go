@@ -29,6 +29,7 @@ var ErrReorgNeedRefetch = errors.New("reorg detected: need to refetch from commo
 type Processor struct {
 	db     *sqlx.DB
 	client RPCClient // RPC client interface for reorg recovery
+	metrics *Metrics  // Prometheus metrics
 }
 
 // RPCClient defines the interface needed by Processor

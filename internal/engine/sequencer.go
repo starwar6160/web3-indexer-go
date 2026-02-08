@@ -17,9 +17,10 @@ type Sequencer struct {
 	resultCh      <-chan BlockData            // 输入channel
 	fatalErrCh    chan<- error                // 致命错误通知channel
 	chainID       int64                       // 链ID用于checkpoint
+	metrics       *Metrics                    // Prometheus metrics
 }
 
-func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resultCh <-chan BlockData, fatalErrCh chan<- error) *Sequencer {
+func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resultCh <-chan BlockData, fatalErrCh chan<- error, metrics *Metrics) *Sequencer {
 	return &Sequencer{
 		expectedBlock: new(big.Int).Set(startBlock),
 		buffer:        make(map[string]BlockData),
@@ -27,6 +28,7 @@ func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resu
 		resultCh:      resultCh,
 		fatalErrCh:    fatalErrCh,
 		chainID:       chainID,
+		metrics:       metrics,
 	}
 }
 
@@ -93,8 +95,12 @@ func (s *Sequencer) handleBlock(ctx context.Context, data BlockData) error {
 		blockNumStr, s.expectedBlock.String(), len(s.buffer)+1)
 	s.buffer[blockNumStr] = data
 	
+	// Update metrics
+	s.metrics.UpdateSequencerBufferSize(len(s.buffer))
+	
 	// 如果buffer过大，可能是前面的区块丢失了，需要告警
 	if len(s.buffer) > 1000 {
+		s.metrics.RecordSequencerBufferFull()
 		return fmt.Errorf("buffer overflow: %d blocks pending, expected %s. Possible data loss", 
 			len(s.buffer), s.expectedBlock.String())
 	}

@@ -4,11 +4,14 @@ import (
 	"context"
 	"log"
 	"math/big"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"web3-indexer-go/internal/engine"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // PGX Driver
@@ -40,7 +43,25 @@ func main() {
 	db.SetMaxIdleConns(10)
 	log.Println("Database connected with connection pool configured")
 	
+	// Initialize metrics
+	metrics := engine.GetMetrics()
+	metrics.RecordStartTime()
+	
+	// Start Prometheus metrics server
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		log.Printf("📊 Prometheus metrics server started on :8080/metrics")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Printf("Metrics server error: %v", err)
+		}
+	}()
+	
 	// 初始化多节点RPC池
+	rpcUrls = os.Getenv("RPC_URLS")
+	if rpcUrls == "" {
+		log.Fatal("RPC_URLS environment variable is required")
+	}
+	
 	rpcPool, err := engine.NewRPCClientPool(strings.Split(rpcUrls, ","))
 	if err != nil {
 		log.Fatalf("RPC Pool Error: %v", err)
@@ -69,7 +90,7 @@ func main() {
 	log.Printf("Scheduled blocks %s to %s", startBlock.String(), endBlock.String())
 
 	// 6. 启动 Sequencer - 确保顺序处理
-	sequencer := engine.NewSequencer(processor, startBlock, 1, fetcher.Results, fatalErrCh)
+	sequencer := engine.NewSequencer(processor, startBlock, 1, fetcher.Results, fatalErrCh, metrics)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
