@@ -379,17 +379,44 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 	
 	LogReorgHandled(len(toDelete), ancestorNum.String())
 	
-	// 执行数据库回滚（删除所有分叉区块）
-	for _, num := range toDelete {
-		_, err := p.db.ExecContext(ctx, "DELETE FROM blocks WHERE number = $1", num.String())
-		if err != nil {
-			log.Printf("Warning: failed to delete block %s: %v", num.String(), err)
+	// 在单个事务内执行回滚（保证原子性）
+	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin reorg transaction: %w", err)
+	}
+	defer tx.Rollback()
+	
+	// 批量删除所有分叉区块（cascade 会自动删除 transfers）
+	if len(toDelete) > 0 {
+		// 找到最小的要删除的块号
+		minDelete := toDelete[0]
+		for _, num := range toDelete {
+			if num.Cmp(minDelete) < 0 {
+				minDelete = num
+			}
 		}
-		// 同时删除相关transfer
-		_, err = p.db.ExecContext(ctx, "DELETE FROM transfers WHERE block_number = $1", num.String())
+		// 删除所有 >= minDelete 的块（更高效）
+		_, err := tx.ExecContext(ctx, "DELETE FROM blocks WHERE number >= $1", minDelete.String())
 		if err != nil {
-			log.Printf("Warning: failed to delete transfers at block %s: %v", num.String(), err)
+			return nil, fmt.Errorf("failed to delete reorg blocks: %w", err)
 		}
+	}
+	
+	// 更新 checkpoint 回退到祖先高度
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO sync_checkpoints (chain_id, last_synced_block)
+		VALUES ($1, $2)
+		ON CONFLICT (chain_id) DO UPDATE SET 
+			last_synced_block = EXCLUDED.last_synced_block,
+			updated_at = NOW()
+	`, 1, ancestorNum.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to update checkpoint during reorg: %w", err)
+	}
+	
+	// 提交事务
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit reorg transaction: %w", err)
 	}
 	
 	log.Printf("✅ Deep reorg handled. Safe to resume from block %s", 
