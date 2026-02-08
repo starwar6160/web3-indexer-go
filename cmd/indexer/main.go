@@ -69,14 +69,28 @@ func main() {
 	// 1. 加载配置
 	_ = godotenv.Load()
 	rpcUrls := os.Getenv("RPC_URLS")
+	wssUrl := os.Getenv("WSS_URL")
 	dbUrl := os.Getenv("DATABASE_URL")
 	
-	if rpcUrls == "" || dbUrl == "" {
+	// 多 RPC 提供商支持：支持逗号分隔的 URL 列表
+	// 格式：RPC_URLS=https://provider1/...,https://provider2/...
+	rpcUrlList := strings.Split(rpcUrls, ",")
+	for i := range rpcUrlList {
+		rpcUrlList[i] = strings.TrimSpace(rpcUrlList[i])
+	}
+	
+	if len(rpcUrlList) == 0 || rpcUrlList[0] == "" || dbUrl == "" {
 		engine.Logger.Error("missing_required_env_vars",
 			slog.String("error", "RPC_URLS and DATABASE_URL must be set in environment"),
 		)
 		os.Exit(1)
 	}
+	
+	engine.Logger.Info("rpc_providers_configured",
+		slog.Int("provider_count", len(rpcUrlList)),
+		slog.String("providers", strings.Join(rpcUrlList, " | ")),
+		slog.Bool("wss_available", wssUrl != ""),
+	)
 
 	// 2. 连接资源
 	db, err := sqlx.Connect("pgx", dbUrl)
@@ -100,8 +114,8 @@ func main() {
 	metrics := engine.GetMetrics()
 	metrics.RecordStartTime()
 	
-	// 初始化多节点RPC池
-	rpcPool, err := engine.NewRPCClientPool(strings.Split(rpcUrls, ","))
+	// 初始化多节点RPC池（支持故障转移）
+	rpcPool, err := engine.NewRPCClientPool(rpcUrlList)
 	if err != nil {
 		engine.Logger.Error("rpc_pool_init_failed",
 			slog.String("error", err.Error()),
