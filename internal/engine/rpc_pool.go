@@ -17,35 +17,40 @@ import (
 
 // RPCClientPool 多RPC节点池，支持轮询和故障转移
 type RPCClientPool struct {
-	clients    []*rpcNode // 所有节点
-	size       int32      // 节点数量
-	index      int32      // 当前轮询索引
-	mu         sync.RWMutex
+	clients     []*rpcNode // 所有节点
+	size        int32      // 节点数量
+	index       int32      // 当前轮询索引
+	mu          sync.RWMutex
 	rateLimiter *rate.Limiter // 令牌桶限速器
 }
 
 // rpcNode 单个RPC节点封装
 type rpcNode struct {
-	url        string
-	client     *ethclient.Client
-	isHealthy  bool
-	lastError  time.Time
-	failCount  int
+	url       string
+	client    *ethclient.Client
+	isHealthy bool
+	lastError time.Time
+	failCount int
 }
 
 // NewRPCClientPool 创建RPC客户端池
 func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
+	return NewRPCClientPoolWithTimeout(urls, 10*time.Second)
+}
+
+// NewRPCClientPoolWithTimeout 创建带自定义超时的RPC节点池
+func NewRPCClientPoolWithTimeout(urls []string, timeout time.Duration) (*RPCClientPool, error) {
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("no RPC URLs provided")
 	}
 
 	pool := &RPCClientPool{
-		clients: make([]*rpcNode, 0, len(urls)),
-		// 初始化令牌桶限速器：每秒5个请求，突发容量10个
-		rateLimiter: rate.NewLimiter(5, 10),
+		clients:     make([]*rpcNode, 0, len(urls)),
+		rateLimiter: rate.NewLimiter(5, 10), // 令牌桶限速器：每秒5个请求，突发容量10个
 	}
 
 	for _, url := range urls {
+		// 使用标准方法创建 ethclient
 		client, err := ethclient.Dial(url)
 		if err != nil {
 			log.Printf("Warning: failed to connect to %s: %v", url, err)
@@ -67,7 +72,7 @@ func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
 	}
 
 	pool.size = int32(len(pool.clients))
-	log.Printf("RPC Pool initialized with %d/%d nodes", len(pool.clients), len(urls))
+	log.Printf("RPC Pool initialized with %d/%d nodes (timeout: %v)", len(pool.clients), len(urls), timeout)
 	return pool, nil
 }
 
@@ -75,7 +80,7 @@ func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
 func (p *RPCClientPool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	for _, node := range p.clients {
 		if node.client != nil {
 			node.client.Close()
@@ -99,11 +104,11 @@ func (p *RPCClientPool) getNextHealthyNode() *rpcNode {
 	for i := 0; i < size; i++ {
 		idx := (startIdx + i) % size
 		node := p.clients[idx]
-		
+
 		if node.isHealthy {
 			return node
 		}
-		
+
 		// 如果节点不健康但已经超过5分钟，尝试恢复
 		if time.Since(node.lastError) > 5*time.Minute {
 			node.isHealthy = true
@@ -112,7 +117,7 @@ func (p *RPCClientPool) getNextHealthyNode() *rpcNode {
 			return node
 		}
 	}
-	
+
 	// 所有节点都不健康，返回nil让调用方处理
 	return nil
 }
@@ -121,14 +126,14 @@ func (p *RPCClientPool) getNextHealthyNode() *rpcNode {
 func (p *RPCClientPool) markNodeUnhealthy(node *rpcNode) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	node.isHealthy = false
 	node.lastError = time.Now()
 	node.failCount++
-	
+
 	// 记录详细的节点错误日志
 	LogRPCRequestFailed("node_unhealthy", node.url, fmt.Errorf("fail_count: %d", node.failCount))
-	
+
 	log.Printf("RPC node %s marked unhealthy (fail count: %d)", node.url, node.failCount)
 }
 
@@ -146,20 +151,20 @@ func (p *RPCClientPool) BlockByNumber(ctx context.Context, number *big.Int) (*ty
 			log.Printf("⚠️ CRITICAL: All RPC nodes are unhealthy!")
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
-		
+
 		// 为单次 RPC 请求设置超时（10秒）
 		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		block, err := node.client.BlockByNumber(reqCtx, number)
 		cancel()
-		
+
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
 		}
-		
+
 		return block, nil
 	}
-	
+
 	return nil, fmt.Errorf("all RPC nodes failed for BlockByNumber")
 }
 
@@ -170,20 +175,20 @@ func (p *RPCClientPool) HeaderByNumber(ctx context.Context, number *big.Int) (*t
 		if node == nil {
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
-		
+
 		// 为单次 RPC 请求设置超时（10秒）
 		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		header, err := node.client.HeaderByNumber(reqCtx, number)
 		cancel()
-		
+
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
 		}
-		
+
 		return header, nil
 	}
-	
+
 	return nil, fmt.Errorf("all RPC nodes failed for HeaderByNumber")
 }
 
@@ -201,20 +206,20 @@ func (p *RPCClientPool) FilterLogs(ctx context.Context, q ethereum.FilterQuery) 
 			log.Printf("⚠️ CRITICAL: All RPC nodes are unhealthy!")
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
-		
+
 		// 为单次 RPC 请求设置超时（10秒）
 		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		logs, err := node.client.FilterLogs(reqCtx, q)
 		cancel()
-		
+
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
 		}
-		
+
 		return logs, nil
 	}
-	
+
 	return nil, fmt.Errorf("all RPC nodes failed for FilterLogs")
 }
 
@@ -226,20 +231,20 @@ func (p *RPCClientPool) GetLatestBlockNumber(ctx context.Context) (*big.Int, err
 			log.Printf("⚠️ CRITICAL: All RPC nodes are unhealthy!")
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
-		
+
 		// 为单次 RPC 请求设置超时（10秒）
 		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		header, err := node.client.HeaderByNumber(reqCtx, nil) // nil = latest
 		cancel()
-		
+
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
 		}
-		
+
 		return header.Number, nil
 	}
-	
+
 	return nil, fmt.Errorf("all RPC nodes failed for GetLatestBlockNumber")
 }
 
