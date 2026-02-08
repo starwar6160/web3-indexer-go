@@ -206,9 +206,3 @@ func (s *Sequencer) GetBufferSize() int {
 	defer s.mu.RUnlock()
 	return len(s.buffer)
 }
-
-// 错误定义
-var (
-	ErrReorgDetected    = fmt.Errorf("reorg detected: parent hash mismatch")
-	ErrReorgNeedRefetch = fmt.Errorf("reorg handled: refetch required from reorg point")
-)

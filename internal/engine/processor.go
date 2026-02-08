@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -14,6 +15,15 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/jmoiron/sqlx"
 )
+
+// TransferEventHash is the ERC20 Transfer event signature hash
+var TransferEventHash = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+
+// ErrReorgDetected is returned when a blockchain reorganization is detected
+var ErrReorgDetected = errors.New("reorg detected: parent hash mismatch")
+
+// ErrReorgNeedRefetch is returned when blocks need to be refetched due to reorg
+var ErrReorgNeedRefetch = errors.New("reorg detected: need to refetch from common ancestor")
 
 // Processor 处理区块数据写入，支持批量和单条模式
 type Processor struct {
