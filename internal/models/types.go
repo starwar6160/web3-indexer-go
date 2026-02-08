@@ -35,11 +35,17 @@ func (b *BigInt) Scan(value interface{}) error {
 		b.Int = new(big.Int)
 		return nil
 	}
-	switch v := value.(range) {
+	switch v := value.(type) {
 	case []byte:
 		i, ok := new(big.Int).SetString(string(v), 10)
 		if !ok {
 			return fmt.Errorf("failed to convert %s to BigInt", string(v))
+		}
+		b.Int = i
+	case string:
+		i, ok := new(big.Int).SetString(v, 10)
+		if !ok {
+			return fmt.Errorf("failed to convert %s to BigInt", v)
 		}
 		b.Int = i
 	default:
