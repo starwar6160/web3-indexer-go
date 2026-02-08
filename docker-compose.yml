@@ -1,23 +1,70 @@
 version: '3.8'
 
 services:
-  postgres:
+  # PostgreSQL Database Service
+  db:
     image: postgres:15-alpine
-    container_name: indexer-postgres
+    container_name: web3-indexer-db
     environment:
+      POSTGRES_DB: web3_indexer
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: indexer
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "15432:5432"  # Expose to host for indexer in host mode
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - web3-network
+
+  # Anvil RPC Node Service
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: web3-indexer-anvil
+    command: anvil --host 127.0.0.1 --port 8545 --chain-id 31337 --accounts 10 --balance 10000 --block-time 1
+    network_mode: "host"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8545"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Go Indexer Service
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: web3-indexer-core
+    environment:
+      # Database configuration using localhost (host mode)
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:15432/web3_indexer?sslmode=disable
+      # RPC configuration using localhost (host mode - Anvil also on host)
+      RPC_URLS: http://127.0.0.1:8545
+      # Chain and sync configuration
+      CHAIN_ID: "31337"
+      START_BLOCK: "0"
+      # API configuration
+      API_PORT: "8080"
+      # Logging
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+    ports:
+      - "8080:8080"
+    network_mode: "host"
+    depends_on:
+      db:
+        condition: service_healthy
+      anvil:
+        condition: service_started
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+
+networks:
+  web3-network:
+    driver: bridge
