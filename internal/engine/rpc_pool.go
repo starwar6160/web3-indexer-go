@@ -130,7 +130,11 @@ func (p *RPCClientPool) BlockByNumber(ctx context.Context, number *big.Int) (*ty
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
 		
-		block, err := node.client.BlockByNumber(ctx, number)
+		// 为单次 RPC 请求设置超时（10秒）
+		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		block, err := node.client.BlockByNumber(reqCtx, number)
+		cancel()
+		
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
@@ -150,7 +154,11 @@ func (p *RPCClientPool) HeaderByNumber(ctx context.Context, number *big.Int) (*t
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
 		
-		header, err := node.client.HeaderByNumber(ctx, number)
+		// 为单次 RPC 请求设置超时（10秒）
+		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		header, err := node.client.HeaderByNumber(reqCtx, number)
+		cancel()
+		
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
@@ -170,7 +178,11 @@ func (p *RPCClientPool) FilterLogs(ctx context.Context, q ethereum.FilterQuery) 
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
 		
-		logs, err := node.client.FilterLogs(ctx, q)
+		// 为单次 RPC 请求设置超时（10秒）
+		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		logs, err := node.client.FilterLogs(reqCtx, q)
+		cancel()
+		
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue

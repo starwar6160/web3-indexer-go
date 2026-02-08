@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -28,40 +27,44 @@ type Fetcher struct {
 	limiter     *rate.Limiter // 速率限制器
 	stopCh      chan struct{} // 用于停止调度
 	stopOnce    sync.Once     // 确保只停止一次
-	pauseCh     chan struct{} // 用于暂停 worker
-	resumeCh    chan struct{} // 用于恢复 worker
-	paused      atomic.Bool   // 当前是否暂停
+	
+	// Pause/Resume 机制：用 sync.Cond 替代 channel 避免竞态
+	pauseMu     sync.Mutex
+	pauseCond   *sync.Cond
+	paused      bool
 }
 
 func NewFetcher(pool *RPCClientPool, concurrency int) *Fetcher {
 	// 默认限制：每秒100个请求，突发200
 	limiter := rate.NewLimiter(rate.Limit(100), 200)
 	
-	return &Fetcher{
+	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
 		jobs:        make(chan *big.Int, concurrency*2),
 		Results:     make(chan BlockData, concurrency*2),
 		limiter:     limiter,
 		stopCh:      make(chan struct{}),
-		pauseCh:     make(chan struct{}),
-		resumeCh:    make(chan struct{}),
+		paused:      false,
 	}
+	f.pauseCond = sync.NewCond(&f.pauseMu)
+	return f
 }
 
 func NewFetcherWithLimiter(pool *RPCClientPool, concurrency int, rps int, burst int) *Fetcher {
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 	
-	return &Fetcher{
+	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
 		jobs:        make(chan *big.Int, concurrency*2),
 		Results:     make(chan BlockData, concurrency*2),
 		limiter:     limiter,
 		stopCh:      make(chan struct{}),
-		pauseCh:     make(chan struct{}),
-		resumeCh:    make(chan struct{}),
+		paused:      false,
 	}
+	f.pauseCond = sync.NewCond(&f.pauseMu)
+	return f
 }
 
 func (f *Fetcher) Start(ctx context.Context, wg *sync.WaitGroup) {
@@ -86,15 +89,20 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 			}
 			
 			// 检查是否暂停（Reorg 处理期间）
-			if f.paused.Load() {
-				select {
-				case <-f.resumeCh:
-					// 恢复后继续
-				case <-ctx.Done():
-					return
-				case <-f.stopCh:
-					return
-				}
+			f.pauseMu.Lock()
+			for f.paused {
+				// 等待恢复信号（使用 Cond.Wait 避免竞态）
+				f.pauseCond.Wait()
+			}
+			f.pauseMu.Unlock()
+			
+			// 检查是否已停止（在 unlock 后再检查）
+			select {
+			case <-ctx.Done():
+				return
+			case <-f.stopCh:
+				return
+			default:
 			}
 			
 			// 等待速率限制令牌
@@ -165,19 +173,19 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	return block, logs, nil
 }
 
-func (f *Fetcher) Schedule(start, end *big.Int) {
-	go func() {
-		for i := new(big.Int).Set(start); i.Cmp(end) <= 0; i.Add(i, big.NewInt(1)) {
-			select {
-			case <-f.stopCh:
-				return
-			default:
-				bn := new(big.Int).Set(i)
-				f.jobs <- bn
-			}
+func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
+	for i := new(big.Int).Set(start); i.Cmp(end) <= 0; i.Add(i, big.NewInt(1)) {
+		bn := new(big.Int).Set(i)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-f.stopCh:
+			return fmt.Errorf("fetcher stopped")
+		case f.jobs <- bn:
 		}
-		close(f.jobs)
-	}()
+	}
+	return nil
 }
 
 // Stop 优雅地停止 Fetcher，清空任务队列
@@ -194,23 +202,30 @@ func (f *Fetcher) Stop() {
 
 // Pause 暂停 Fetcher（用于 Reorg 处理期间防止写入旧分叉数据）
 func (f *Fetcher) Pause() {
-	if f.paused.CompareAndSwap(false, true) {
+	f.pauseMu.Lock()
+	defer f.pauseMu.Unlock()
+	if !f.paused {
+		f.paused = true
 		LogFetcherPaused("reorg_handling")
 	}
 }
 
 // Resume 恢复 Fetcher
 func (f *Fetcher) Resume() {
-	if f.paused.CompareAndSwap(true, false) {
-		close(f.resumeCh)
-		f.resumeCh = make(chan struct{}) // 重新初始化以备下次使用
+	f.pauseMu.Lock()
+	defer f.pauseMu.Unlock()
+	if f.paused {
+		f.paused = false
+		f.pauseCond.Broadcast() // 唤醒所有等待的 worker
 		LogFetcherResumed()
 	}
 }
 
 // IsPaused 返回当前是否暂停
 func (f *Fetcher) IsPaused() bool {
-	return f.paused.Load()
+	f.pauseMu.Lock()
+	defer f.pauseMu.Unlock()
+	return f.paused
 }
 func (f *Fetcher) SetRateLimit(rps int, burst int) {
 	f.limiter.SetLimit(rate.Limit(rps))

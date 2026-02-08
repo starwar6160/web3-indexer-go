@@ -225,3 +225,8 @@ func (h *HealthServer) checkFetcher(ctx context.Context) Check {
 		Message: "fetcher running",
 	}
 }
+
+// SetSequencer 动态设置 sequencer（用于 main 初始化后注入）
+func (h *HealthServer) SetSequencer(sequencer *Sequencer) {
+	h.sequencer = sequencer
+}

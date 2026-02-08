@@ -162,7 +162,12 @@ func main() {
 	
 	// 调度任务 (从 checkpoint 开始同步 100 个块用于演示)
 	endBlock := new(big.Int).Add(startBlock, big.NewInt(100))
-	fetcher.Schedule(startBlock, endBlock)
+	if err := fetcher.Schedule(ctx, startBlock, endBlock); err != nil {
+		engine.Logger.Error("schedule_failed",
+			slog.String("error", err.Error()),
+		)
+		os.Exit(1)
+	}
 	engine.Logger.Info("blocks_scheduled",
 		slog.String("start_block", startBlock.String()),
 		slog.String("end_block", endBlock.String()),
@@ -171,6 +176,10 @@ func main() {
 
 	// 6. 启动 Sequencer - 确保顺序处理（传入 Fetcher 用于 Reorg 时暂停）
 	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, 1, fetcher.Results, fatalErrCh, metrics)
+	
+	// 把 sequencer 注入到 healthServer（使健康检查能正确报告状态）
+	healthServer.SetSequencer(sequencer)
+	
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

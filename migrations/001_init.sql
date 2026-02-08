@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS transfers (
     UNIQUE(block_number, log_index)
 );
 
+-- 为常见查询添加索引
+CREATE INDEX idx_transfers_from_address ON transfers(from_address);
+CREATE INDEX idx_transfers_to_address ON transfers(to_address);
+CREATE INDEX idx_transfers_token_address ON transfers(token_address);
+CREATE INDEX idx_transfers_block_number ON transfers(block_number);
+
 CREATE TABLE IF NOT EXISTS sync_checkpoints (
     id SERIAL PRIMARY KEY,
     chain_id NUMERIC(78,0) UNIQUE,

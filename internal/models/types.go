@@ -66,11 +66,14 @@ func (u *Uint256) Scan(value interface{}) error {
 
 	// 处理科学计数法（PostgreSQL NUMERIC 可能返回）
 	if strings.ContainsAny(s, "eE") {
-		// 用 big.Int 解析科学计数法，再转 uint256
-		bi := new(big.Int)
-		_, ok := bi.SetString(s, 10)
-		if !ok {
-			return fmt.Errorf("failed to parse scientific notation %s to Uint256", s)
+		// 用 big.Float 解析科学计数法，再转 big.Int，最后转 uint256
+		f, _, err := big.ParseFloat(s, 10, 0, big.ToNearestEven)
+		if err != nil {
+			return fmt.Errorf("failed to parse numeric %q: %w", s, err)
+		}
+		bi, acc := f.Int(nil)
+		if acc != big.Exact {
+			return fmt.Errorf("numeric %q is not an integer", s)
 		}
 		var overflow bool
 		u.Int, overflow = uint256.FromBig(bi)
@@ -140,6 +143,19 @@ func (b *BigInt) Scan(value interface{}) error {
 			b.Int = i
 			return nil
 		}
+		// 处理科学计数法（PostgreSQL NUMERIC 可能返回）
+		if strings.ContainsAny(s, "eE") {
+			f, _, err := big.ParseFloat(s, 10, 0, big.ToNearestEven)
+			if err != nil {
+				return fmt.Errorf("failed to parse numeric %q: %w", s, err)
+			}
+			bi, acc := f.Int(nil)
+			if acc != big.Exact {
+				return fmt.Errorf("numeric %q is not an integer", s)
+			}
+			b.Int = bi
+			return nil
+		}
 		i, ok := new(big.Int).SetString(s, 10)
 		if !ok {
 			return fmt.Errorf("failed to convert %s to BigInt", s)
@@ -153,6 +169,19 @@ func (b *BigInt) Scan(value interface{}) error {
 				return fmt.Errorf("failed to convert hex %s to BigInt", v)
 			}
 			b.Int = i
+			return nil
+		}
+		// 处理科学计数法（PostgreSQL NUMERIC 可能返回）
+		if strings.ContainsAny(v, "eE") {
+			f, _, err := big.ParseFloat(v, 10, 0, big.ToNearestEven)
+			if err != nil {
+				return fmt.Errorf("failed to parse numeric %q: %w", v, err)
+			}
+			bi, acc := f.Int(nil)
+			if acc != big.Exact {
+				return fmt.Errorf("numeric %q is not an integer", v)
+			}
+			b.Int = bi
 			return nil
 		}
 		i, ok := new(big.Int).SetString(v, 10)

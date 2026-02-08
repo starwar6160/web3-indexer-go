@@ -25,6 +25,15 @@ var ErrReorgDetected = errors.New("reorg detected: parent hash mismatch")
 // ErrReorgNeedRefetch is returned when blocks need to be refetched due to reorg
 var ErrReorgNeedRefetch = errors.New("reorg detected: need to refetch from common ancestor")
 
+// ReorgError 携带触发高度的 reorg 错误（用于上层处理）
+type ReorgError struct {
+	At *big.Int
+}
+
+func (e ReorgError) Error() string {
+	return fmt.Sprintf("reorg detected at block %s", e.At.String())
+}
+
 // Processor 处理区块数据写入，支持批量和单条模式
 type Processor struct {
 	db     *sqlx.DB
@@ -86,6 +95,11 @@ func isFatalError(err error) bool {
 		return true
 	}
 	
+	// ReorgError 也是致命错误（需要上层处理）
+	if _, ok := err.(ReorgError); ok {
+		return true
+	}
+	
 	// 上下文取消不需要重试
 	if err == context.Canceled || err == context.DeadlineExceeded {
 		return true
@@ -123,15 +137,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		// 如果找到了上一个区块，检查 Hash 链
 		if lastBlock.Hash != block.ParentHash().Hex() {
 			LogReorgDetected(blockNum.String(), lastBlock.Hash, block.ParentHash().Hex())
-			// 触发回滚逻辑
-			_, err = tx.ExecContext(ctx, 
-				"DELETE FROM blocks WHERE number >= $1", 
-				new(big.Int).Sub(blockNum, big.NewInt(1)).String())
-			if err != nil {
-				return fmt.Errorf("reorg rollback failed: %w", err)
-			}
-			
-			return ErrReorgDetected
+			// 只返回错误，不在当前事务内删除（避免被 defer tx.Rollback() 回滚）
+			// 上层会统一处理回滚与重新调度
+			return ReorgError{At: new(big.Int).Set(blockNum)}
 		}
 	} else if err != sql.ErrNoRows {
 		// 数据库查询错误（不是空结果）
@@ -241,23 +249,9 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		return nil
 	}
 	
-	// 开启事务
-	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return fmt.Errorf("failed to begin batch transaction: %w", err)
-	}
-	defer tx.Rollback()
-	
-	// 批量插入 blocks
-	blockQuery := `
-		INSERT INTO blocks (number, hash, parent_hash, timestamp)
-		VALUES (:number, :hash, :parent_hash, :timestamp)
-		ON CONFLICT (number) DO UPDATE SET
-			hash = EXCLUDED.hash,
-			parent_hash = EXCLUDED.parent_hash,
-			timestamp = EXCLUDED.timestamp,
-			processed_at = NOW()
-	`
+	// 收集有效的 blocks 和 transfers
+	validBlocks := []models.Block{}
+	validTransfers := []models.Transfer{}
 	
 	for _, data := range blocks {
 		if data.Err != nil {
@@ -265,37 +259,44 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		}
 		
 		block := data.Block
-		_, err = tx.NamedExecContext(ctx, blockQuery, models.Block{
+		validBlocks = append(validBlocks, models.Block{
 			Number:     models.BigInt{Int: block.Number()},
 			Hash:       block.Hash().Hex(),
 			ParentHash: block.ParentHash().Hex(),
 			Timestamp:  block.Time(),
 		})
-		if err != nil {
-			return fmt.Errorf("batch insert block %s failed: %w", block.Number().String(), err)
-		}
 		
 		// 处理 transfers
 		for _, vLog := range data.Logs {
 			transfer := p.ExtractTransfer(vLog)
 			if transfer != nil {
-				_, err = tx.NamedExecContext(ctx, `
-					INSERT INTO transfers 
-					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
-					VALUES 
-					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
-					ON CONFLICT (block_number, log_index) DO NOTHING
-				`, transfer)
-				if err != nil {
-					return fmt.Errorf("batch insert transfer failed: %w", err)
-				}
+				validTransfers = append(validTransfers, *transfer)
 			}
+		}
+	}
+	
+	if len(validBlocks) == 0 {
+		return nil
+	}
+	
+	// 使用 BulkInserter 进行高效批量写入（COPY 或 UNNEST）
+	inserter := NewBulkInserter(p.db)
+	
+	// 批量插入 blocks
+	if err := inserter.InsertBlocksBatch(ctx, validBlocks); err != nil {
+		return fmt.Errorf("batch insert blocks failed: %w", err)
+	}
+	
+	// 批量插入 transfers
+	if len(validTransfers) > 0 {
+		if err := inserter.InsertTransfersBatch(ctx, validTransfers); err != nil {
+			return fmt.Errorf("batch insert transfers failed: %w", err)
 		}
 	}
 	
 	// 更新 checkpoint 到最后一个区块
 	lastBlock := blocks[len(blocks)-1].Block
-	_, err = tx.ExecContext(ctx, `
+	_, err := p.db.ExecContext(ctx, `
 		INSERT INTO sync_checkpoints (chain_id, last_synced_block)
 		VALUES ($1, $2)
 		ON CONFLICT (chain_id) DO UPDATE SET 
@@ -306,7 +307,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		return fmt.Errorf("batch checkpoint update failed: %w", err)
 	}
 	
-	return tx.Commit()
+	return nil
 }
 
 // FindCommonAncestor 递归查找共同祖先（处理深度重组）
