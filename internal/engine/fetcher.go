@@ -134,6 +134,7 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.Block, []types.Log, error) {
 	var block *types.Block
 	var err error
+	start := time.Now()
 	
 	// 指数退避重试逻辑 (RPC pool 内部有节点故障转移)
 	for retries := 0; retries < 3; retries++ {
@@ -169,6 +170,9 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 		// 日志获取失败不阻塞区块处理
 		logs = []types.Log{}
 	}
+	
+	// 记录 fetch 耗时
+	GetMetrics().RecordFetcherJobCompleted(time.Since(start))
 	
 	return block, logs, nil
 }

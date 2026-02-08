@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"web3-indexer-go/internal/engine"
@@ -127,13 +129,20 @@ func main() {
 	// Start Prometheus metrics server
 	mux.Handle("/metrics", promhttp.Handler())
 	
+	// 创建 HTTP server 用于优雅关闭
+	httpServer := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+	
+	// 在 goroutine 中启动 HTTP server
 	go func() {
 		engine.Logger.Info("http_server_started",
 			slog.String("port", "8080"),
 			slog.String("health_endpoint", "http://localhost:8080/healthz"),
 			slog.String("metrics_endpoint", "http://localhost:8080/metrics"),
 		)
-		if err := http.ListenAndServe(":8080", mux); err != nil {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			engine.Logger.Error("http_server_error",
 				slog.String("error", err.Error()),
 			)
@@ -150,7 +159,18 @@ func main() {
 	fetcher.Start(ctx, &wg)
 
 	// 5. 从 checkpoint 恢复起始区块
-	chainID := int64(1) // TODO: 从环境变量读取
+	chainIDStr := os.Getenv("CHAIN_ID")
+	if chainIDStr == "" {
+		chainIDStr = "1" // 默认为以太坊主网
+	}
+	chainID, err := strconv.ParseInt(chainIDStr, 10, 64)
+	if err != nil {
+		engine.Logger.Error("invalid_chain_id",
+			slog.String("chain_id", chainIDStr),
+			slog.String("error", err.Error()),
+		)
+		os.Exit(1)
+	}
 	startBlock, err := getStartBlockFromCheckpoint(ctx, db, chainID)
 	if err != nil {
 		engine.Logger.Error("checkpoint_recovery_failed",
@@ -208,7 +228,19 @@ func main() {
 	
 	// 触发优雅关闭
 	engine.Logger.Info("shutdown_initiated")
+	
+	// 优雅关闭 HTTP server（等待现有请求完成，最多 5 秒）
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		engine.Logger.Error("http_server_shutdown_error",
+			slog.String("error", err.Error()),
+		)
+	}
+	
+	// 取消主 context，停止 fetcher 和 sequencer
 	cancel()
 	wg.Wait()
+	
 	engine.Logger.Info("shutdown_complete")
 }
