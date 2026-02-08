@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/big"
 	"sync"
@@ -127,13 +128,23 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	var block *types.Block
 	var err error
 	
-	// 重试逻辑 (RPC pool 内部有节点故障转移)
+	// 指数退避重试逻辑 (RPC pool 内部有节点故障转移)
 	for retries := 0; retries < 3; retries++ {
 		block, err = f.pool.BlockByNumber(ctx, bn)
 		if err == nil {
 			break
 		}
-		time.Sleep(time.Duration(retries+1) * 100 * time.Millisecond)
+		
+		// 指数退避：100ms, 200ms, 400ms
+		backoff := time.Duration(100*(1<<retries)) * time.Millisecond
+		select {
+		case <-time.After(backoff):
+			// 继续重试
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-f.stopCh:
+			return nil, nil, fmt.Errorf("fetcher stopped")
+		}
 	}
 	
 	if err != nil {

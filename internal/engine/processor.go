@@ -61,10 +61,16 @@ func (p *Processor) ProcessBlockWithRetry(ctx context.Context, data BlockData, m
 			return ctx.Err()
 		}
 		
-		// 指数退避重试
-		backoff := time.Duration(i+1) * time.Second
+		// 指数退避重试：1s, 2s, 4s
+		backoff := time.Duration(1<<i) * time.Second
 		log.Printf("Retry %d/%d for block %s after %v: %v", i+1, maxRetries, data.Block.Number().String(), backoff, err)
-		time.Sleep(backoff)
+		
+		select {
+		case <-time.After(backoff):
+			// 继续重试
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	
 	return fmt.Errorf("max retries exceeded for block %s: %w", data.Block.Number().String(), err)
