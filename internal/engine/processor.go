@@ -36,14 +36,9 @@ func (e ReorgError) Error() string {
 
 // Processor 处理区块数据写入，支持批量和单条模式
 type Processor struct {
-	db     *sqlx.DB
-	client RPCClient // RPC client interface for reorg recovery
+	db      *sqlx.DB
+	client  RPCClient // RPC client interface for reorg recovery
 	metrics *Metrics  // Prometheus metrics
-}
-
-// RPCClient defines the interface needed by Processor
-type RPCClient interface {
-	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
 }
 
 func NewProcessor(db *sqlx.DB, client RPCClient) *Processor {
@@ -53,23 +48,23 @@ func NewProcessor(db *sqlx.DB, client RPCClient) *Processor {
 // ProcessBlockWithRetry 带重试的区块处理
 func (p *Processor) ProcessBlockWithRetry(ctx context.Context, data BlockData, maxRetries int) error {
 	var err error
-	
+
 	for i := 0; i < maxRetries; i++ {
 		err = p.ProcessBlock(ctx, data)
 		if err == nil {
 			return nil
 		}
-		
+
 		// 检查是否是致命错误（不需要重试）
 		if isFatalError(err) {
 			return err
 		}
-		
+
 		// 检查上下文是否已取消
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		
+
 		// 指数退避重试：1s, 2s, 4s
 		backoff := time.Duration(1<<i) * time.Second
 		LogRPCRetry("ProcessBlock", i+1, err)
@@ -80,7 +75,7 @@ func (p *Processor) ProcessBlockWithRetry(ctx context.Context, data BlockData, m
 			return ctx.Err()
 		}
 	}
-	
+
 	return fmt.Errorf("max retries exceeded for block %s: %w", data.Block.Number().String(), err)
 }
 
@@ -89,22 +84,22 @@ func isFatalError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	// Reorg 检测错误需要特殊处理，不是简单重试
 	if err == ErrReorgDetected {
 		return true
 	}
-	
+
 	// ReorgError 也是致命错误（需要上层处理）
 	if _, ok := err.(ReorgError); ok {
 		return true
 	}
-	
+
 	// 上下文取消不需要重试
 	if err == context.Canceled || err == context.DeadlineExceeded {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -113,7 +108,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	if data.Err != nil {
 		return fmt.Errorf("fetch error: %w", data.Err)
 	}
-	
+
 	block := data.Block
 	blockNum := block.Number()
 	start := time.Now()
@@ -125,16 +120,16 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		LogTransactionFailed("begin_transaction", blockNum.String(), err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	
+
 	// 无论成功失败，确保 Rollback (Commit 后 Rollback 无效)
 	defer tx.Rollback()
 
 	// 1. Reorg 检测 (Parent Hash Check)
 	var lastBlock models.Block
-	err = tx.GetContext(ctx, &lastBlock, 
-		"SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = $1", 
+	err = tx.GetContext(ctx, &lastBlock,
+		"SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = $1",
 		new(big.Int).Sub(blockNum, big.NewInt(1)).String())
-	
+
 	if err == nil {
 		// 如果找到了上一个区块，检查 Hash 链
 		if lastBlock.Hash != block.ParentHash().Hex() {
@@ -200,14 +195,14 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		LogTransactionFailed("commit_transaction", blockNum.String(), err)
 		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
 	}
-	
+
 	// 记录处理耗时和当前同步高度
 	if p.metrics != nil {
 		p.metrics.RecordBlockProcessed(time.Since(start))
 		// 更新当前同步高度 gauge（用于监控）
 		p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
 	}
-	
+
 	return nil
 }
 
@@ -220,16 +215,29 @@ func (p *Processor) updateCheckpointInTx(ctx context.Context, tx *sqlx.Tx, chain
 			last_synced_block = EXCLUDED.last_synced_block,
 			updated_at = NOW()
 	`, chainID, blockNumber.String())
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to update checkpoint: %w", err)
 	}
-	
+
 	return nil
 }
 
 // UpdateCheckpoint 更新同步检查点（已废弃，保留用于兼容性）
 // 警告：此方法在事务外调用，存在数据不一致风险，建议统一使用事务内更新
+func (p *Processor) UpdateCheckpoint(ctx context.Context, chainID int64, blockNumber *big.Int) error {
+	tx, err := p.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := p.updateCheckpointInTx(ctx, tx, chainID, blockNumber); err != nil {
+		return fmt.Errorf("failed to update checkpoint: %w", err)
+	}
+
+	return tx.Commit()
+}
 
 // ExtractTransfer 从区块日志中提取 ERC20 Transfer 事件
 func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
@@ -259,16 +267,16 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	if len(blocks) == 0 {
 		return nil
 	}
-	
+
 	// 收集有效的 blocks 和 transfers
 	validBlocks := []models.Block{}
 	validTransfers := []models.Transfer{}
-	
+
 	for _, data := range blocks {
 		if data.Err != nil {
 			continue
 		}
-		
+
 		block := data.Block
 		validBlocks = append(validBlocks, models.Block{
 			Number:     models.BigInt{Int: block.Number()},
@@ -276,7 +284,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 			ParentHash: block.ParentHash().Hex(),
 			Timestamp:  block.Time(),
 		})
-		
+
 		// 处理 transfers
 		for _, vLog := range data.Logs {
 			transfer := p.ExtractTransfer(vLog)
@@ -285,26 +293,26 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 			}
 		}
 	}
-	
+
 	if len(validBlocks) == 0 {
 		return nil
 	}
-	
+
 	// 使用 BulkInserter 进行高效批量写入（COPY 或 UNNEST）
 	inserter := NewBulkInserter(p.db)
-	
+
 	// 批量插入 blocks
 	if err := inserter.InsertBlocksBatch(ctx, validBlocks); err != nil {
 		return fmt.Errorf("batch insert blocks failed: %w", err)
 	}
-	
+
 	// 批量插入 transfers
 	if len(validTransfers) > 0 {
 		if err := inserter.InsertTransfersBatch(ctx, validTransfers); err != nil {
 			return fmt.Errorf("batch insert transfers failed: %w", err)
 		}
 	}
-	
+
 	// 更新 checkpoint 到最后一个区块
 	lastBlock := blocks[len(blocks)-1].Block
 	_, err := p.db.ExecContext(ctx, `
@@ -317,7 +325,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	if err != nil {
 		return fmt.Errorf("batch checkpoint update failed: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -325,23 +333,23 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 // 返回共同祖先的区块号和哈希，以及需要删除的区块列表
 func (p *Processor) FindCommonAncestor(ctx context.Context, blockNum *big.Int) (*big.Int, string, []*big.Int, error) {
 	log.Printf("🔍 Finding common ancestor from block %s", blockNum.String())
-	
+
 	toDelete := []*big.Int{}
 	currentNum := new(big.Int).Set(blockNum)
 	maxLookback := big.NewInt(1000) // 最大回退1000个块防止无限循环
-	
+
 	for currentNum.Cmp(big.NewInt(0)) > 0 && new(big.Int).Sub(blockNum, currentNum).Cmp(maxLookback) <= 0 {
 		// 从RPC获取链上区块
 		rpcBlock, err := p.client.BlockByNumber(ctx, currentNum)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("failed to get block %s from RPC: %w", currentNum.String(), err)
 		}
-		
+
 		// 查询本地数据库中相同高度的区块
 		var localBlock models.Block
-		err = p.db.GetContext(ctx, &localBlock, 
+		err = p.db.GetContext(ctx, &localBlock,
 			"SELECT hash FROM blocks WHERE number = $1", currentNum.String())
-		
+
 		if err == sql.ErrNoRows {
 			// 本地没有这个区块，继续往前找
 			toDelete = append(toDelete, new(big.Int).Set(currentNum))
@@ -351,23 +359,23 @@ func (p *Processor) FindCommonAncestor(ctx context.Context, blockNum *big.Int) (
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("database error at block %s: %w", currentNum.String(), err)
 		}
-		
+
 		// 检查哈希是否匹配
 		if strings.ToLower(localBlock.Hash) == strings.ToLower(rpcBlock.Hash().Hex()) {
 			// 找到共同祖先！
-			log.Printf("✅ Common ancestor found at block %s (hash: %s)", 
+			log.Printf("✅ Common ancestor found at block %s (hash: %s)",
 				currentNum.String(), localBlock.Hash)
 			return currentNum, localBlock.Hash, toDelete, nil
 		}
-		
+
 		// 哈希不匹配，这个区块也在重组链上，需要删除
 		toDelete = append(toDelete, new(big.Int).Set(currentNum))
-		
+
 		// 继续查找父区块（使用RPC返回的parent hash）
 		parentNum := new(big.Int).Sub(currentNum, big.NewInt(1))
 		currentNum.Set(parentNum)
 	}
-	
+
 	return nil, "", nil, fmt.Errorf("common ancestor not found within %s blocks", maxLookback.String())
 }
 
@@ -379,16 +387,16 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 	if err != nil {
 		return nil, fmt.Errorf("failed to find common ancestor: %w", err)
 	}
-	
+
 	LogReorgHandled(len(toDelete), ancestorNum.String())
-	
+
 	// 在单个事务内执行回滚（保证原子性）
 	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin reorg transaction: %w", err)
 	}
 	defer tx.Rollback()
-	
+
 	// 批量删除所有分叉区块（cascade 会自动删除 transfers）
 	if len(toDelete) > 0 {
 		// 找到最小的要删除的块号
@@ -404,7 +412,7 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 			return nil, fmt.Errorf("failed to delete reorg blocks: %w", err)
 		}
 	}
-	
+
 	// 更新 checkpoint 回退到祖先高度
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO sync_checkpoints (chain_id, last_synced_block)
@@ -416,14 +424,14 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 	if err != nil {
 		return nil, fmt.Errorf("failed to update checkpoint during reorg: %w", err)
 	}
-	
+
 	// 提交事务
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit reorg transaction: %w", err)
 	}
-	
-	log.Printf("✅ Deep reorg handled. Safe to resume from block %s", 
+
+	log.Printf("✅ Deep reorg handled. Safe to resume from block %s",
 		new(big.Int).Add(ancestorNum, big.NewInt(1)).String())
-	
+
 	return ancestorNum, nil
 }
