@@ -1,284 +1,188 @@
-# Web3 Indexer Go
+[![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/golang-migrate/migrate/CI/master)](https://github.com/golang-migrate/migrate/actions/workflows/ci.yaml?query=branch%3Amaster)
+[![GoDoc](https://pkg.go.dev/badge/github.com/golang-migrate/migrate)](https://pkg.go.dev/github.com/golang-migrate/migrate/v4)
+[![Coverage Status](https://img.shields.io/coveralls/github/golang-migrate/migrate/master.svg)](https://coveralls.io/github/golang-migrate/migrate?branch=master)
+[![packagecloud.io](https://img.shields.io/badge/deb-packagecloud.io-844fec.svg)](https://packagecloud.io/golang-migrate/migrate?filter=debs)
+[![Docker Pulls](https://img.shields.io/docker/pulls/migrate/migrate.svg)](https://hub.docker.com/r/migrate/migrate/)
+![Supported Go Versions](https://img.shields.io/badge/Go-1.16%2C%201.17-lightgrey.svg)
+[![GitHub Release](https://img.shields.io/github/release/golang-migrate/migrate.svg)](https://github.com/golang-migrate/migrate/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/golang-migrate/migrate)](https://goreportcard.com/report/github.com/golang-migrate/migrate)
 
-A production-ready Ethereum blockchain indexer written in Go with support for ERC20 Transfer events.
+# migrate
 
-## 🏗️ V2 Architecture
+__Database migrations written in Go. Use as [CLI](#cli-usage) or import as [library](#use-in-your-go-project).__
 
-The V2 architecture introduces significant improvements for production readiness:
+* Migrate reads migrations from [sources](#migration-sources)
+   and applies them in correct order to a [database](#databases).
+* Drivers are "dumb", migrate glues everything together and makes sure the logic is bulletproof.
+   (Keeps the drivers lightweight, too.)
+* Database drivers don't assume things or try to correct user input. When in doubt, fail.
 
-### Core Components
+Forked from [mattes/migrate](https://github.com/mattes/migrate)
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Fetcher       │───▶│   Sequencer     │───▶│   Processor     │
-│                 │    │                 │    │                 │
-│ • Multi-RPC     │    │ • Ordered       │    │ • ACID Tx       │
-│ • Rate Limit    │    │ • Buffer        │    │ • Reorg Handle  │
-│ • Worker Pool   │    │ • Continuations │    │ • Batch Write   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+## Databases
 
-### Key Features
+Database drivers run migrations. [Add a new database?](database/driver.go)
 
-#### 1. **Ordered Processing (Sequencer)**
-- Ensures blocks are processed in strict order despite concurrent fetching
-- Buffers out-of-order blocks and processes them sequentially
-- Prevents false reorg detections and data loss
+* [PostgreSQL](database/postgres)
+* [PGX](database/pgx)
+* [Redshift](database/redshift)
+* [Ql](database/ql)
+* [Cassandra](database/cassandra)
+* [SQLite](database/sqlite)
+* [SQLite3](database/sqlite3) ([todo #165](https://github.com/mattes/migrate/issues/165))
+* [SQLCipher](database/sqlcipher)
+* [MySQL/ MariaDB](database/mysql)
+* [Neo4j](database/neo4j)
+* [MongoDB](database/mongodb)
+* [CrateDB](database/crate) ([todo #170](https://github.com/mattes/migrate/issues/170))
+* [Shell](database/shell) ([todo #171](https://github.com/mattes/migrate/issues/171))
+* [Google Cloud Spanner](database/spanner)
+* [CockroachDB](database/cockroachdb)
+* [ClickHouse](database/clickhouse)
+* [Firebird](database/firebird)
+* [MS SQL Server](database/sqlserver)
 
-#### 2. **Multi-RPC Node Pool**
-- Round-robin load balancing across multiple RPC endpoints
-- Automatic failover and health checking
-- Node recovery after 5-minute cooldown
+### Database URLs
 
-#### 3. **Advanced Reorg Handling**
-- **Shallow Reorg**: Parent hash mismatch detection (1-2 blocks)
-- **Deep Reorg**: Common ancestor recursive lookup (up to 1000 blocks)
-- Atomic rollback with cascading deletes
+Database connection strings are specified via URLs. The URL format is driver dependent but generally has the form: `dbdriver://username:password@host:port/dbname?param1=true&param2=false`
 
-#### 4. **Rate Limiting & Backpressure**
-- Configurable rate limits for RPC calls
-- Prevents node overload and IP bans
-- Graceful degradation under load
+Any [reserved URL characters](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_reserved_characters) need to be escaped. Note, the `%` character also [needs to be escaped](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_the_percent_character)
 
-#### 5. **Prometheus Metrics**
-- Block processing metrics
-- RPC pool health monitoring
-- Database connection tracking
-- Reorg detection counts
+Explicitly, the following characters need to be escaped:
+`!`, `#`, `$`, `%`, `&`, `'`, `(`, `)`, `*`, `+`, `,`, `/`, `:`, `;`, `=`, `?`, `@`, `[`, `]`
 
-#### 6. **Production Database**
-- PostgreSQL with NUMERIC(78,0) for uint256
-- Connection pooling optimization
-- Serializable isolation for consistency
-
-## 📊 Metrics
-
-The indexer exposes comprehensive Prometheus metrics:
-
-### Block Processing
-- `indexer_blocks_processed_total` - Successfully processed blocks
-- `indexer_blocks_failed_total` - Failed block processing
-- `indexer_block_processing_duration_seconds` - Processing time histogram
-
-### Reorg Handling
-- `indexer_reorgs_detected_total` - Reorganizations detected
-- `indexer_reorgs_handled_total` - Successfully handled reorgs
-
-### RPC Pool
-- `indexer_rpc_requests_total` - RPC requests by node/method
-- `indexer_rpc_healthy_nodes` - Healthy node count
-- `indexer_rpc_request_duration_seconds` - RPC latency histogram
-
-### Database
-- `indexer_db_connections_active` - Active DB connections
-- `indexer_db_queries_total` - Query counts by operation
-- `indexer_db_query_duration_seconds` - Query latency
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Go 1.21+
-- PostgreSQL 14+
-- Ethereum RPC endpoint(s)
-
-### Installation
+It's easiest to always run the URL parts of your DB connection URL (e.g. username, password, etc) through an URL encoder. See the example Python snippets below:
 
 ```bash
-git clone <repository>
-cd web3-indexer-go
-go mod download
+$ python3 -c 'import urllib.parse; print(urllib.parse.quote(input("String to encode: "), ""))'
+String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
+FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
+$ python2 -c 'import urllib; print urllib.quote(raw_input("String to encode: "), "")'
+String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
+FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
+$
 ```
 
-### Configuration
+## Migration Sources
 
-Copy `.env.example` to `.env` and configure:
+Source drivers read migrations from local or remote sources. [Add a new source?](source/driver.go)
+
+* [Filesystem](source/file) - read from filesystem
+* [io/fs](source/iofs) - read from a Go [io/fs](https://pkg.go.dev/io/fs#FS)
+* [Go-Bindata](source/go_bindata) - read from embedded binary data ([jteeuwen/go-bindata](https://github.com/jteeuwen/go-bindata))
+* [pkger](source/pkger) - read from embedded binary data ([markbates/pkger](https://github.com/markbates/pkger))
+* [GitHub](source/github) - read from remote GitHub repositories
+* [GitHub Enterprise](source/github_ee) - read from remote GitHub Enterprise repositories
+* [Bitbucket](source/bitbucket) - read from remote Bitbucket repositories
+* [Gitlab](source/gitlab) - read from remote Gitlab repositories
+* [AWS S3](source/aws_s3) - read from Amazon Web Services S3
+* [Google Cloud Storage](source/google_cloud_storage) - read from Google Cloud Platform Storage
+
+## CLI usage
+
+* Simple wrapper around this library.
+* Handles ctrl+c (SIGINT) gracefully.
+* No config search paths, no config files, no magic ENV var injections.
+
+__[CLI Documentation](cmd/migrate)__
+
+### Basic usage
 
 ```bash
-# Database
-DATABASE_URL=postgres://user:pass@localhost/web3indexer?sslmode=disable
-
-# Ethereum RPC (comma-separated for multi-node pool)
-RPC_URLS=https://eth.llamarpc.com,https://rpc.ankr.com/eth,https://ethereum.publicnode.com
-
-# Chain Configuration
-CHAIN_ID=1
-START_BLOCK=18500000
-
-# Rate Limiting (requests per second)
-FETCH_RATE_LIMIT=50
-FETCH_RATE_BURST=100
+$ migrate -source file://path/to/migrations -database postgres://localhost:5432/database up 2
 ```
 
-### Database Setup
+### Docker usage
 
 ```bash
-# Create database
-createdb web3indexer
-
-# Run migrations
-psql $DATABASE_URL -f migrations/001_init.sql
+$ docker run -v {{ migration dir }}:/migrations --network host migrate/migrate
+    -path=/migrations/ -database postgres://localhost:5432/database up 2
 ```
 
-### Running
+## Use in your Go project
 
-```bash
-# Build
-go build -o indexer cmd/indexer/main.go
+* API is stable and frozen for this release (v3 & v4).
+* Uses [Go modules](https://golang.org/cmd/go/#hdr-Modules__module_versions__and_more) to manage dependencies.
+* To help prevent database corruptions, it supports graceful stops via `GracefulStop chan bool`.
+* Bring your own logger.
+* Uses `io.Reader` streams internally for low memory overhead.
+* Thread-safe and no goroutine leaks.
 
-# Run
-./indexer
-```
+__[Go Documentation](https://godoc.org/github.com/golang-migrate/migrate)__
 
-## 🧪 Testing
-
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run specific component tests
-go test ./internal/engine/...
-```
-
-## 📈 Production Deployment
-
-### System Requirements
-
-**Minimum:**
-- CPU: 2 cores
-- RAM: 4GB
-- Storage: 100GB SSD
-- Network: 100Mbps
-
-**Recommended:**
-- CPU: 4+ cores
-- RAM: 8GB+
-- Storage: 500GB+ NVMe SSD
-- Network: 1Gbps+
-
-### Docker Deployment
-
-```dockerfile
-FROM golang:1.21-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN go build -o indexer cmd/indexer/main.go
-
-FROM postgres:15-alpine
-COPY --from=builder /app/indexer /usr/local/bin/
-COPY migrations/ /migrations/
-CMD ["indexer"]
-```
-
-### Monitoring
-
-#### Prometheus Configuration
-
-```yaml
-scrape_configs:
-  - job_name: 'web3-indexer'
-    static_configs:
-      - targets: ['localhost:8080']
-    metrics_path: /metrics
-```
-
-#### Grafana Dashboard
-
-Key panels to monitor:
-- Block processing rate
-- RPC node health
-- Database connection pool
-- Reorg detection frequency
-- Sequencer buffer size
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | - |
-| `RPC_URLS` | Comma-separated RPC endpoints | - |
-| `CHAIN_ID` | Ethereum chain ID | 1 |
-| `START_BLOCK` | Initial block number | 0 |
-| `FETCH_RATE_LIMIT` | RPC rate limit (req/s) | 50 |
-| `FETCH_RATE_BURST` | RPC burst capacity | 100 |
-
-### Performance Tuning
-
-#### Fetcher Concurrency
 ```go
-fetcher := engine.NewFetcher(rpcPool, 10) // 10 concurrent workers
+import (
+    "github.com/golang-migrate/migrate/v4"
+    _ "github.com/golang-migrate/migrate/v4/database/postgres"
+    _ "github.com/golang-migrate/migrate/v4/source/github"
+)
+
+func main() {
+    m, err := migrate.New(
+        "github://mattes:personal-access-token@mattes/migrate_test",
+        "postgres://localhost:5432/database?sslmode=enable")
+    m.Steps(2)
+}
 ```
 
-#### Rate Limiting
+Want to use an existing database client?
+
 ```go
-fetcher.SetRateLimit(100, 200) // 100 req/s, 200 burst
+import (
+    "database/sql"
+    _ "github.com/lib/pq"
+    "github.com/golang-migrate/migrate/v4"
+    "github.com/golang-migrate/migrate/v4/database/postgres"
+    _ "github.com/golang-migrate/migrate/v4/source/file"
+)
+
+func main() {
+    db, err := sql.Open("postgres", "postgres://localhost:5432/database?sslmode=enable")
+    driver, err := postgres.WithInstance(db, &postgres.Config{})
+    m, err := migrate.NewWithDatabaseInstance(
+        "file:///migrations",
+        "postgres", driver)
+    m.Up() // or m.Step(2) if you want to explicitly set the number of migrations to run
+}
 ```
 
-#### Database Pool
-```go
-db.SetMaxOpenConns(25)
-db.SetMaxIdleConns(5)
-db.SetConnMaxLifetime(5 * time.Minute)
+## Getting started
+
+Go to [getting started](GETTING_STARTED.md)
+
+## Tutorials
+
+* [CockroachDB](database/cockroachdb/TUTORIAL.md)
+* [PostgreSQL](database/postgres/TUTORIAL.md)
+
+(more tutorials to come)
+
+## Migration files
+
+Each migration has an up and down migration. [Why?](FAQ.md#why-two-separate-files-up-and-down-for-a-migration)
+
+```bash
+1481574547_create_users_table.up.sql
+1481574547_create_users_table.down.sql
 ```
 
-## 🛠️ Development
+[Best practices: How to write migrations.](MIGRATIONS.md)
 
-### Project Structure
+## Versions
 
-```
-web3-indexer-go/
-├── cmd/indexer/          # Main application entry
-├── internal/
-│   ├── config/          # Configuration management
-│   ├── database/        # Database repository
-│   ├── engine/          # Core indexing engine
-│   │   ├── fetcher.go   # RPC fetcher with rate limiting
-│   │   ├── sequencer.go # Ordered block processing
-│   │   ├── processor.go # Block processing & reorg handling
-│   │   ├── rpc_pool.go  # Multi-RPC node pool
-│   │   └── metrics.go   # Prometheus metrics
-│   └── models/          # Data models
-├── migrations/          # Database migrations
-└── .env.example        # Configuration template
-```
+Version | Supported? | Import | Notes
+--------|------------|--------|------
+**master** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | New features and bug fixes arrive here first |
+**v4** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | Used for stable releases |
+**v3** | :x: | `import "github.com/golang-migrate/migrate"` (with package manager) or `import "gopkg.in/golang-migrate/migrate.v3"` (not recommended) | **DO NOT USE** - No longer supported |
 
-### Adding New Event Types
+## Development and Contributing
 
-1. Update `models/types.go`
-2. Add event hash to `processor.go`
-3. Implement extraction logic in `ExtractTransfer()`
-4. Add database migration if needed
+Yes, please! [`Makefile`](Makefile) is your friend,
+read the [development guide](CONTRIBUTING.md).
 
-### Testing Strategy
-
-- **Unit Tests**: Component isolation with mocks
-- **Integration Tests**: Database and RPC interactions
-- **Load Tests**: High-throughput scenarios
-- **Reorg Tests**: Deep reorg recovery validation
-
-## 📝 License
-
-MIT License - see LICENSE file for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-## 📞 Support
-
-- Issues: [GitHub Issues](https://github.com/your-repo/issues)
-- Discussions: [GitHub Discussions](https://github.com/your-repo/discussions)
+Also have a look at the [FAQ](FAQ.md).
 
 ---
 
-**Production Score: 85/100** ✅
-
-*Ready for production deployment with monitoring and alerting.*
+Looking for alternatives? [https://awesome-go.com/#database](https://awesome-go.com/#database).
