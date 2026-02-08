@@ -157,22 +157,30 @@ func (h *HealthServer) checkDatabase(ctx context.Context) Check {
 // checkRPC 检查 RPC 连接
 func (h *HealthServer) checkRPC(ctx context.Context) Check {
 	start := time.Now()
-	
+
+	healthyCount := h.rpcPool.GetHealthyNodeCount()
+	totalCount := h.rpcPool.GetTotalNodeCount()
+
 	// 获取最新区块号
 	header, err := h.rpcPool.HeaderByNumber(ctx, nil)
 	latency := time.Since(start)
-	
+
 	if err != nil {
 		return Check{
 			Status:  "unhealthy",
-			Message: err.Error(),
+			Message: fmt.Sprintf("rpc_nodes: %d/%d healthy, error: %s", healthyCount, totalCount, err.Error()),
 			Latency: latency.String(),
 		}
 	}
-	
+
+	status := "healthy"
+	if healthyCount < totalCount {
+		status = "degraded"
+	}
+
 	return Check{
-		Status:  "healthy",
-		Message: "latest_block: " + header.Number.String(),
+		Status:  status,
+		Message: fmt.Sprintf("rpc_nodes: %d/%d healthy, latest_block: %s", healthyCount, totalCount, header.Number.String()),
 		Latency: latency.String(),
 	}
 }
