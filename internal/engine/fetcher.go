@@ -188,16 +188,32 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 }
 
 func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
-	for i := new(big.Int).Set(start); i.Cmp(end) <= 0; i.Add(i, big.NewInt(1)) {
-		bn := new(big.Int).Set(i)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-f.stopCh:
-			return fmt.Errorf("fetcher stopped")
-		case f.jobs <- bn:
+	// QuickNode 优化：eth_getLogs 单次查询最多 2000 个块
+	// 如果范围超过 2000，自动分批处理
+	maxBlockRange := big.NewInt(2000)
+	current := new(big.Int).Set(start)
+	
+	for current.Cmp(end) <= 0 {
+		batchEnd := new(big.Int).Add(current, maxBlockRange)
+		if batchEnd.Cmp(end) > 0 {
+			batchEnd = new(big.Int).Set(end)
 		}
+		
+		// 调度当前批次的块
+		for i := new(big.Int).Set(current); i.Cmp(batchEnd) <= 0; i.Add(i, big.NewInt(1)) {
+			bn := new(big.Int).Set(i)
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-f.stopCh:
+				return fmt.Errorf("fetcher stopped")
+			case f.jobs <- bn:
+			}
+		}
+		
+		// 移动到下一批
+		current = new(big.Int).Add(batchEnd, big.NewInt(1))
 	}
 	return nil
 }
