@@ -6,11 +6,11 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"web3-indexer-go/internal/engine"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	_ "github.com/jackc/pgx/v5/stdlib" // PGX Driver
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
@@ -21,11 +21,11 @@ func main() {
 	
 	// 1. 加载配置
 	_ = godotenv.Load()
-	rpcUrl := os.Getenv("RPC_URL")
+	rpcUrls := os.Getenv("RPC_URLS")
 	dbUrl := os.Getenv("DATABASE_URL")
 	
-	if rpcUrl == "" || dbUrl == "" {
-		log.Fatal("RPC_URL and DATABASE_URL must be set in environment")
+	if rpcUrls == "" || dbUrl == "" {
+		log.Fatal("RPC_URLS and DATABASE_URL must be set in environment")
 	}
 
 	// 2. 连接资源
@@ -40,16 +40,17 @@ func main() {
 	db.SetMaxIdleConns(10)
 	log.Println("Database connected with connection pool configured")
 	
-	client, err := ethclient.Dial(rpcUrl)
+	// 初始化多节点RPC池
+	rpcPool, err := engine.NewRPCClientPool(strings.Split(rpcUrls, ","))
 	if err != nil {
-		log.Fatalf("RPC Connect Error: %v", err)
+		log.Fatalf("RPC Pool Error: %v", err)
 	}
-	defer client.Close()
-	log.Println("RPC client connected")
+	defer rpcPool.Close()
+	log.Printf("RPC Pool initialized with %d healthy nodes", rpcPool.GetHealthyNodeCount())
 
 	// 3. 初始化组件
-	fetcher := engine.NewFetcher(client, 10) // 10 workers, 100 rps limit
-	processor := engine.NewProcessor(db)
+	fetcher := engine.NewFetcher(rpcPool, 10) // 10 workers, 100 rps limit
+	processor := engine.NewProcessor(db, rpcPool) // 传入RPC池用于reorg恢复
 	
 	// 致命错误通道 - 用于触发优雅关闭
 	fatalErrCh := make(chan error, 1)

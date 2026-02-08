@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -27,11 +28,12 @@ var ErrReorgNeedRefetch = errors.New("reorg detected: need to refetch from commo
 
 // Processor 处理区块数据写入，支持批量和单条模式
 type Processor struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	client *ethclient.Client // RPC client for reorg recovery
 }
 
-func NewProcessor(db *sqlx.DB) *Processor {
-	return &Processor{db: db}
+func NewProcessor(db *sqlx.DB, client *ethclient.Client) *Processor {
+	return &Processor{db: db, client: client}
 }
 
 // ProcessBlockWithRetry 带重试的区块处理
@@ -288,4 +290,86 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	}
 	
 	return tx.Commit()
+}
+
+// FindCommonAncestor 递归查找共同祖先（处理深度重组）
+// 返回共同祖先的区块号和哈希，以及需要删除的区块列表
+func (p *Processor) FindCommonAncestor(ctx context.Context, blockNum *big.Int) (*big.Int, string, []*big.Int, error) {
+	log.Printf("🔍 Finding common ancestor from block %s", blockNum.String())
+	
+	toDelete := []*big.Int{}
+	currentNum := new(big.Int).Set(blockNum)
+	maxLookback := big.NewInt(1000) // 最大回退1000个块防止无限循环
+	
+	for currentNum.Cmp(big.NewInt(0)) > 0 && new(big.Int).Sub(blockNum, currentNum).Cmp(maxLookback) <= 0 {
+		// 从RPC获取链上区块
+		rpcBlock, err := p.client.BlockByNumber(ctx, currentNum)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("failed to get block %s from RPC: %w", currentNum.String(), err)
+		}
+		
+		// 查询本地数据库中相同高度的区块
+		var localBlock models.Block
+		err = p.db.GetContext(ctx, &localBlock, 
+			"SELECT hash FROM blocks WHERE number = $1", currentNum.String())
+		
+		if err == sql.ErrNoRows {
+			// 本地没有这个区块，继续往前找
+			toDelete = append(toDelete, new(big.Int).Set(currentNum))
+			currentNum.Sub(currentNum, big.NewInt(1))
+			continue
+		}
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("database error at block %s: %w", currentNum.String(), err)
+		}
+		
+		// 检查哈希是否匹配
+		if strings.ToLower(localBlock.Hash) == strings.ToLower(rpcBlock.Hash().Hex()) {
+			// 找到共同祖先！
+			log.Printf("✅ Common ancestor found at block %s (hash: %s)", 
+				currentNum.String(), localBlock.Hash)
+			return currentNum, localBlock.Hash, toDelete, nil
+		}
+		
+		// 哈希不匹配，这个区块也在重组链上，需要删除
+		toDelete = append(toDelete, new(big.Int).Set(currentNum))
+		
+		// 继续查找父区块（使用RPC返回的parent hash）
+		parentNum := new(big.Int).Sub(currentNum, big.NewInt(1))
+		currentNum.Set(parentNum)
+	}
+	
+	return nil, "", nil, fmt.Errorf("common ancestor not found within %s blocks", maxLookback.String())
+}
+
+// HandleDeepReorg 处理深度重组（超过1个块的重组）
+// 调用此函数前必须停止Fetcher并清空其队列
+func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*big.Int, error) {
+	log.Printf("🔧 Handling deep reorg at block %s", blockNum.String())
+	
+	// 查找共同祖先
+	ancestorNum, _, toDelete, err := p.FindCommonAncestor(ctx, blockNum)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find common ancestor: %w", err)
+	}
+	
+	log.Printf("📊 Reorg affects %d blocks, rolling back to %s", len(toDelete), ancestorNum.String())
+	
+	// 执行数据库回滚（删除所有分叉区块）
+	for _, num := range toDelete {
+		_, err := p.db.ExecContext(ctx, "DELETE FROM blocks WHERE number = $1", num.String())
+		if err != nil {
+			log.Printf("Warning: failed to delete block %s: %v", num.String(), err)
+		}
+		// 同时删除相关transfer
+		_, err = p.db.ExecContext(ctx, "DELETE FROM transfers WHERE block_number = $1", num.String())
+		if err != nil {
+			log.Printf("Warning: failed to delete transfers at block %s: %v", num.String(), err)
+		}
+	}
+	
+	log.Printf("✅ Deep reorg handled. Safe to resume from block %s", 
+		new(big.Int).Add(ancestorNum, big.NewInt(1)).String())
+	
+	return ancestorNum, nil
 }

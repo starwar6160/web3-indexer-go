@@ -9,7 +9,6 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"golang.org/x/time/rate"
 )
 
@@ -20,7 +19,7 @@ type BlockData struct {
 }
 
 type Fetcher struct {
-	client      *ethclient.Client
+	pool        *RPCClientPool // 多节点RPC池
 	concurrency int
 	jobs        chan *big.Int
 	Results     chan BlockData
@@ -29,12 +28,12 @@ type Fetcher struct {
 	stopOnce    sync.Once     // 确保只停止一次
 }
 
-func NewFetcher(client *ethclient.Client, concurrency int) *Fetcher {
+func NewFetcher(pool *RPCClientPool, concurrency int) *Fetcher {
 	// 默认限制：每秒100个请求，突发200
 	limiter := rate.NewLimiter(rate.Limit(100), 200)
 	
 	return &Fetcher{
-		client:      client,
+		pool:        pool,
 		concurrency: concurrency,
 		jobs:        make(chan *big.Int, concurrency*2),
 		Results:     make(chan BlockData, concurrency*2),
@@ -43,11 +42,11 @@ func NewFetcher(client *ethclient.Client, concurrency int) *Fetcher {
 	}
 }
 
-func NewFetcherWithLimiter(client *ethclient.Client, concurrency int, rps int, burst int) *Fetcher {
+func NewFetcherWithLimiter(pool *RPCClientPool, concurrency int, rps int, burst int) *Fetcher {
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 	
 	return &Fetcher{
-		client:      client,
+		pool:        pool,
 		concurrency: concurrency,
 		jobs:        make(chan *big.Int, concurrency*2),
 		Results:     make(chan BlockData, concurrency*2),
@@ -107,9 +106,9 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	var block *types.Block
 	var err error
 	
-	// 重试逻辑
+	// 重试逻辑 (RPC pool 内部有节点故障转移)
 	for retries := 0; retries < 3; retries++ {
-		block, err = f.client.BlockByNumber(ctx, bn)
+		block, err = f.pool.BlockByNumber(ctx, bn)
 		if err == nil {
 			break
 		}
@@ -121,8 +120,7 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	}
 	
 	// 获取该区块的日志（Transfer事件）
-	// 这里简化处理，实际应用中可能需要根据具体需求过滤
-	logs, err := f.client.FilterLogs(ctx, ethereum.FilterQuery{
+	logs, err := f.pool.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: bn,
 		ToBlock:   bn,
 		Topics:    [][]common.Hash{{TransferEventHash}},
