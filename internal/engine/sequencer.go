@@ -13,6 +13,7 @@ type Sequencer struct {
 	expectedBlock *big.Int                    // 下一个期望处理的区块号
 	buffer        map[string]BlockData        // 区块号 -> 数据的缓冲区 (使用string作为key避免big.Int比较问题)
 	processor     *Processor                  // 实际处理器
+	fetcher       *Fetcher                    // 用于Reorg时暂停抓取
 	mu            sync.RWMutex                // 保护buffer和expectedBlock
 	resultCh      <-chan BlockData            // 输入channel
 	fatalErrCh    chan<- error                // 致命错误通知channel
@@ -25,6 +26,20 @@ func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resu
 		expectedBlock: new(big.Int).Set(startBlock),
 		buffer:        make(map[string]BlockData),
 		processor:     processor,
+		resultCh:      resultCh,
+		fatalErrCh:    fatalErrCh,
+		chainID:       chainID,
+		metrics:       metrics,
+	}
+}
+
+// NewSequencerWithFetcher 创建带 Fetcher 控制的 Sequencer（推荐用于 Reorg 处理）
+func NewSequencerWithFetcher(processor *Processor, fetcher *Fetcher, startBlock *big.Int, chainID int64, resultCh <-chan BlockData, fatalErrCh chan<- error, metrics *Metrics) *Sequencer {
+	return &Sequencer{
+		expectedBlock: new(big.Int).Set(startBlock),
+		buffer:        make(map[string]BlockData),
+		processor:     processor,
+		fetcher:       fetcher,
 		resultCh:      resultCh,
 		fatalErrCh:    fatalErrCh,
 		chainID:       chainID,
@@ -154,6 +169,12 @@ func (s *Sequencer) processBufferContinuations(ctx context.Context) {
 func (s *Sequencer) handleReorg(ctx context.Context, data BlockData) error {
 	blockNum := data.Block.Number()
 	log.Printf("Handling reorg at block %s", blockNum.String())
+	
+	// 暂停 Fetcher 防止继续写入旧分叉数据
+	if s.fetcher != nil {
+		s.fetcher.Pause()
+		defer s.fetcher.Resume() // 处理完成后恢复
+	}
 	
 	// 清空所有大于等于当前区块的buffer数据（这些可能是旧分叉的数据）
 	toDelete := []string{}

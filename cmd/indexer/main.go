@@ -89,8 +89,8 @@ func main() {
 	fetcher.Schedule(startBlock, endBlock)
 	log.Printf("Scheduled blocks %s to %s", startBlock.String(), endBlock.String())
 
-	// 6. 启动 Sequencer - 确保顺序处理
-	sequencer := engine.NewSequencer(processor, startBlock, 1, fetcher.Results, fatalErrCh, metrics)
+	// 6. 启动 Sequencer - 确保顺序处理（传入 Fetcher 用于 Reorg 时暂停）
+	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, 1, fetcher.Results, fatalErrCh, metrics)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

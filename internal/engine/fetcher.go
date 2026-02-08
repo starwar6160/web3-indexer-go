@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"log"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -26,6 +28,9 @@ type Fetcher struct {
 	limiter     *rate.Limiter // 速率限制器
 	stopCh      chan struct{} // 用于停止调度
 	stopOnce    sync.Once     // 确保只停止一次
+	pauseCh     chan struct{} // 用于暂停 worker
+	resumeCh    chan struct{} // 用于恢复 worker
+	paused      atomic.Bool   // 当前是否暂停
 }
 
 func NewFetcher(pool *RPCClientPool, concurrency int) *Fetcher {
@@ -39,6 +44,8 @@ func NewFetcher(pool *RPCClientPool, concurrency int) *Fetcher {
 		Results:     make(chan BlockData, concurrency*2),
 		limiter:     limiter,
 		stopCh:      make(chan struct{}),
+		pauseCh:     make(chan struct{}),
+		resumeCh:    make(chan struct{}),
 	}
 }
 
@@ -52,6 +59,8 @@ func NewFetcherWithLimiter(pool *RPCClientPool, concurrency int, rps int, burst 
 		Results:     make(chan BlockData, concurrency*2),
 		limiter:     limiter,
 		stopCh:      make(chan struct{}),
+		pauseCh:     make(chan struct{}),
+		resumeCh:    make(chan struct{}),
 	}
 }
 
@@ -74,6 +83,18 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 		case bn, ok := <-f.jobs:
 			if !ok {
 				return
+			}
+			
+			// 检查是否暂停（Reorg 处理期间）
+			if f.paused.Load() {
+				select {
+				case <-f.resumeCh:
+					// 恢复后继续
+				case <-ctx.Done():
+					return
+				case <-f.stopCh:
+					return
+				}
 			}
 			
 			// 等待速率限制令牌
@@ -160,7 +181,26 @@ func (f *Fetcher) Stop() {
 	})
 }
 
-// SetRateLimit 动态调整速率限制
+// Pause 暂停 Fetcher（用于 Reorg 处理期间防止写入旧分叉数据）
+func (f *Fetcher) Pause() {
+	if f.paused.CompareAndSwap(false, true) {
+		log.Println("Fetcher paused for reorg handling")
+	}
+}
+
+// Resume 恢复 Fetcher
+func (f *Fetcher) Resume() {
+	if f.paused.CompareAndSwap(true, false) {
+		close(f.resumeCh)
+		f.resumeCh = make(chan struct{}) // 重新初始化以备下次使用
+		log.Println("Fetcher resumed")
+	}
+}
+
+// IsPaused 返回当前是否暂停
+func (f *Fetcher) IsPaused() bool {
+	return f.paused.Load()
+}
 func (f *Fetcher) SetRateLimit(rps int, burst int) {
 	f.limiter.SetLimit(rate.Limit(rps))
 	f.limiter.SetBurst(burst)
