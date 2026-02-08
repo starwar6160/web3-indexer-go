@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
@@ -29,7 +29,10 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, chainID int64
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
 			// 没有checkpoint，从0开始
-			log.Printf("No checkpoint found for chain %d, starting from block 0", chainID)
+			engine.Logger.Info("no_checkpoint_found",
+				slog.Int64("chain_id", chainID),
+				slog.String("action", "starting_from_block_0"),
+			)
 			return big.NewInt(0), nil
 		}
 		return nil, err
@@ -43,14 +46,23 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, chainID int64
 	
 	// 从下一个区块开始
 	startBlock := new(big.Int).Add(blockNum, big.NewInt(1))
-	log.Printf("Resuming from checkpoint: last synced block %s, starting from %s", 
-		blockNum.String(), startBlock.String())
+	engine.LogCheckpointResumed(blockNum.String(), startBlock.String())
 	
 	return startBlock, nil
 }
 
 func main() {
-	log.Println("Starting Web3 Indexer V2 - Production Ready")
+	// 初始化结构化日志
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	engine.InitLogger(logLevel)
+	
+	engine.Logger.Info("starting_web3_indexer",
+		slog.String("version", "V2"),
+		slog.String("mode", "production_ready"),
+	)
 	
 	// 1. 加载配置
 	_ = godotenv.Load()
@@ -58,20 +70,29 @@ func main() {
 	dbUrl := os.Getenv("DATABASE_URL")
 	
 	if rpcUrls == "" || dbUrl == "" {
-		log.Fatal("RPC_URLS and DATABASE_URL must be set in environment")
+		engine.Logger.Error("missing_required_env_vars",
+			slog.String("error", "RPC_URLS and DATABASE_URL must be set in environment"),
+		)
+		os.Exit(1)
 	}
 
 	// 2. 连接资源
 	db, err := sqlx.Connect("pgx", dbUrl)
 	if err != nil {
-		log.Fatalf("DB Connect Error: %v", err)
+		engine.Logger.Error("database_connection_failed",
+			slog.String("error", err.Error()),
+		)
+		os.Exit(1)
 	}
 	defer db.Close()
 	
 	// 配置数据库连接池
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
-	log.Println("Database connected with connection pool configured")
+	engine.Logger.Info("database_connected",
+		slog.Int("max_open_conns", 25),
+		slog.Int("max_idle_conns", 10),
+	)
 	
 	// Initialize metrics
 	metrics := engine.GetMetrics()
@@ -80,10 +101,17 @@ func main() {
 	// 初始化多节点RPC池
 	rpcPool, err := engine.NewRPCClientPool(strings.Split(rpcUrls, ","))
 	if err != nil {
-		log.Fatalf("RPC Pool Error: %v", err)
+		engine.Logger.Error("rpc_pool_init_failed",
+			slog.String("error", err.Error()),
+		)
+		os.Exit(1)
 	}
 	defer rpcPool.Close()
-	log.Printf("RPC Pool initialized with %d healthy nodes", rpcPool.GetHealthyNodeCount())
+	healthyNodes := rpcPool.GetHealthyNodeCount()
+	engine.Logger.Info("rpc_pool_initialized",
+		slog.Int("healthy_nodes", healthyNodes),
+		slog.Int("total_urls", len(strings.Split(rpcUrls, ","))),
+	)
 
 	// 3. 初始化组件
 	fetcher := engine.NewFetcher(rpcPool, 10) // 10 workers, 100 rps limit
@@ -100,11 +128,15 @@ func main() {
 	mux.Handle("/metrics", promhttp.Handler())
 	
 	go func() {
-		log.Printf("📊 HTTP server started on :8080")
-		log.Printf("   Health checks: http://localhost:8080/healthz")
-		log.Printf("   Metrics: http://localhost:8080/metrics")
+		engine.Logger.Info("http_server_started",
+			slog.String("port", "8080"),
+			slog.String("health_endpoint", "http://localhost:8080/healthz"),
+			slog.String("metrics_endpoint", "http://localhost:8080/metrics"),
+		)
 		if err := http.ListenAndServe(":8080", mux); err != nil {
-			log.Printf("HTTP server error: %v", err)
+			engine.Logger.Error("http_server_error",
+				slog.String("error", err.Error()),
+			)
 		}
 	}()
 	
@@ -121,13 +153,21 @@ func main() {
 	chainID := int64(1) // TODO: 从环境变量读取
 	startBlock, err := getStartBlockFromCheckpoint(ctx, db, chainID)
 	if err != nil {
-		log.Fatalf("Failed to get start block from checkpoint: %v", err)
+		engine.Logger.Error("checkpoint_recovery_failed",
+			slog.String("error", err.Error()),
+			slog.Int64("chain_id", chainID),
+		)
+		os.Exit(1)
 	}
 	
 	// 调度任务 (从 checkpoint 开始同步 100 个块用于演示)
 	endBlock := new(big.Int).Add(startBlock, big.NewInt(100))
 	fetcher.Schedule(startBlock, endBlock)
-	log.Printf("Scheduled blocks %s to %s (resumed from checkpoint)", startBlock.String(), endBlock.String())
+	engine.Logger.Info("blocks_scheduled",
+		slog.String("start_block", startBlock.String()),
+		slog.String("end_block", endBlock.String()),
+		slog.String("mode", "resumed_from_checkpoint"),
+	)
 
 	// 6. 启动 Sequencer - 确保顺序处理（传入 Fetcher 用于 Reorg 时暂停）
 	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, 1, fetcher.Results, fatalErrCh, metrics)
@@ -137,7 +177,10 @@ func main() {
 		sequencer.Run(ctx)
 	}()
 	
-	log.Println("Sequencer started with ordered processing guarantee")
+	engine.Logger.Info("sequencer_started",
+		slog.String("mode", "ordered_processing"),
+		slog.String("expected_block", startBlock.String()),
+	)
 
 	// 7. 优雅退出处理
 	sigCh := make(chan os.Signal, 1)
@@ -145,18 +188,18 @@ func main() {
 	
 	select {
 	case sig := <-sigCh:
-		log.Printf("Received signal: %v, initiating shutdown...", sig)
+		engine.Logger.Info("shutdown_signal_received",
+			slog.String("signal", sig.String()),
+		)
 	case fatalErr := <-fatalErrCh:
-		log.Printf("Fatal error from sequencer: %v, initiating shutdown...", fatalErr)
+		engine.Logger.Error("fatal_error_received",
+			slog.String("error", fatalErr.Error()),
+		)
 	}
 	
 	// 触发优雅关闭
+	engine.Logger.Info("shutdown_initiated")
 	cancel()
-	
-	// 停止 Fetcher 以清空任务队列
-	fetcher.Stop()
-	
-	// 等待所有 goroutine 完成
 	wg.Wait()
-	log.Println("Shutdown complete.")
+	engine.Logger.Info("shutdown_complete")
 }

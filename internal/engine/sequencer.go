@@ -115,9 +115,8 @@ func (s *Sequencer) handleBlock(ctx context.Context, data BlockData) error {
 	
 	// 如果buffer过大，可能是前面的区块丢失了，需要告警
 	if len(s.buffer) > 1000 {
-		s.metrics.RecordSequencerBufferFull()
-		return fmt.Errorf("buffer overflow: %d blocks pending, expected %s. Possible data loss", 
-			len(s.buffer), s.expectedBlock.String())
+		LogBufferFull(len(s.buffer), s.expectedBlock.String())
+		return fmt.Errorf("sequencer buffer overflow: %d blocks pending", len(s.buffer))
 	}
 	
 	return nil
@@ -162,13 +161,13 @@ func (s *Sequencer) processBufferContinuations(ctx context.Context) {
 		}
 		
 		log.Printf("Processed buffered block %s", nextNumStr)
+		LogBlockProcessing(nextNumStr, data.Block.Hash().Hex(), 0)
 	}
 }
 
 // handleReorg 处理重组事件
 func (s *Sequencer) handleReorg(ctx context.Context, data BlockData) error {
 	blockNum := data.Block.Number()
-	log.Printf("Handling reorg at block %s", blockNum.String())
 	
 	// 暂停 Fetcher 防止继续写入旧分叉数据
 	if s.fetcher != nil {

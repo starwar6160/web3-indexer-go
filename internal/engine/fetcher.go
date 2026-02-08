@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -137,6 +136,7 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 		
 		// 指数退避：100ms, 200ms, 400ms
 		backoff := time.Duration(100*(1<<retries)) * time.Millisecond
+		LogRPCRetry("BlockByNumber", retries+1, err)
 		select {
 		case <-time.After(backoff):
 			// 继续重试
@@ -195,7 +195,7 @@ func (f *Fetcher) Stop() {
 // Pause 暂停 Fetcher（用于 Reorg 处理期间防止写入旧分叉数据）
 func (f *Fetcher) Pause() {
 	if f.paused.CompareAndSwap(false, true) {
-		log.Println("Fetcher paused for reorg handling")
+		LogFetcherPaused("reorg_handling")
 	}
 }
 
@@ -204,7 +204,7 @@ func (f *Fetcher) Resume() {
 	if f.paused.CompareAndSwap(true, false) {
 		close(f.resumeCh)
 		f.resumeCh = make(chan struct{}) // 重新初始化以备下次使用
-		log.Println("Fetcher resumed")
+		LogFetcherResumed()
 	}
 }
 

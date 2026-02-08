@@ -63,8 +63,7 @@ func (p *Processor) ProcessBlockWithRetry(ctx context.Context, data BlockData, m
 		
 		// 指数退避重试：1s, 2s, 4s
 		backoff := time.Duration(1<<i) * time.Second
-		log.Printf("Retry %d/%d for block %s after %v: %v", i+1, maxRetries, data.Block.Number().String(), backoff, err)
-		
+		LogRPCRetry("ProcessBlock", i+1, err)
 		select {
 		case <-time.After(backoff):
 			// 继续重试
@@ -123,9 +122,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	if err == nil {
 		// 如果找到了上一个区块，检查 Hash 链
 		if lastBlock.Hash != block.ParentHash().Hex() {
-			log.Printf("🚨 REORG DETECTED at block %s! Expected parent %s, got %s", 
-				blockNum.String(), lastBlock.Hash, block.ParentHash().Hex())
-			
+			LogReorgDetected(blockNum.String(), lastBlock.Hash, block.ParentHash().Hex())
 			// 触发回滚逻辑
 			_, err = tx.ExecContext(ctx, 
 				"DELETE FROM blocks WHERE number >= $1", 
@@ -365,15 +362,13 @@ func (p *Processor) FindCommonAncestor(ctx context.Context, blockNum *big.Int) (
 // HandleDeepReorg 处理深度重组（超过1个块的重组）
 // 调用此函数前必须停止Fetcher并清空其队列
 func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*big.Int, error) {
-	log.Printf("🔧 Handling deep reorg at block %s", blockNum.String())
-	
 	// 查找共同祖先
 	ancestorNum, _, toDelete, err := p.FindCommonAncestor(ctx, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find common ancestor: %w", err)
 	}
 	
-	log.Printf("📊 Reorg affects %d blocks, rolling back to %s", len(toDelete), ancestorNum.String())
+	LogReorgHandled(len(toDelete), ancestorNum.String())
 	
 	// 执行数据库回滚（删除所有分叉区块）
 	for _, num := range toDelete {
