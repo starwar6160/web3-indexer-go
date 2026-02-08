@@ -56,13 +56,14 @@ start: docker-up build
 	@echo "🚀 启动Web3 Indexer..."
 	@echo "📝 环境变量配置:"
 	@echo "   DATABASE_URL=postgres://postgres:postgres@localhost:15432/indexer?sslmode=disable"
-	@echo "   RPC_URLS=https://eth.llamarpc.com"
-	@echo "   CHAIN_ID=1"
+	@echo "   RPC_URLS=https://greatest-alpha-morning.ethereum-sepolia.quiknode.pro/acf2caf911f89ccdc17e965b59706700a8479bad/"
+	@echo "   CHAIN_ID=11155111 (Sepolia)"
+	@echo "   START_BLOCK=10216000"
 	@echo ""
 	@DATABASE_URL=postgres://postgres:postgres@localhost:15432/indexer?sslmode=disable \
-	 RPC_URLS=https://eth.llamarpc.com \
-	 CHAIN_ID=1 \
-	 START_BLOCK=185000000 \
+	 RPC_URLS=https://greatest-alpha-morning.ethereum-sepolia.quiknode.pro/acf2caf911f89ccdc17e965b59706700a8479bad/ \
+	 CHAIN_ID=11155111 \
+	 START_BLOCK=10216000 \
 	 LOG_LEVEL=info \
 	 ./bin/indexer &
 	@echo "✅ 索引器已启动"
