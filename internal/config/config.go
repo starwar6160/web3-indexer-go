@@ -4,25 +4,39 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
 	DatabaseURL string
-	RPCURL      string
+	RPCURLs     []string // 支持多个RPC URL
+	WSSURL      string
 	ChainID     int64
 	StartBlock  int64
+	LogLevel    string
+	LogFormat   string
 }
 
 func Load() *Config {
 	_ = godotenv.Load() // .env文件是可选的
 
+	// 解析RPC URL列表（支持逗号分隔）
+	rpcUrlsStr := getEnv("RPC_URLS", "https://eth.llamarpc.com")
+	rpcUrls := strings.Split(rpcUrlsStr, ",")
+	for i, url := range rpcUrls {
+		rpcUrls[i] = strings.TrimSpace(url)
+	}
+
 	return &Config{
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
-		RPCURL:      getEnv("RPC_URL", "https://eth.llamarpc.com"),
+		RPCURLs:     rpcUrls,
+		WSSURL:      getEnv("WSS_URL", ""),
 		ChainID:     getEnvAsInt64("CHAIN_ID", 1),
-		StartBlock:  getEnvAsInt64("START_BLOCK", 0),
+		StartBlock:  getEnvAsInt64("START_BLOCK", 10000000), // 默认从1000万开始，避免从0同步
+		LogLevel:    getEnv("LOG_LEVEL", "info"),
+		LogFormat:   getEnv("LOG_FORMAT", "json"),
 	}
 }
 
