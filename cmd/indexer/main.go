@@ -183,8 +183,33 @@ func main() {
 		os.Exit(1)
 	}
 	
-	// 调度任务 (从 checkpoint 开始同步 100 个块用于演示)
-	endBlock := new(big.Int).Add(startBlock, big.NewInt(100))
+	// 6. 动态获取链上最新块高（支持增量同步）
+	latestBlock, err := rpcPool.GetLatestBlockNumber(ctx)
+	if err != nil {
+		engine.Logger.Error("failed_to_get_latest_block",
+			slog.String("error", err.Error()),
+		)
+		os.Exit(1)
+	}
+	
+	engine.Logger.Info("latest_block_fetched",
+		slog.String("latest_block", latestBlock.String()),
+		slog.String("start_block", startBlock.String()),
+		slog.String("blocks_behind", new(big.Int).Sub(latestBlock, startBlock).String()),
+	)
+	
+	// 调度任务：从 checkpoint 同步到最新块（支持增量同步）
+	// 如果差距太大（>10000），分批同步以避免内存溢出
+	batchSize := big.NewInt(1000)
+	if new(big.Int).Sub(latestBlock, startBlock).Cmp(big.NewInt(10000)) > 0 {
+		batchSize = big.NewInt(500) // 大差距时减小批次
+	}
+	
+	endBlock := new(big.Int).Add(startBlock, batchSize)
+	if endBlock.Cmp(latestBlock) > 0 {
+		endBlock = new(big.Int).Set(latestBlock) // 不超过最新块
+	}
+	
 	if err := fetcher.Schedule(ctx, startBlock, endBlock); err != nil {
 		engine.Logger.Error("schedule_failed",
 			slog.String("error", err.Error()),
@@ -194,7 +219,7 @@ func main() {
 	engine.Logger.Info("blocks_scheduled",
 		slog.String("start_block", startBlock.String()),
 		slog.String("end_block", endBlock.String()),
-		slog.String("mode", "resumed_from_checkpoint"),
+		slog.String("mode", "incremental_sync"),
 	)
 
 	// 6. 启动 Sequencer - 确保顺序处理（传入 Fetcher 用于 Reorg 时暂停）
