@@ -12,14 +12,16 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"golang.org/x/time/rate"
 )
 
 // RPCClientPool 多RPC节点池，支持轮询和故障转移
 type RPCClientPool struct {
-	clients []*rpcNode // 所有节点
-	size    int32      // 节点数量
-	index   int32      // 当前轮询索引
-	mu      sync.RWMutex
+	clients    []*rpcNode // 所有节点
+	size       int32      // 节点数量
+	index      int32      // 当前轮询索引
+	mu         sync.RWMutex
+	rateLimiter *rate.Limiter // 令牌桶限速器
 }
 
 // rpcNode 单个RPC节点封装
@@ -39,6 +41,8 @@ func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
 
 	pool := &RPCClientPool{
 		clients: make([]*rpcNode, 0, len(urls)),
+		// 初始化令牌桶限速器：每秒5个请求，突发容量10个
+		rateLimiter: rate.NewLimiter(5, 10),
 	}
 
 	for _, url := range urls {
@@ -47,7 +51,7 @@ func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
 			log.Printf("Warning: failed to connect to %s: %v", url, err)
 			continue
 		}
-		
+
 		pool.clients = append(pool.clients, &rpcNode{
 			url:       url,
 			client:    client,
@@ -56,7 +60,10 @@ func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
 	}
 
 	if len(pool.clients) == 0 {
-		return nil, fmt.Errorf("failed to connect to any RPC endpoint")
+		log.Printf("Warning: no RPC nodes connected initially, will retry later")
+		// 返回空池，但允许后续重试
+		pool.size = 0
+		return pool, nil
 	}
 
 	pool.size = int32(len(pool.clients))
@@ -119,12 +126,20 @@ func (p *RPCClientPool) markNodeUnhealthy(node *rpcNode) {
 	node.lastError = time.Now()
 	node.failCount++
 	
+	// 记录详细的节点错误日志
+	LogRPCRequestFailed("node_unhealthy", node.url, fmt.Errorf("fail_count: %d", node.failCount))
+	
 	log.Printf("RPC node %s marked unhealthy (fail count: %d)", node.url, node.failCount)
 }
 
-// BlockByNumber 获取区块（带故障转移）
+// BlockByNumber 获取区块（带故障转移和限速）
 func (p *RPCClientPool) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
 	for attempts := 0; attempts < int(p.size); attempts++ {
+		// 令牌桶限速：等待令牌
+		if err := p.rateLimiter.Wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limiter error: %w", err)
+		}
+
 		node := p.getNextHealthyNode()
 		if node == nil {
 			// 所有节点都不健康，记录告警
@@ -172,9 +187,14 @@ func (p *RPCClientPool) HeaderByNumber(ctx context.Context, number *big.Int) (*t
 	return nil, fmt.Errorf("all RPC nodes failed for HeaderByNumber")
 }
 
-// FilterLogs 过滤日志（带故障转移）
+// FilterLogs 过滤日志（带故障转移和限速）
 func (p *RPCClientPool) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
 	for attempts := 0; attempts < int(p.size); attempts++ {
+		// 令牌桶限速：等待令牌
+		if err := p.rateLimiter.Wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limiter error: %w", err)
+		}
+
 		node := p.getNextHealthyNode()
 		if node == nil {
 			// 所有节点都不健康，记录告警
@@ -223,11 +243,68 @@ func (p *RPCClientPool) GetLatestBlockNumber(ctx context.Context) (*big.Int, err
 	return nil, fmt.Errorf("all RPC nodes failed for GetLatestBlockNumber")
 }
 
+// CheckHealth 检查所有节点的健康状态
+func (p *RPCClientPool) CheckHealth() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	healthyNodes := 0
+	for _, node := range p.clients {
+		if node.isHealthy {
+			// 执行简单的健康检查
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, err := node.client.BlockNumber(ctx)
+			cancel()
+
+			if err != nil {
+				node.isHealthy = false
+				node.failCount++
+				node.lastError = time.Now()
+				log.Printf("RPC node %s marked unhealthy (fail count: %d)", node.url, node.failCount)
+			} else {
+				healthyNodes++
+			}
+		} else {
+			// 不健康的节点可以尝试恢复
+			if time.Since(node.lastError) > 30*time.Second {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, err := node.client.BlockNumber(ctx)
+				cancel()
+
+				if err == nil {
+					node.isHealthy = true
+					log.Printf("RPC node %s recovered", node.url)
+					healthyNodes++
+				}
+			}
+		}
+	}
+
+	return healthyNodes > 0
+}
+
+// WaitForHealthy 等待直到有健康节点或超时
+func (p *RPCClientPool) WaitForHealthy(timeout time.Duration) bool {
+	start := time.Now()
+	for {
+		if p.CheckHealth() {
+			return true
+		}
+
+		if time.Since(start) > timeout {
+			return false
+		}
+
+		time.Sleep(5 * time.Second)
+		log.Printf("Waiting for healthy RPC nodes...")
+	}
+}
+
 // GetHealthyNodeCount 返回健康节点数量
 func (p *RPCClientPool) GetHealthyNodeCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	
+
 	count := 0
 	for _, node := range p.clients {
 		if node.isHealthy {
@@ -235,4 +312,11 @@ func (p *RPCClientPool) GetHealthyNodeCount() int {
 		}
 	}
 	return count
+}
+
+// GetTotalNodeCount 返回总节点数量
+func (p *RPCClientPool) GetTotalNodeCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.clients)
 }
