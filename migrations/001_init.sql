@@ -34,3 +34,18 @@ CREATE TABLE IF NOT EXISTS sync_checkpoints (
     last_synced_block NUMERIC(78,0) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- 持久性检查点表：记录每个 batch 的处理状态
+CREATE TABLE IF NOT EXISTS sync_status (
+    id SERIAL PRIMARY KEY,
+    chain_id NUMERIC(78,0) NOT NULL,
+    last_processed_block NUMERIC(78,0) NOT NULL,
+    last_processed_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    batch_size INTEGER DEFAULT 1000,
+    rpc_provider VARCHAR(255),
+    status VARCHAR(50) DEFAULT 'syncing', -- syncing, paused, error
+    error_message TEXT,
+    UNIQUE(chain_id)
+);
+
+CREATE INDEX idx_sync_status_chain_id ON sync_status(chain_id);

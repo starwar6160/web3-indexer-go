@@ -87,3 +87,48 @@ func (r *Repository) UpdateCheckpoint(ctx context.Context, chainID int64, blockN
 	_, err := r.db.ExecContext(ctx, query, chainID, blockNumber.String())
 	return err
 }
+
+// UpdateSyncStatus 更新同步状态（持久性检查点）
+func (r *Repository) UpdateSyncStatus(ctx context.Context, chainID int64, lastProcessedBlock *big.Int, rpcProvider string) error {
+	query := `
+		INSERT INTO sync_status (chain_id, last_processed_block, rpc_provider, status)
+		VALUES ($1, $2, $3, 'syncing')
+		ON CONFLICT (chain_id) DO UPDATE SET 
+			last_processed_block = EXCLUDED.last_processed_block,
+			last_processed_timestamp = NOW(),
+			rpc_provider = EXCLUDED.rpc_provider,
+			status = 'syncing',
+			error_message = NULL
+	`
+	_, err := r.db.ExecContext(ctx, query, chainID, lastProcessedBlock.String(), rpcProvider)
+	return err
+}
+
+// GetSyncStatus 获取同步状态
+func (r *Repository) GetSyncStatus(ctx context.Context, chainID int64) (*big.Int, string, error) {
+	var lastProcessedBlock string
+	var rpcProvider string
+	query := `SELECT last_processed_block, rpc_provider FROM sync_status WHERE chain_id = $1`
+	err := r.db.GetContext(ctx, &struct {
+		LastProcessedBlock string
+		RPCProvider        string
+	}{}, query, chainID)
+	if err != nil {
+		// 如果表为空，返回 nil（让调用者使用 checkpoint）
+		return nil, "", nil
+	}
+	blockNum := new(big.Int)
+	blockNum.SetString(lastProcessedBlock, 10)
+	return blockNum, rpcProvider, nil
+}
+
+// RecordSyncError 记录同步错误
+func (r *Repository) RecordSyncError(ctx context.Context, chainID int64, errorMsg string) error {
+	query := `
+		UPDATE sync_status 
+		SET status = 'error', error_message = $2, last_processed_timestamp = NOW()
+		WHERE chain_id = $1
+	`
+	_, err := r.db.ExecContext(ctx, query, chainID, errorMsg)
+	return err
+}

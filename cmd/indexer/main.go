@@ -174,6 +174,8 @@ func main() {
 		)
 		os.Exit(1)
 	}
+	
+	// 优先从 sync_status 表恢复（持久性检查点），其次从 checkpoint 表
 	startBlock, err := getStartBlockFromCheckpoint(ctx, db, chainID)
 	if err != nil {
 		engine.Logger.Error("checkpoint_recovery_failed",
@@ -182,6 +184,11 @@ func main() {
 		)
 		os.Exit(1)
 	}
+	
+	engine.Logger.Info("checkpoint_recovered",
+		slog.String("start_block", startBlock.String()),
+		slog.Int64("chain_id", chainID),
+	)
 	
 	// 6. 动态获取链上最新块高（支持增量同步）
 	latestBlock, err := rpcPool.GetLatestBlockNumber(ctx)
