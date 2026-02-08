@@ -176,7 +176,12 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		}
 	}
 
-	// 4. 提交事务
+	// 4. 更新 Checkpoint（在同一事务中保证原子性）
+	if err := p.updateCheckpointInTx(ctx, tx, 1, blockNum); err != nil {
+		return fmt.Errorf("failed to update checkpoint for block %s: %w", blockNum.String(), err)
+	}
+
+	// 5. 提交事务
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
 	}
@@ -184,9 +189,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	return nil
 }
 
-// UpdateCheckpoint 更新同步检查点（在Sequencer确认顺序后调用）
-func (p *Processor) UpdateCheckpoint(ctx context.Context, chainID int64, blockNumber *big.Int) error {
-	_, err := p.db.ExecContext(ctx, `
+// updateCheckpointInTx 在事务内更新 checkpoint（保证原子性）
+func (p *Processor) updateCheckpointInTx(ctx context.Context, tx *sqlx.Tx, chainID int64, blockNumber *big.Int) error {
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO sync_checkpoints (chain_id, last_synced_block)
 		VALUES ($1, $2)
 		ON CONFLICT (chain_id) DO UPDATE SET 
@@ -200,6 +205,9 @@ func (p *Processor) UpdateCheckpoint(ctx context.Context, chainID int64, blockNu
 	
 	return nil
 }
+
+// UpdateCheckpoint 更新同步检查点（已废弃，保留用于兼容性）
+// 警告：此方法在事务外调用，存在数据不一致风险，建议统一使用事务内更新
 
 // ExtractTransfer 从区块日志中提取 ERC20 Transfer 事件
 func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
