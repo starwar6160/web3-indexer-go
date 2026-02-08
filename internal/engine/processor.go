@@ -218,7 +218,8 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 
 	from := common.BytesToAddress(vLog.Topics[1].Bytes())
 	to := common.BytesToAddress(vLog.Topics[2].Bytes())
-	amount := new(big.Int).SetBytes(vLog.Data)
+	// 使用 uint256 处理金额，保证金融级精度
+	amount := models.NewUint256FromBigInt(new(big.Int).SetBytes(vLog.Data))
 
 	return &models.Transfer{
 		BlockNumber:  models.BigInt{Int: new(big.Int).SetUint64(vLog.BlockNumber)},
@@ -226,7 +227,7 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 		LogIndex:     uint(vLog.Index),
 		From:         strings.ToLower(from.Hex()),
 		To:           strings.ToLower(to.Hex()),
-		Amount:       models.BigInt{Int: amount},
+		Amount:       amount,
 		TokenAddress: strings.ToLower(vLog.Address.Hex()),
 	}
 }

@@ -4,7 +4,100 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"math/big"
+	"strings"
+
+	"github.com/holiman/uint256"
 )
+
+// Uint256 封装 uint256.Int 以支持 sql.Scanner 和 driver.Valuer
+// 专为 EVM 链金额计算设计，避免精度丢失
+type Uint256 struct {
+	*uint256.Int
+}
+
+func NewUint256(n uint64) Uint256 {
+	return Uint256{uint256.NewInt(n)}
+}
+
+func NewUint256FromBigInt(b *big.Int) Uint256 {
+	if b == nil {
+		return Uint256{uint256.NewInt(0)}
+	}
+	u, overflow := uint256.FromBig(b)
+	if overflow {
+		// 处理溢出，返回最大值
+		return Uint256{uint256.MustFromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")}
+	}
+	return Uint256{u}
+}
+
+func NewUint256FromString(s string) (Uint256, bool) {
+	u, err := uint256.FromDecimal(s)
+	if err != nil {
+		return Uint256{}, false
+	}
+	return Uint256{u}, true
+}
+
+// Value 实现 driver.Valuer (写入数据库)
+func (u Uint256) Value() (driver.Value, error) {
+	if u.Int == nil {
+		return "0", nil
+	}
+	return u.Int.Dec(), nil
+}
+
+// Scan 实现 sql.Scanner (读取数据库)
+func (u *Uint256) Scan(value interface{}) error {
+	if value == nil {
+		u.Int = uint256.NewInt(0)
+		return nil
+	}
+
+	var s string
+	switch v := value.(type) {
+	case []byte:
+		s = string(v)
+	case string:
+		s = v
+	default:
+		return fmt.Errorf("unsupported type for Uint256: %T", v)
+	}
+
+	// 处理科学计数法（PostgreSQL NUMERIC 可能返回）
+	if strings.ContainsAny(s, "eE") {
+		// 用 big.Int 解析科学计数法，再转 uint256
+		bi := new(big.Int)
+		_, ok := bi.SetString(s, 10)
+		if !ok {
+			return fmt.Errorf("failed to parse scientific notation %s to Uint256", s)
+		}
+		var overflow bool
+		u.Int, overflow = uint256.FromBig(bi)
+		if overflow {
+			return fmt.Errorf("value %s overflows uint256", s)
+		}
+		return nil
+	}
+
+	// 普通十进制解析
+	var err error
+	u.Int, err = uint256.FromDecimal(s)
+	if err != nil {
+		return fmt.Errorf("failed to convert %s to Uint256: %w", s, err)
+	}
+	return nil
+}
+
+// String 返回十进制字符串表示
+func (u Uint256) String() string {
+	if u.Int == nil {
+		return "0"
+	}
+	return u.Int.Dec()
+}
+
+// 以下保留 BigInt 兼容性，推荐新项目使用 Uint256
 
 // BigInt 封装 math/big.Int 以支持 sql.Scanner 和 driver.Valuer
 // 它可以自动处理 Go BigInt <-> Postgres NUMERIC 的转换
@@ -82,11 +175,11 @@ type Block struct {
 }
 
 type Transfer struct {
-	BlockNumber  BigInt `db:"block_number"` 
-	TxHash       string `db:"tx_hash"` 
-	LogIndex     uint   `db:"log_index"` 
-	From         string `db:"from_address"` 
-	To           string `db:"to_address"` 
-	Amount       BigInt `db:"amount"` 
-	TokenAddress string `db:"token_address"` 
+	BlockNumber  BigInt   `db:"block_number"`
+	TxHash       string   `db:"tx_hash"`
+	LogIndex     uint     `db:"log_index"`
+	From         string   `db:"from_address"`
+	To           string   `db:"to_address"`
+	Amount       Uint256  `db:"amount"`  // 使用 Uint256 保证金融级精度
+	TokenAddress string   `db:"token_address"`
 }
