@@ -1,0 +1,11 @@
+# Allowed patterns for documentation (false positives)
+# These are examples in SECURITY.md documentation
+
+API_KEY.*
+DATABASE_URL=.*
+RPC_URL.*
+SECRET_KEY.*
+PRIVATE_KEY.*
+PASSWORD=.*
+TOKEN=.*
+sk-or-v1-[a-zA-Z0-9]{48}.*
