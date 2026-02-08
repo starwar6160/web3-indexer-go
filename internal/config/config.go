@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	StartBlock  int64
 	LogLevel    string
 	LogFormat   string
+	RPCTimeout  time.Duration // RPC超时配置
 }
 
 func Load() *Config {
@@ -29,6 +31,9 @@ func Load() *Config {
 		rpcUrls[i] = strings.TrimSpace(url)
 	}
 
+	// 解析RPC超时（默认10秒）
+	rpcTimeoutSeconds := getEnvAsInt64("RPC_TIMEOUT_SECONDS", 10)
+
 	return &Config{
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
 		RPCURLs:     rpcUrls,
@@ -37,6 +42,7 @@ func Load() *Config {
 		StartBlock:  getEnvAsInt64("START_BLOCK", 10000000), // 默认从1000万开始，避免从0同步
 		LogLevel:    getEnv("LOG_LEVEL", "info"),
 		LogFormat:   getEnv("LOG_FORMAT", "json"),
+		RPCTimeout:  time.Duration(rpcTimeoutSeconds) * time.Second,
 	}
 }
 
