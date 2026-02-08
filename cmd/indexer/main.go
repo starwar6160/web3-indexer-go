@@ -47,21 +47,7 @@ func main() {
 	metrics := engine.GetMetrics()
 	metrics.RecordStartTime()
 	
-	// Start Prometheus metrics server
-	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		log.Printf("📊 Prometheus metrics server started on :8080/metrics")
-		if err := http.ListenAndServe(":8080", nil); err != nil {
-			log.Printf("Metrics server error: %v", err)
-		}
-	}()
-	
 	// 初始化多节点RPC池
-	rpcUrls = os.Getenv("RPC_URLS")
-	if rpcUrls == "" {
-		log.Fatal("RPC_URLS environment variable is required")
-	}
-	
 	rpcPool, err := engine.NewRPCClientPool(strings.Split(rpcUrls, ","))
 	if err != nil {
 		log.Fatalf("RPC Pool Error: %v", err)
@@ -72,6 +58,25 @@ func main() {
 	// 3. 初始化组件
 	fetcher := engine.NewFetcher(rpcPool, 10) // 10 workers, 100 rps limit
 	processor := engine.NewProcessor(db, rpcPool) // 传入RPC池用于reorg恢复
+	
+	// Start HTTP server with health checks and metrics
+	mux := http.NewServeMux()
+	
+	// Initialize health server (pass nil for sequencer, will be updated later)
+	healthServer := engine.NewHealthServer(db, rpcPool, nil, fetcher)
+	healthServer.RegisterRoutes(mux)
+	
+	// Start Prometheus metrics server
+	mux.Handle("/metrics", promhttp.Handler())
+	
+	go func() {
+		log.Printf("📊 HTTP server started on :8080")
+		log.Printf("   Health checks: http://localhost:8080/healthz")
+		log.Printf("   Metrics: http://localhost:8080/metrics")
+		if err := http.ListenAndServe(":8080", mux); err != nil {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
 	
 	// 致命错误通道 - 用于触发优雅关闭
 	fatalErrCh := make(chan error, 1)
