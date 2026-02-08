@@ -4,7 +4,8 @@
 *.dll
 *.so
 *.dylib
-indexer
+/indexer
+indexer.exe
 
 # Test binary, built with `go test -c`
 *.test
