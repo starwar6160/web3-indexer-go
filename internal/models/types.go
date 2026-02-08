@@ -37,12 +37,31 @@ func (b *BigInt) Scan(value interface{}) error {
 	}
 	switch v := value.(type) {
 	case []byte:
-		i, ok := new(big.Int).SetString(string(v), 10)
+		s := string(v)
+		// 支持 hex 字符串 (0x...)
+		if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
+			i, ok := new(big.Int).SetString(s[2:], 16)
+			if !ok {
+				return fmt.Errorf("failed to convert hex %s to BigInt", s)
+			}
+			b.Int = i
+			return nil
+		}
+		i, ok := new(big.Int).SetString(s, 10)
 		if !ok {
-			return fmt.Errorf("failed to convert %s to BigInt", string(v))
+			return fmt.Errorf("failed to convert %s to BigInt", s)
 		}
 		b.Int = i
 	case string:
+		// 支持 hex 字符串 (0x...)
+		if len(v) >= 2 && v[0] == '0' && (v[1] == 'x' || v[1] == 'X') {
+			i, ok := new(big.Int).SetString(v[2:], 16)
+			if !ok {
+				return fmt.Errorf("failed to convert hex %s to BigInt", v)
+			}
+			b.Int = i
+			return nil
+		}
 		i, ok := new(big.Int).SetString(v, 10)
 		if !ok {
 			return fmt.Errorf("failed to convert %s to BigInt", v)
