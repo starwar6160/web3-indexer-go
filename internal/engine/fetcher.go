@@ -22,24 +22,24 @@ type BlockData struct {
 }
 
 type Fetcher struct {
-	pool        *RPCClientPool // 多节点RPC池
+	pool        RPCClient // RPC客户端接口，支持Mock和真实实现
 	concurrency int
 	jobs        chan *big.Int
 	Results     chan BlockData
 	limiter     *rate.Limiter // 速率限制器
 	stopCh      chan struct{} // 用于停止调度
 	stopOnce    sync.Once     // 确保只停止一次
-	
+
 	// Pause/Resume 机制：用 sync.Cond 替代 channel 避免竞态
-	pauseMu     sync.Mutex
-	pauseCond   *sync.Cond
-	paused      bool
+	pauseMu   sync.Mutex
+	pauseCond *sync.Cond
+	paused    bool
 }
 
-func NewFetcher(pool *RPCClientPool, concurrency int) *Fetcher {
+func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 	// 默认限制：每秒100个请求，突发200
 	limiter := rate.NewLimiter(rate.Limit(100), 200)
-	
+
 	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
@@ -53,9 +53,9 @@ func NewFetcher(pool *RPCClientPool, concurrency int) *Fetcher {
 	return f
 }
 
-func NewFetcherWithLimiter(pool *RPCClientPool, concurrency int, rps int, burst int) *Fetcher {
+func NewFetcherWithLimiter(pool RPCClient, concurrency int, rps int, burst int) *Fetcher {
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
-	
+
 	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
@@ -78,7 +78,7 @@ func (f *Fetcher) Start(ctx context.Context, wg *sync.WaitGroup) {
 
 func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -89,7 +89,7 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 			if !ok {
 				return
 			}
-			
+
 			// 检查是否暂停（Reorg 处理期间）
 			f.pauseMu.Lock()
 			for f.paused {
@@ -97,7 +97,7 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 				f.pauseCond.Wait()
 			}
 			f.pauseMu.Unlock()
-			
+
 			// 检查是否已停止（在 unlock 后再检查）
 			select {
 			case <-ctx.Done():
@@ -106,7 +106,7 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 				return
 			default:
 			}
-			
+
 			// 等待速率限制令牌
 			if err := f.limiter.Wait(ctx); err != nil {
 				select {
@@ -118,10 +118,10 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 				}
 				continue
 			}
-			
+
 			// 获取区块数据
 			block, logs, err := f.fetchBlockWithLogs(ctx, bn)
-			
+
 			select {
 			case f.Results <- BlockData{Block: block, Logs: logs, Err: err}:
 			case <-ctx.Done():
@@ -137,14 +137,14 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	var block *types.Block
 	var err error
 	start := time.Now()
-	
+
 	// 指数退避重试逻辑 (RPC pool 内部有节点故障转移)
 	for retries := 0; retries < 3; retries++ {
 		block, err = f.pool.BlockByNumber(ctx, bn)
 		if err == nil {
 			break
 		}
-		
+
 		// 根据错误类型选择退避时间
 		// 429 (Too Many Requests) 需要更长的退避
 		var backoff time.Duration
@@ -155,7 +155,7 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 			// 其他错误：100ms, 200ms, 400ms
 			backoff = time.Duration(100*(1<<retries)) * time.Millisecond
 		}
-		
+
 		LogRPCRetry("BlockByNumber", retries+1, err)
 		select {
 		case <-time.After(backoff):
@@ -166,11 +166,11 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 			return nil, nil, fmt.Errorf("fetcher stopped")
 		}
 	}
-	
+
 	if err != nil {
 		return nil, nil, err
 	}
-	
+
 	// 获取该区块的日志（Transfer事件）
 	logs, err := f.pool.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: bn,
@@ -186,10 +186,10 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 		)
 		logs = []types.Log{}
 	}
-	
+
 	// 记录 fetch 耗时
 	GetMetrics().RecordFetcherJobCompleted(time.Since(start))
-	
+
 	return block, logs, nil
 }
 
@@ -198,13 +198,13 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	// 如果范围超过 2000，自动分批处理
 	maxBlockRange := big.NewInt(2000)
 	current := new(big.Int).Set(start)
-	
+
 	for current.Cmp(end) <= 0 {
 		batchEnd := new(big.Int).Add(current, maxBlockRange)
 		if batchEnd.Cmp(end) > 0 {
 			batchEnd = new(big.Int).Set(end)
 		}
-		
+
 		// 调度当前批次的块
 		for i := new(big.Int).Set(current); i.Cmp(batchEnd) <= 0; i.Add(i, big.NewInt(1)) {
 			bn := new(big.Int).Set(i)
@@ -217,7 +217,7 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 			case f.jobs <- bn:
 			}
 		}
-		
+
 		// 移动到下一批
 		current = new(big.Int).Add(batchEnd, big.NewInt(1))
 	}
