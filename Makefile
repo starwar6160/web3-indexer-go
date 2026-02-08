@@ -55,11 +55,11 @@ docker-down:
 start: docker-up build
 	@echo "🚀 启动Web3 Indexer..."
 	@echo "📝 环境变量配置:"
-	@echo "   DATABASE_URL=postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"
+	@echo "   DATABASE_URL=postgres://postgres:postgres@localhost:15432/indexer?sslmode=disable"
 	@echo "   RPC_URLS=https://eth.llamarpc.com"
 	@echo "   CHAIN_ID=1"
 	@echo ""
-	@DATABASE_URL=postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable \
+	@DATABASE_URL=postgres://postgres:postgres@localhost:15432/indexer?sslmode=disable \
 	 RPC_URLS=https://eth.llamarpc.com \
 	 CHAIN_ID=1 \
 	 START_BLOCK=185000000 \
@@ -143,7 +143,7 @@ dev: docker-up build
 	@echo "🔧 启动开发环境 (包含Anvil测试节点)..."
 	docker compose -f docker-compose.infra.yml --profile testing up -d
 	@sleep 3
-	@DATABASE_URL=postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable \
+	@DATABASE_URL=postgres://postgres:postgres@localhost:15432/indexer?sslmode=disable \
 	 RPC_URLS=http://localhost:8545 \
 	 WSS_URL=ws://localhost:8545 \
 	 CHAIN_ID=31337 \
@@ -161,7 +161,7 @@ dev-setup: docker-up
 	@echo "💡 现在可以运行 'make start' 启动索引器"
 
 # Database migrations (requires golang-migrate)
-DB_URL=postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable
+DB_URL=postgres://postgres:postgres@localhost:15432/indexer?sslmode=disable
 
 migrate-up:
 	@echo "📈 执行数据库迁移..."
