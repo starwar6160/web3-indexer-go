@@ -151,6 +151,9 @@ func main() {
 	
 	// 致命错误通道 - 用于触发优雅关闭
 	fatalErrCh := make(chan error, 1)
+	
+	// Reorg 事件通道 - 用于处理链重组
+	reorgCh := make(chan engine.ReorgEvent, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -195,7 +198,7 @@ func main() {
 	)
 
 	// 6. 启动 Sequencer - 确保顺序处理（传入 Fetcher 用于 Reorg 时暂停）
-	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, 1, fetcher.Results, fatalErrCh, metrics)
+	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, chainID, fetcher.Results, fatalErrCh, reorgCh, metrics)
 	
 	// 把 sequencer 注入到 healthServer（使健康检查能正确报告状态）
 	healthServer.SetSequencer(sequencer)
