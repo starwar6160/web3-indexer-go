@@ -57,11 +57,28 @@ func NewRPCClientPoolWithTimeout(urls []string, timeout time.Duration) (*RPCClie
 			continue
 		}
 
-		pool.clients = append(pool.clients, &rpcNode{
+		// 创建节点对象，初始状态为不健康，需要通过健康检查
+		node := &rpcNode{
 			url:       url,
 			client:    client,
-			isHealthy: true,
-		})
+			isHealthy: false, // 初始状态为不健康
+		}
+
+		// 立即进行健康检查
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		_, err = client.HeaderByNumber(ctx, nil) // 获取最新块头来验证连接
+		cancel()
+
+		if err != nil {
+			log.Printf("Health check failed for %s: %v", url, err)
+			node.isHealthy = false
+			node.lastError = time.Now()
+		} else {
+			log.Printf("Health check passed for %s", url)
+			node.isHealthy = true
+		}
+
+		pool.clients = append(pool.clients, node)
 	}
 
 	if len(pool.clients) == 0 {
@@ -72,7 +89,13 @@ func NewRPCClientPoolWithTimeout(urls []string, timeout time.Duration) (*RPCClie
 	}
 
 	pool.size = int32(len(pool.clients))
-	log.Printf("RPC Pool initialized with %d/%d nodes (timeout: %v)", len(pool.clients), len(urls), timeout)
+	healthyCount := 0
+	for _, node := range pool.clients {
+		if node.isHealthy {
+			healthyCount++
+		}
+	}
+	log.Printf("RPC Pool initialized with %d/%d nodes healthy (timeout: %v)", healthyCount, len(pool.clients), timeout)
 	return pool, nil
 }
 
