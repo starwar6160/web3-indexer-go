@@ -13,7 +13,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -29,10 +28,15 @@ var ErrReorgNeedRefetch = errors.New("reorg detected: need to refetch from commo
 // Processor 处理区块数据写入，支持批量和单条模式
 type Processor struct {
 	db     *sqlx.DB
-	client *ethclient.Client // RPC client for reorg recovery
+	client RPCClient // RPC client interface for reorg recovery
 }
 
-func NewProcessor(db *sqlx.DB, client *ethclient.Client) *Processor {
+// RPCClient defines the interface needed by Processor
+type RPCClient interface {
+	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
+}
+
+func NewProcessor(db *sqlx.DB, client RPCClient) *Processor {
 	return &Processor{db: db, client: client}
 }
 
