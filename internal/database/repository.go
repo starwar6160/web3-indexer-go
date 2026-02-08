@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -20,6 +21,13 @@ func NewRepository(databaseURL string) (*Repository, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
+	
+	// 配置连接池 - 生产级设置
+	db.SetMaxOpenConns(25)                  // 最大打开连接数
+	db.SetMaxIdleConns(10)                  // 最大空闲连接数
+	db.SetConnMaxLifetime(5 * time.Minute) // 连接最大生命周期
+	db.SetConnMaxIdleTime(1 * time.Minute) // 空闲连接最大存活时间
+	
 	return &Repository{db: db}, nil
 }
 
