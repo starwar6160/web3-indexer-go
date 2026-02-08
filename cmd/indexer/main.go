@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/big"
 	"net/http"
@@ -18,6 +19,35 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 )
+
+// getStartBlockFromCheckpoint 从数据库获取起始区块号
+func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, chainID int64) (*big.Int, error) {
+	var lastSyncedBlock string
+	err := db.GetContext(ctx, &lastSyncedBlock, 
+		"SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
+	
+	if err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			// 没有checkpoint，从0开始
+			log.Printf("No checkpoint found for chain %d, starting from block 0", chainID)
+			return big.NewInt(0), nil
+		}
+		return nil, err
+	}
+	
+	// 解析区块号
+	blockNum, ok := new(big.Int).SetString(lastSyncedBlock, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid block number in checkpoint: %s", lastSyncedBlock)
+	}
+	
+	// 从下一个区块开始
+	startBlock := new(big.Int).Add(blockNum, big.NewInt(1))
+	log.Printf("Resuming from checkpoint: last synced block %s, starting from %s", 
+		blockNum.String(), startBlock.String())
+	
+	return startBlock, nil
+}
 
 func main() {
 	log.Println("Starting Web3 Indexer V2 - Production Ready")
@@ -87,12 +117,17 @@ func main() {
 	// 4. 启动 Fetcher
 	fetcher.Start(ctx, &wg)
 
-	// 5. 调度任务 (演示模式：抓取 100 个块)
-	// 实际生产环境应从数据库 checkpoint 恢复
-	startBlock := big.NewInt(18000000)
-	endBlock := big.NewInt(18000100)
+	// 5. 从 checkpoint 恢复起始区块
+	chainID := int64(1) // TODO: 从环境变量读取
+	startBlock, err := getStartBlockFromCheckpoint(ctx, db, chainID)
+	if err != nil {
+		log.Fatalf("Failed to get start block from checkpoint: %v", err)
+	}
+	
+	// 调度任务 (从 checkpoint 开始同步 100 个块用于演示)
+	endBlock := new(big.Int).Add(startBlock, big.NewInt(100))
 	fetcher.Schedule(startBlock, endBlock)
-	log.Printf("Scheduled blocks %s to %s", startBlock.String(), endBlock.String())
+	log.Printf("Scheduled blocks %s to %s (resumed from checkpoint)", startBlock.String(), endBlock.String())
 
 	// 6. 启动 Sequencer - 确保顺序处理（传入 Fetcher 用于 Reorg 时暂停）
 	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, 1, fetcher.Results, fatalErrCh, metrics)
