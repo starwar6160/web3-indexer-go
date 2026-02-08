@@ -122,6 +122,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 开启事务 (ACID 核心)
 	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
+		LogTransactionFailed("begin_transaction", blockNum.String(), err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	
@@ -164,6 +165,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		Timestamp:  block.Time(),
 	})
 	if err != nil {
+		LogTransactionFailed("insert_block", blockNum.String(), err)
 		return fmt.Errorf("failed to insert block: %w", err)
 	}
 
@@ -195,6 +197,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 	// 5. 提交事务
 	if err := tx.Commit(); err != nil {
+		LogTransactionFailed("commit_transaction", blockNum.String(), err)
 		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
 	}
 	

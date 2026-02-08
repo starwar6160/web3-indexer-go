@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strings"
 	"sync"
@@ -177,7 +178,12 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 		Topics:    [][]common.Hash{{TransferEventHash}},
 	})
 	if err != nil {
-		// 日志获取失败不阻塞区块处理
+		// 日志获取失败不阻塞区块处理，但记录详细错误信息
+		Logger.Warn("logs_fetch_failed",
+			slog.String("block_number", bn.String()),
+			slog.String("error", err.Error()),
+			slog.String("action", "continuing_with_empty_logs"),
+		)
 		logs = []types.Log{}
 	}
 	

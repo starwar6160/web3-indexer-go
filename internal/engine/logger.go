@@ -96,18 +96,36 @@ func LogCheckpointResumed(lastSyncedBlock, startBlock string) {
 	)
 }
 
-// LogBufferFull 记录缓冲区满日志
-func LogBufferFull(bufferSize int, expectedBlock string) {
-	Logger.Error("sequencer_buffer_full",
-		slog.Int("buffer_size", bufferSize),
-		slog.String("expected_block", expectedBlock),
-	)
-}
-
 // LogDatabaseError 记录数据库错误日志
 func LogDatabaseError(operation string, err error) {
 	Logger.Error("database_error",
 		slog.String("operation", operation),
 		slog.String("error", err.Error()),
+	)
+}
+
+// LogRPCRequestFailed 记录 RPC 请求失败日志
+func LogRPCRequestFailed(method string, node string, err error) {
+	Logger.Warn("rpc_request_failed",
+		slog.String("method", method),
+		slog.String("node", node),
+		slog.String("error", err.Error()),
+	)
+}
+
+// LogTransactionFailed 记录事务处理失败日志
+func LogTransactionFailed(operation string, blockNumber string, err error) {
+	Logger.Error("transaction_failed",
+		slog.String("operation", operation),
+		slog.String("block_number", blockNumber),
+		slog.String("error", err.Error()),
+	)
+}
+
+// LogBufferFull 记录缓冲区满日志
+func LogBufferFull(bufferSize int, expectedBlock string) {
+	Logger.Error("sequencer_buffer_full",
+		slog.Int("buffer_size", bufferSize),
+		slog.String("expected_block", expectedBlock),
 	)
 }

@@ -48,6 +48,7 @@ type Metrics struct {
 	// System metrics
 	CheckpointUpdates   prometheus.Counter
 	StartTime           prometheus.Gauge
+	CurrentSyncHeight   prometheus.Gauge
 }
 
 var (
@@ -176,6 +177,10 @@ func NewMetrics() *Metrics {
 			Name: "indexer_start_time_seconds",
 			Help: "Unix timestamp when indexer started",
 		}),
+		CurrentSyncHeight: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_current_sync_height",
+			Help: "Current block height being synced",
+		}),
 	}
 }
 
@@ -290,8 +295,5 @@ func (m *Metrics) RecordStartTime() {
 
 // UpdateCurrentSyncHeight updates the current sync height gauge
 func (m *Metrics) UpdateCurrentSyncHeight(height int64) {
-	// 使用现有的 SequencerBufferSize gauge 作为 current_sync_height
-	// 或者可以添加新的 gauge，这里暂时用 SequencerBufferSize 的 label 来记录
-	// 实际应该添加新的 gauge，但为了最小改动，这里只记录日志
-	// 如果需要完整实现，应该在 Metrics 结构体中添加 CurrentSyncHeight gauge
+	m.CurrentSyncHeight.Set(float64(height))
 }
