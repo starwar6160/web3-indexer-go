@@ -118,12 +118,18 @@ func (s *Sequencer) handleBlock(ctx context.Context, data BlockData) error {
 	s.buffer[blockNumStr] = data
 	
 	// Update metrics
-	s.metrics.UpdateSequencerBufferSize(len(s.buffer))
+	bufferSize := len(s.buffer)
+	s.metrics.UpdateSequencerBufferSize(bufferSize)
 	
-	// 如果buffer过大，可能是前面的区块丢失了，需要告警
-	if len(s.buffer) > 1000 {
-		LogBufferFull(len(s.buffer), s.expectedBlock.String())
-		return fmt.Errorf("sequencer buffer overflow: %d blocks pending", len(s.buffer))
+	// 分级告警：buffer 膨胀
+	if bufferSize > 500 {
+		LogBufferFull(bufferSize, s.expectedBlock.String())
+		s.metrics.RecordSequencerBufferFull()
+	}
+	
+	// 如果buffer过大，可能是前面的区块丢失了，需要致命告警
+	if bufferSize > 1000 {
+		return fmt.Errorf("sequencer buffer overflow: %d blocks pending", bufferSize)
 	}
 	
 	return nil

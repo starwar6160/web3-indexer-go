@@ -218,16 +218,60 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	
-	select {
-	case sig := <-sigCh:
-		engine.Logger.Info("shutdown_signal_received",
-			slog.String("signal", sig.String()),
-		)
-	case fatalErr := <-fatalErrCh:
-		engine.Logger.Error("fatal_error_received",
-			slog.String("error", fatalErr.Error()),
-		)
+	for {
+		select {
+		case sig := <-sigCh:
+			engine.Logger.Info("shutdown_signal_received",
+				slog.String("signal", sig.String()),
+			)
+			goto shutdown
+		case fatalErr := <-fatalErrCh:
+			engine.Logger.Error("fatal_error_received",
+				slog.String("error", fatalErr.Error()),
+			)
+			goto shutdown
+		case reorgEvent := <-reorgCh:
+			// 处理 reorg 事件：停止、回滚、重新调度
+			engine.Logger.Warn("reorg_event_received",
+				slog.String("at_block", reorgEvent.At.String()),
+			)
+			
+			// 停止 fetcher 防止继续写入
+			fetcher.Stop()
+			
+			// 计算共同祖先并回滚
+			ancestorNum, err := processor.HandleDeepReorg(ctx, reorgEvent.At)
+			if err != nil {
+				engine.Logger.Error("reorg_handling_failed",
+					slog.String("error", err.Error()),
+				)
+				goto shutdown
+			}
+			
+			// 从祖先+1 重新调度
+			resumeBlock := new(big.Int).Add(ancestorNum, big.NewInt(1))
+			resumeEndBlock := new(big.Int).Add(resumeBlock, big.NewInt(100))
+			
+			// 创建新的 fetcher（旧的已停止）
+			fetcher = engine.NewFetcher(rpcPool, 10)
+			fetcher.Start(ctx, &wg)
+			
+			if err := fetcher.Schedule(ctx, resumeBlock, resumeEndBlock); err != nil {
+				engine.Logger.Error("reorg_reschedule_failed",
+					slog.String("error", err.Error()),
+				)
+				goto shutdown
+			}
+			
+			engine.Logger.Info("reorg_recovery_complete",
+				slog.String("resume_block", resumeBlock.String()),
+				slog.String("resume_end_block", resumeEndBlock.String()),
+			)
+			// 继续循环等待下一个事件
+		}
 	}
+	
+shutdown:
 	
 	// 触发优雅关闭
 	engine.Logger.Info("shutdown_initiated")

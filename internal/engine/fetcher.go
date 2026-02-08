@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,8 +144,17 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 			break
 		}
 		
-		// 指数退避：100ms, 200ms, 400ms
-		backoff := time.Duration(100*(1<<retries)) * time.Millisecond
+		// 根据错误类型选择退避时间
+		// 429 (Too Many Requests) 需要更长的退避
+		var backoff time.Duration
+		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "too many requests") {
+			// 429 错误：1s, 2s, 4s（更长的退避）
+			backoff = time.Duration(1000*(1<<retries)) * time.Millisecond
+		} else {
+			// 其他错误：100ms, 200ms, 400ms
+			backoff = time.Duration(100*(1<<retries)) * time.Millisecond
+		}
+		
 		LogRPCRetry("BlockByNumber", retries+1, err)
 		select {
 		case <-time.After(backoff):

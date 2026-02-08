@@ -127,6 +127,8 @@ func (p *RPCClientPool) BlockByNumber(ctx context.Context, number *big.Int) (*ty
 	for attempts := 0; attempts < int(p.size); attempts++ {
 		node := p.getNextHealthyNode()
 		if node == nil {
+			// 所有节点都不健康，记录告警
+			log.Printf("⚠️ CRITICAL: All RPC nodes are unhealthy!")
 			return nil, fmt.Errorf("no healthy RPC nodes available")
 		}
 		

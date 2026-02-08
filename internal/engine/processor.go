@@ -116,6 +116,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	
 	block := data.Block
 	blockNum := block.Number()
+	start := time.Now()
 	log.Printf("Processing block: %s | Hash: %s", blockNum.String(), block.Hash().Hex())
 
 	// 开启事务 (ACID 核心)
@@ -195,6 +196,13 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 5. 提交事务
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
+	}
+	
+	// 记录处理耗时和当前同步高度
+	if p.metrics != nil {
+		p.metrics.RecordBlockProcessed(time.Since(start))
+		// 更新当前同步高度 gauge（用于监控）
+		p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
 	}
 	
 	return nil
