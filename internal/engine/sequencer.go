@@ -3,10 +3,14 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"math/big"
+	"sort"
 	"sync"
+	"time"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // ReorgEvent 表示检测到的 reorg 事件
@@ -17,13 +21,13 @@ type ReorgEvent struct {
 // Sequencer 确保区块按顺序处理，解决并发抓取导致的乱序问题
 type Sequencer struct {
 	expectedBlock *big.Int             // 下一个期望处理的区块号
-	buffer        map[string]BlockData // 区块号 -> 数据的缓冲区 (使用string作为key避免big.Int比较问题)
+	buffer        map[string]BlockData // 区块号 -> 数据的缓冲区
 	processor     *Processor           // 实际处理器
 	fetcher       *Fetcher             // 用于Reorg时暂停抓取
 	mu            sync.RWMutex         // 保护buffer和expectedBlock
 	resultCh      <-chan BlockData     // 输入channel
 	fatalErrCh    chan<- error         // 致命错误通知channel
-	reorgCh       chan<- ReorgEvent    // reorg 事件通知channel（可选）
+	reorgCh       chan<- ReorgEvent    // reorg 事件通知channel
 	chainID       int64                // 链ID用于checkpoint
 	metrics       *Metrics             // Prometheus metrics
 }
@@ -40,7 +44,6 @@ func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resu
 	}
 }
 
-// NewSequencerWithFetcher 创建带 Fetcher 控制的 Sequencer（推荐用于 Reorg 处理）
 func NewSequencerWithFetcher(processor *Processor, fetcher *Fetcher, startBlock *big.Int, chainID int64, resultCh <-chan BlockData, fatalErrCh chan<- error, reorgCh chan<- ReorgEvent, metrics *Metrics) *Sequencer {
 	return &Sequencer{
 		expectedBlock: new(big.Int).Set(startBlock),
@@ -55,39 +58,67 @@ func NewSequencerWithFetcher(processor *Processor, fetcher *Fetcher, startBlock 
 	}
 }
 
-// Run 启动排序处理器，按顺序处理区块
 func (s *Sequencer) Run(ctx context.Context) {
 	Logger.Info("🚀 Sequencer started. Expected block: " + s.expectedBlock.String())
-	Logger.Info("📢 [Sequencer] 正在等待来自 Fetcher 的区块数据...",
-		slog.String("expected_block", s.expectedBlock.String()),
-	)
-
-	// 标记Sequencer已初始化
-	initialized := true
-	_ = initialized
 
 	for {
 		select {
 		case <-ctx.Done():
-			Logger.Info("Sequencer shutting down. Buffer size: " + fmt.Sprintf("%d", len(s.buffer)))
 			return
 
 		case data, ok := <-s.resultCh:
 			if !ok {
-				// channel关闭，尝试清空buffer
-				log.Printf("⚠️ Sequencer: resultCh closed, draining buffer...")
 				s.drainBuffer(ctx)
 				return
 			}
 
-			log.Printf("📦 Sequencer received block: %s", data.Block.Number().String())
+			// 收集一个批次的连续区块进行批量处理
+			batch := []BlockData{data}
+			maxBatchSize := 100
+			
+			// 给予一个小小的等待时间（10ms），让更多块进入 channel
+			// 这能显著提升批量处理的机会
+			timeout := time.After(10 * time.Millisecond)
+			
+		collect_loop:
+			for len(batch) < maxBatchSize {
+				select {
+				case nextData, ok := <-s.resultCh:
+					if !ok {
+						break collect_loop
+					}
+					batch = append(batch, nextData)
+				case <-timeout:
+					break collect_loop
+				default:
+					if len(batch) > 0 {
+						// 如果已经有数据了，且目前没新数据，稍微等一下或者直接出场
+						// 这里我们选择直接出场，由 timeout 保证最低等待
+					}
+				}
+			}
 
-			if err := s.handleBlock(ctx, data); err != nil {
-				log.Printf("❌ Sequencer error handling block: %v", err)
-				// 致命错误，通知外层关闭
+			// 关键优化：对批次进行排序，以最大化顺序处理的可能性
+			// 因为并发 fetcher 会导致乱序到达
+			sort.Slice(batch, func(i, j int) bool {
+				n1 := batch[i].Number
+				if n1 == nil && batch[i].Block != nil {
+					n1 = batch[i].Block.Number()
+				}
+				n2 := batch[j].Number
+				if n2 == nil && batch[j].Block != nil {
+					n2 = batch[j].Block.Number()
+				}
+				
+				if n1 == nil { return true } // nil first (error handling)
+				if n2 == nil { return false }
+				
+				return n1.Cmp(n2) < 0
+			})
+
+			if err := s.handleBatch(ctx, batch); err != nil {
 				select {
 				case s.fatalErrCh <- err:
-					log.Printf("📢 Sent fatal error to fatalErrCh")
 				case <-ctx.Done():
 				}
 				return
@@ -96,127 +127,152 @@ func (s *Sequencer) Run(ctx context.Context) {
 	}
 }
 
-// handleBlock 处理单个区块数据，维护顺序性
-func (s *Sequencer) handleBlock(ctx context.Context, data BlockData) error {
-	if data.Err != nil {
-		return fmt.Errorf("fetch error for block: %w", data.Err)
-	}
-
-	blockNum := data.Block.Number()
-	blockNumStr := blockNum.String()
-
+func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 如果这个区块正是我们期望的下一个，立即处理
-	if blockNum.Cmp(s.expectedBlock) == 0 {
-		if err := s.processSequential(ctx, data); err != nil {
-			return err
+	i := 0
+	for i < len(batch) {
+		data := batch[i]
+		blockNum := data.Number
+		if blockNum == nil && data.Block != nil {
+			blockNum = data.Block.Number()
 		}
 
-		// 检查buffer中是否有连续的后续区块可以处理
-		s.processBufferContinuations(ctx)
-		return nil
+		// 尝试批量顺序处理
+		if blockNum != nil && blockNum.Cmp(s.expectedBlock) == 0 {
+			sequentialBatch := []BlockData{data}
+			nextExpected := new(big.Int).Add(s.expectedBlock, big.NewInt(1))
+			
+			j := i + 1
+			for j < len(batch) {
+				nNum := batch[j].Number
+				if nNum == nil && batch[j].Block != nil {
+					nNum = batch[j].Block.Number()
+				}
+				
+				if nNum != nil && nNum.Cmp(nextExpected) == 0 {
+					sequentialBatch = append(sequentialBatch, batch[j])
+					nextExpected.Add(nextExpected, big.NewInt(1))
+					j++
+				} else {
+					break
+				}
+			}
+
+			if len(sequentialBatch) > 1 {
+				Logger.Info("sequencer_processing_batch", 
+					slog.Int("size", len(sequentialBatch)),
+					slog.String("from", sequentialBatch[0].Number.String()),
+					slog.String("to", sequentialBatch[len(sequentialBatch)-1].Number.String()),
+				)
+				if err := s.processor.ProcessBatch(ctx, sequentialBatch, s.chainID); err != nil {
+					return err
+				}
+				s.expectedBlock.Set(nextExpected)
+				i = j
+				s.processBufferContinuationsLocked(ctx)
+				continue
+			}
+		}
+
+		if err := s.handleBlockLocked(ctx, data); err != nil {
+			return err
+		}
+		i++
 	}
-
-	// 如果区块号小于期望的，说明已经处理过了，跳过
-	if blockNum.Cmp(s.expectedBlock) < 0 {
-		log.Printf("Skipping duplicate/late block %s (expected %s)", blockNumStr, s.expectedBlock.String())
-		return nil
-	}
-
-	// 区块号大于期望的，存入buffer等待
-	log.Printf("Buffering out-of-order block %s (expected %s). Buffer size: %d",
-		blockNumStr, s.expectedBlock.String(), len(s.buffer)+1)
-	s.buffer[blockNumStr] = data
-
-	// Update metrics
-	bufferSize := len(s.buffer)
-	s.metrics.UpdateSequencerBufferSize(bufferSize)
-
-	// 分级告警：buffer 膨胀
-	if bufferSize > 500 {
-		LogBufferFull(bufferSize, s.expectedBlock.String())
-		s.metrics.RecordSequencerBufferFull()
-	}
-
-	// 如果buffer过大，可能是前面的区块丢失了，需要致命告警
-	if bufferSize > 1000 {
-		return fmt.Errorf("sequencer buffer overflow: %d blocks pending", bufferSize)
-	}
-
 	return nil
 }
 
-// processSequential 按顺序处理区块并更新checkpoint
-func (s *Sequencer) processSequential(ctx context.Context, data BlockData) error {
-	blockNum := data.Block.Number()
+func (s *Sequencer) handleBlock(ctx context.Context, data BlockData) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handleBlockLocked(ctx, data)
+}
 
-	// 执行处理（带重试）
-	if err := s.processor.ProcessBlockWithRetry(ctx, data, 3); err != nil {
-		// 区分reorg错误和致命错误
-		if _, ok := err.(ReorgError); ok {
-			// reorg需要特殊处理：清空buffer，重置expected block，发送事件
-			return s.handleReorg(ctx, data)
-		}
-		return fmt.Errorf("failed to process block %s: %w", blockNum.String(), err)
+func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error {
+	blockNum := data.Number
+	if blockNum == nil && data.Block != nil {
+		blockNum = data.Block.Number()
 	}
 
-	// 成功处理后推进期望值
+	if data.Err != nil {
+		Logger.Warn("sequencer_fetch_error_retrying", slog.String("block", blockNum.String()))
+		if blockNum != nil {
+			var err error
+			data.Block, err = s.processor.client.BlockByNumber(ctx, blockNum)
+			if err == nil {
+				q := ethereum.FilterQuery{FromBlock: blockNum, ToBlock: blockNum, Topics: [][]common.Hash{{TransferEventHash}}}
+				data.Logs, err = s.processor.client.FilterLogs(ctx, q)
+				if err == nil {
+					data.Err = nil
+					Logger.Info("sequencer_retry_success", slog.String("block", blockNum.String()))
+				}
+			}
+		}
+		if data.Err != nil {
+			return fmt.Errorf("fetch error for block %s: %w", blockNum.String(), data.Err)
+		}
+	}
+
+	blockNum = data.Block.Number()
+	if blockNum.Cmp(s.expectedBlock) == 0 {
+		if err := s.processSequentialLocked(ctx, data); err != nil {
+			return err
+		}
+		s.processBufferContinuationsLocked(ctx)
+		return nil
+	}
+
+	if blockNum.Cmp(s.expectedBlock) < 0 {
+		return nil
+	}
+
+	s.buffer[blockNum.String()] = data
+	if len(s.buffer) > 1000 {
+		return fmt.Errorf("sequencer buffer overflow: %d blocks", len(s.buffer))
+	}
+	return nil
+}
+
+func (s *Sequencer) processSequentialLocked(ctx context.Context, data BlockData) error {
+	if err := s.processor.ProcessBlockWithRetry(ctx, data, 3); err != nil {
+		if _, ok := err.(ReorgError); ok {
+			return s.handleReorgLocked(ctx, data)
+		}
+		return err
+	}
 	s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
 	return nil
 }
 
-// processBufferContinuations 处理buffer中连续的区块
-func (s *Sequencer) processBufferContinuations(ctx context.Context) {
+func (s *Sequencer) processBufferContinuationsLocked(ctx context.Context) {
 	for {
 		nextNumStr := s.expectedBlock.String()
 		data, exists := s.buffer[nextNumStr]
 		if !exists {
 			break
 		}
-
 		delete(s.buffer, nextNumStr)
-
-		if err := s.processSequential(ctx, data); err != nil {
-			// 记录错误但不中断，让外层通过channel处理
-			log.Printf("Error processing buffered block %s: %v", nextNumStr, err)
-			// 放回buffer稍后重试
+		if err := s.processSequentialLocked(ctx, data); err != nil {
 			s.buffer[nextNumStr] = data
 			break
 		}
-
-		log.Printf("Processed buffered block %s", nextNumStr)
-		LogBlockProcessing(nextNumStr, data.Block.Hash().Hex(), 0)
 	}
 }
 
-// handleReorg 处理重组事件
-func (s *Sequencer) handleReorg(ctx context.Context, data BlockData) error {
+func (s *Sequencer) handleReorgLocked(ctx context.Context, data BlockData) error {
 	blockNum := data.Block.Number()
-
-	// 暂停 Fetcher 防止继续写入旧分叉数据
 	if s.fetcher != nil {
 		s.fetcher.Pause()
 	}
-
-	// 清空所有大于等于当前区块的buffer数据（这些可能是旧分叉的数据）
-	toDelete := []string{}
 	for numStr := range s.buffer {
-		num := new(big.Int)
-		num.SetString(numStr, 10)
+		num, _ := new(big.Int).SetString(numStr, 10)
 		if num.Cmp(blockNum) >= 0 {
-			toDelete = append(toDelete, numStr)
+			delete(s.buffer, numStr)
 		}
 	}
-	for _, numStr := range toDelete {
-		delete(s.buffer, numStr)
-	}
-
-	// 重置expected block到reorg点
 	s.expectedBlock.Set(blockNum)
-
-	// 发送 reorg 事件给 main（如果有 reorgCh）
 	if s.reorgCh != nil {
 		select {
 		case s.reorgCh <- ReorgEvent{At: new(big.Int).Set(blockNum)}:
@@ -224,43 +280,21 @@ func (s *Sequencer) handleReorg(ctx context.Context, data BlockData) error {
 			return ctx.Err()
 		}
 	}
-
-	// 返回特殊错误，通知外层需要重新调度fetch
 	return ErrReorgNeedRefetch
 }
 
-// drainBuffer 尝试在关闭前清空buffer
 func (s *Sequencer) drainBuffer(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	for len(s.buffer) > 0 {
-		nextNumStr := s.expectedBlock.String()
-		data, exists := s.buffer[nextNumStr]
-		if !exists {
-			log.Printf("Cannot drain buffer: missing block %s, remaining: %d", nextNumStr, len(s.buffer))
-			return
-		}
-
-		delete(s.buffer, nextNumStr)
-
-		if err := s.processor.ProcessBlockWithRetry(ctx, data, 3); err != nil {
-			log.Printf("Failed to drain block %s: %v", nextNumStr, err)
-			return
-		}
-
-		s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
-	}
+	s.processBufferContinuationsLocked(ctx)
 }
 
-// GetExpectedBlock 返回当前期望的区块号（用于外部监控）
 func (s *Sequencer) GetExpectedBlock() *big.Int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return new(big.Int).Set(s.expectedBlock)
 }
 
-// GetBufferSize 返回当前缓冲区大小（用于外部监控）
 func (s *Sequencer) GetBufferSize() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
