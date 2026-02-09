@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -675,16 +676,27 @@ func main() {
 	// Start Prometheus metrics server
 	mux.Handle("/metrics", promhttp.Handler())
 
+	// 获取 API 端口（从环境变量或默认值）
+	apiPort := os.Getenv("API_PORT")
+	if apiPort == "" {
+		apiPort = "8080"
+	}
+	apiAddr := ":" + apiPort
+
 	// 创建 HTTP server 用于优雅关闭
 	httpServer := &http.Server{
-		Addr:    ":8080",
+		Addr:    apiAddr,
 		Handler: mux,
 	}
 
 	// 检查端口冲突
-	if err := checkPortAvailable(8080); err != nil {
+	portNum := 8080
+	if p, err := strconv.Atoi(apiPort); err == nil {
+		portNum = p
+	}
+	if err := checkPortAvailable(portNum); err != nil {
 		engine.Logger.Error("port_conflict",
-			slog.Int("port", 8080),
+			slog.Int("port", portNum),
 			slog.String("error", err.Error()),
 		)
 		os.Exit(1)
@@ -693,10 +705,10 @@ func main() {
 	// 在 goroutine 中启动 HTTP server
 	go func() {
 		engine.Logger.Info("http_server_started",
-			slog.String("port", "8080"),
-			slog.String("health_endpoint", "http://localhost:8080/healthz"),
-			slog.String("metrics_endpoint", "http://localhost:8080/metrics"),
-			slog.String("dashboard_url", "http://localhost:8080"),
+			slog.String("port", apiPort),
+			slog.String("health_endpoint", "http://localhost:"+apiPort+"/healthz"),
+			slog.String("metrics_endpoint", "http://localhost:"+apiPort+"/metrics"),
+			slog.String("dashboard_url", "http://localhost:"+apiPort),
 		)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			engine.Logger.Error("http_server_error",
@@ -791,7 +803,7 @@ func main() {
 	engine.Logger.Info("smart_sleep_system_enabled",
 		slog.Duration("demo_duration", 5*time.Minute),
 		slog.Duration("idle_timeout", 10*time.Minute),
-		slog.String("dashboard_url", "http://localhost:8080"),
+		slog.String("dashboard_url", "http://localhost:"+apiPort),
 	)
 
 	// 7. 优雅退出处理
