@@ -40,6 +40,7 @@ type Processor struct {
 	client           RPCClient // RPC client interface for reorg recovery
 	metrics          *Metrics  // Prometheus metrics
 	watchedAddresses map[common.Address]bool
+	EventHook        func(eventType string, data interface{}) // 实时事件回调
 }
 
 func NewProcessor(db *sqlx.DB, client RPCClient) *Processor {
