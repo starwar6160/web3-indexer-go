@@ -49,7 +49,7 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:  make(chan WSEvent),
+		broadcast:  make(chan WSEvent, 1024), // 增加缓冲区防止丢消息
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		clients:    make(map[*Client]bool),
@@ -63,13 +63,13 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
-			h.logger.Debug("ws_client_connected", slog.Int("total_clients", len(h.clients)))
+			h.logger.Info("ws_client_connected", slog.Int("total_clients", len(h.clients)))
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
-				h.logger.Debug("ws_client_disconnected", slog.Int("total_clients", len(h.clients)))
+				h.logger.Info("ws_client_disconnected", slog.Int("total_clients", len(h.clients)))
 			}
 
 		case event := <-h.broadcast:
@@ -81,11 +81,16 @@ func (h *Hub) Run() {
 			}
 
 			// 广播给所有客户端
+			if len(h.clients) == 0 {
+				h.logger.Debug("ws_no_clients_dropping_broadcast", slog.String("type", event.Type))
+				continue
+			}
+
 			for client := range h.clients {
 				select {
 				case client.send <- message:
 				default:
-					// 如果客户端阻塞，直接断开，防止拖累整个系统
+					h.logger.Warn("ws_client_blocked_dropping_client")
 					close(client.send)
 					delete(h.clients, client)
 				}
@@ -100,7 +105,7 @@ func (h *Hub) Broadcast(event WSEvent) {
 	case h.broadcast <- event:
 	default:
 		// 如果 Hub 处理不过来，丢弃消息，保证 Indexer 核心不卡死
-		h.logger.Warn("ws_hub_blocked_dropping_message")
+		h.logger.Warn("ws_hub_blocked_dropping_message", slog.String("type", event.Type))
 	}
 }
 

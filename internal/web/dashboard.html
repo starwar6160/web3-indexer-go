@@ -140,6 +140,23 @@
 
             // 3. 建立 WebSocket
             connectWS();
+
+            // 4. 定期刷新状态，保持后端活跃 (StateManager Keep-alive)
+            setInterval(async () => {
+                try {
+                    const res = await fetch('/api/status');
+                    const data = await res.json();
+                    updateStats(data);
+                    
+                    // 如果状态变回了 IDLE，尝试提醒用户或自动重新激活
+                    if (data.state === 'idle') {
+                        console.warn("Backend went idle, re-activating...");
+                        fetch('/api/admin/start-demo', { method: 'POST' });
+                    }
+                } catch (e) {
+                    console.error("Keep-alive failed", e);
+                }
+            }, 30000); // 每 30 秒访问一次
         }
 
         function connectWS() {
@@ -199,10 +216,12 @@
             
             // 兼容 API 和 WS 不同的字段名
             const blockNum = t.block_number || t.blockNumber || "0";
-            const from = t.from || t.from_address || "0x...";
-            const to = t.to || t.to_address || "0x...";
-            const value = t.value || t.amount || "0";
-            const isSynthetic = t.is_synthetic || t.log_index === 0 || false;
+            const from = t.from || t.from_address || t.From || "0x...";
+            const to = t.to || t.to_address || t.To || "0x...";
+            const value = t.value || t.amount || t.Amount || "0";
+            const logIndex = (t.log_index !== undefined) ? t.log_index : 
+                             (t.logIndex !== undefined) ? t.logIndex : 0;
+            const isSynthetic = t.is_synthetic || logIndex >= 10000;
 
             const typeClass = isSynthetic ? 'badge-synthetic' : 'badge-real';
             const typeText = isSynthetic ? 'SYNTH' : 'REAL';
