@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"web3-indexer-go/internal/config"
+	"web3-indexer-go/internal/emulator"
 	"web3-indexer-go/internal/engine"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // PGX Driver
@@ -391,19 +393,85 @@ func main() {
 	fetcher := engine.NewFetcher(rpcPool, 10)     // 10 workers, 100 rps limit
 	processor := engine.NewProcessor(db, rpcPool) // 传入RPC池用于reorg恢复
 
-	// Set watched addresses for contract monitoring
-	if watchAddresses := os.Getenv("WATCH_ADDRESSES"); watchAddresses != "" {
-		// Parse comma-separated addresses
-		addresses := strings.Split(watchAddresses, ",")
-		fetcher.SetWatchedAddresses(addresses)
-		engine.Logger.Info("watched_addresses_configured",
-			slog.Int("count", len(addresses)),
-			slog.String("addresses", watchAddresses),
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+
+	// 4. 初始化仿真引擎（如果启用）
+	var emulatorInstance *emulator.Emulator
+	emulatorAddrChan := make(chan common.Address, 1)
+
+	emuConfig := emulator.LoadConfig()
+	if emuConfig.Enabled && emuConfig.IsValid() {
+		engine.Logger.Info("emulator_config_loaded",
+			slog.String("rpc_url", emuConfig.RpcURL),
+			slog.Duration("block_interval", emuConfig.BlockInterval),
+			slog.Duration("tx_interval", emuConfig.TxInterval),
+		)
+
+		var err error
+		emulatorInstance, err = emulator.NewEmulator(emuConfig.RpcURL, emuConfig.PrivateKey)
+		if err != nil {
+			engine.Logger.Error("emulator_initialization_failed",
+				slog.String("error", err.Error()),
+			)
+			// 不中断主程序，仅记录警告
+		} else {
+			// 配置仿真器参数
+			emulatorInstance.SetBlockInterval(emuConfig.BlockInterval)
+			emulatorInstance.SetTxInterval(emuConfig.TxInterval)
+
+			// 在后台启动仿真引擎
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := emulatorInstance.Start(ctx, emulatorAddrChan); err != nil {
+					engine.Logger.Error("emulator_runtime_error",
+						slog.String("error", err.Error()),
+					)
+				}
+			}()
+
+			engine.Logger.Info("emulator_started_in_background")
+		}
+	} else if os.Getenv("EMULATOR_ENABLED") == "true" {
+		engine.Logger.Warn("emulator_enabled_but_not_configured",
+			slog.String("hint", "Set EMULATOR_RPC_URL and EMULATOR_PRIVATE_KEY"),
 		)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
+	// 5. 从仿真器或环境变量获取监控地址
+	watchedAddresses := []string{}
+
+	// 优先从仿真器获取动态部署的合约地址
+	select {
+	case deployedAddr := <-emulatorAddrChan:
+		watchedAddresses = append(watchedAddresses, deployedAddr.Hex())
+		engine.Logger.Info("contract_address_from_emulator",
+			slog.String("address", deployedAddr.Hex()),
+		)
+	case <-time.After(2 * time.Second):
+		// 超时，继续使用环境变量配置
+	}
+
+	// 从环境变量添加额外的监控地址
+	if watchAddressesEnv := os.Getenv("WATCH_ADDRESSES"); watchAddressesEnv != "" {
+		envAddresses := strings.Split(watchAddressesEnv, ",")
+		for _, addr := range envAddresses {
+			addr = strings.TrimSpace(addr)
+			if addr != "" {
+				watchedAddresses = append(watchedAddresses, addr)
+			}
+		}
+	}
+
+	// 设置监控地址
+	if len(watchedAddresses) > 0 {
+		fetcher.SetWatchedAddresses(watchedAddresses)
+		engine.Logger.Info("watched_addresses_configured",
+			slog.Int("count", len(watchedAddresses)),
+			slog.String("addresses", strings.Join(watchedAddresses, ", ")),
+		)
+	}
 
 	// 致命错误通道 - 用于触发优雅关闭
 	fatalErrCh := make(chan error, 1)
