@@ -516,6 +516,32 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
 
+	// 6. 实时事件推送 (在事务成功后)
+	if p.EventHook != nil {
+		for _, data := range blocks {
+			if data.Err != nil {
+				continue
+			}
+			block := data.Block
+			p.EventHook("block", map[string]interface{}{
+				"number":    block.NumberU64(),
+				"hash":      block.Hash().Hex(),
+				"timestamp": block.Time(),
+				"tx_count":  len(block.Transactions()),
+			})
+		}
+		for _, t := range validTransfers {
+			p.EventHook("transfer", map[string]interface{}{
+				"tx_hash":       t.TxHash,
+				"from":          t.From,
+				"to":            t.To,
+				"value":         t.Amount.String(),
+				"block_number":  t.BlockNumber.String(),
+				"token_address": t.TokenAddress,
+			})
+		}
+	}
+
 	return nil
 }
 
