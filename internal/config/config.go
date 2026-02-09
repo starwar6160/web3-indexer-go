@@ -11,14 +11,16 @@ import (
 )
 
 type Config struct {
-	DatabaseURL string
-	RPCURLs     []string // 支持多个RPC URL
-	WSSURL      string
-	ChainID     int64
-	StartBlock  int64
-	LogLevel    string
-	LogFormat   string
-	RPCTimeout  time.Duration // RPC超时配置
+	DatabaseURL      string
+	RPCURLs          []string // 支持多个RPC URL
+	WSSURL           string
+	ChainID          int64
+	StartBlock       int64
+	LogLevel         string
+	LogFormat        string
+	RPCTimeout       time.Duration // RPC超时配置
+	FetchConcurrency int           // 并发抓取数
+	FetchBatchSize   int           // 批量处理大小
 }
 
 func Load() *Config {
@@ -34,15 +36,21 @@ func Load() *Config {
 	// 解析RPC超时（默认10秒）
 	rpcTimeoutSeconds := getEnvAsInt64("RPC_TIMEOUT_SECONDS", 10)
 
+	// 并发配置
+	fetchConcurrency := int(getEnvAsInt64("FETCH_CONCURRENCY", 10))
+	fetchBatchSize := int(getEnvAsInt64("FETCH_BATCH_SIZE", 200))
+
 	return &Config{
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
-		RPCURLs:     rpcUrls,
-		WSSURL:      getEnv("WSS_URL", ""),
-		ChainID:     getEnvAsInt64("CHAIN_ID", 1),
-		StartBlock:  getEnvAsInt64("START_BLOCK", 10000000), // 默认从1000万开始，避免从0同步
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		LogFormat:   getEnv("LOG_FORMAT", "json"),
-		RPCTimeout:  time.Duration(rpcTimeoutSeconds) * time.Second,
+		DatabaseURL:      getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
+		RPCURLs:          rpcUrls,
+		WSSURL:           getEnv("WSS_URL", ""),
+		ChainID:          getEnvAsInt64("CHAIN_ID", 1),
+		StartBlock:       getEnvAsInt64("START_BLOCK", 10000000), // 默认从1000万开始，避免从0同步
+		LogLevel:         getEnv("LOG_LEVEL", "info"),
+		LogFormat:        getEnv("LOG_FORMAT", "json"),
+		RPCTimeout:       time.Duration(rpcTimeoutSeconds) * time.Second,
+		FetchConcurrency: fetchConcurrency,
+		FetchBatchSize:   fetchBatchSize,
 	}
 }
 

@@ -16,9 +16,10 @@ import (
 )
 
 type BlockData struct {
-	Block *types.Block
-	Logs  []types.Log
-	Err   error
+	Number *big.Int
+	Block  *types.Block
+	Logs   []types.Log
+	Err    error
 }
 
 type Fetcher struct {
@@ -40,8 +41,8 @@ type Fetcher struct {
 }
 
 func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
-	// 默认限制：每秒100个请求，突发200
-	limiter := rate.NewLimiter(rate.Limit(100), 200)
+	// 彻底关闭限速
+	limiter := rate.NewLimiter(rate.Inf, 0)
 
 	f := &Fetcher{
 		pool:        pool,
@@ -131,7 +132,7 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 			// 等待速率限制令牌
 			if err := f.limiter.Wait(ctx); err != nil {
 				select {
-				case f.Results <- BlockData{Err: err}:
+				case f.Results <- BlockData{Number: bn, Err: err}:
 				case <-ctx.Done():
 					return
 				case <-f.stopCh:
@@ -144,7 +145,7 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 			block, logs, err := f.fetchBlockWithLogs(ctx, bn)
 
 			select {
-			case f.Results <- BlockData{Block: block, Logs: logs, Err: err}:
+			case f.Results <- BlockData{Number: bn, Block: block, Logs: logs, Err: err}:
 			case <-ctx.Done():
 				return
 			case <-f.stopCh:

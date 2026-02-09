@@ -46,7 +46,7 @@ func NewRPCClientPoolWithTimeout(urls []string, timeout time.Duration) (*RPCClie
 
 	pool := &RPCClientPool{
 		clients:     make([]*rpcNode, 0, len(urls)),
-		rateLimiter: rate.NewLimiter(5, 10), // 令牌桶限速器：每秒5个请求，突发容量10个
+		rateLimiter: rate.NewLimiter(rate.Inf, 0), // 彻底关闭限速
 	}
 
 	for _, url := range urls {
@@ -347,4 +347,10 @@ func (p *RPCClientPool) GetTotalNodeCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return len(p.clients)
+}
+
+// SetRateLimit 动态设置限速
+func (p *RPCClientPool) SetRateLimit(rps int, burst int) {
+	p.rateLimiter.SetLimit(rate.Limit(rps))
+	p.rateLimiter.SetBurst(burst)
 }
