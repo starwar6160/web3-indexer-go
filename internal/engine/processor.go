@@ -183,6 +183,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	}
 
 	// 3. 处理 Transfer 事件（如果日志中有）
+	var transfers []models.Transfer         // 用于实时推送
 	txWithRealLogs := make(map[string]bool) // track tx hashes that produced real Transfer logs
 	if len(data.Logs) > 0 {
 		Logger.Debug("scanning_logs",
@@ -249,6 +250,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 						return fmt.Errorf("failed to insert transfer at block %s: %w", blockNum.String(), err)
 					}
 					txWithRealLogs[transfer.TxHash] = true
+					transfers = append(transfers, *transfer)
 					Logger.Info("✅ Transfer saved to DB",
 						slog.String("stage", "PROCESSOR"),
 						slog.String("block", blockNum.String()),
@@ -313,6 +315,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 					ON CONFLICT (block_number, log_index) DO NOTHING
 				`, syntheticTransfer)
 				if err == nil {
+					transfers = append(transfers, *syntheticTransfer)
 					Logger.Info("✅ Synthetic Transfer saved to DB",
 						slog.String("stage", "PROCESSOR"),
 						slog.String("tx_hash", tx.Hash().Hex()),
@@ -331,6 +334,27 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	if err := dbTx.Commit(); err != nil {
 		LogTransactionFailed("commit_transaction", blockNum.String(), err)
 		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
+	}
+
+	// 6. 实时事件推送 (在事务成功后)
+	if p.EventHook != nil {
+		p.EventHook("block", map[string]interface{}{
+			"number":    block.NumberU64(),
+			"hash":      block.Hash().Hex(),
+			"timestamp": block.Time(),
+			"tx_count":  len(block.Transactions()),
+		})
+		for _, t := range transfers {
+			p.EventHook("transfer", map[string]interface{}{
+				"tx_hash":       t.TxHash,
+				"from":          t.From,
+				"to":            t.To,
+				"value":         t.Amount.String(),
+				"block_number":  t.BlockNumber.String(),
+				"token_address": t.TokenAddress,
+				"log_index":     t.LogIndex,
+			})
+		}
 	}
 
 	// 记录处理耗时 and 当前同步高度
@@ -538,6 +562,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 				"value":         t.Amount.String(),
 				"block_number":  t.BlockNumber.String(),
 				"token_address": t.TokenAddress,
+				"log_index":     t.LogIndex,
 			})
 		}
 	}
