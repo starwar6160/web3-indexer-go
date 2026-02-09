@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/big"
 	"strings"
 	"time"
@@ -112,10 +112,13 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	block := data.Block
 	blockNum := block.Number()
 	start := time.Now()
-	log.Printf("Processing block: %s | Hash: %s", blockNum.String(), block.Hash().Hex())
+	Logger.Debug("processing_block", 
+		slog.String("block", blockNum.String()), 
+		slog.String("hash", block.Hash().Hex()),
+	)
 
 	// 开启事务 (ACID 核心)
-	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		LogTransactionFailed("begin_transaction", blockNum.String(), err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -166,17 +169,25 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 	// 3. 处理 Transfer 事件（如果日志中有）
 	if len(data.Logs) > 0 {
-		log.Printf("🔍 Block %s contains %d logs, scanning for Transfer events...", blockNum.String(), len(data.Logs))
+		Logger.Debug("scanning_logs",
+			slog.String("block", blockNum.String()),
+			slog.Int("logs_count", len(data.Logs)),
+		)
 	}
 
 	for i, vLog := range data.Logs {
-		log.Printf("  📋 Log %d: Contract=%s, Topics=%d, Data=%d bytes",
-			i, vLog.Address.Hex(), len(vLog.Topics), len(vLog.Data))
+		Logger.Debug("processing_log",
+			slog.Int("index", i),
+			slog.String("contract", vLog.Address.Hex()),
+		)
 
 		transfer := p.ExtractTransfer(vLog)
 		if transfer != nil {
-			log.Printf("  🎯 Found Transfer event! From=%s To=%s Amount=%s",
-				transfer.From, transfer.To, transfer.Amount.String())
+			Logger.Info("transfer_found",
+				slog.String("from", transfer.From),
+				slog.String("to", transfer.To),
+				slog.String("amount", transfer.Amount.String()),
+			)
 
 			_, err = tx.NamedExecContext(ctx, `
 				INSERT INTO transfers 
@@ -192,7 +203,10 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			if err != nil {
 				return fmt.Errorf("failed to insert transfer at block %s: %w", blockNum.String(), err)
 			}
-			log.Printf("  ✅ Transfer saved to DB: Block=%s TxHash=%s", blockNum.String(), transfer.TxHash)
+			Logger.Debug("transfer_saved",
+				slog.String("block", blockNum.String()),
+				slog.String("tx_hash", transfer.TxHash),
+			)
 		}
 	}
 
@@ -309,7 +323,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		return nil
 	}
 
-	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return fmt.Errorf("failed to begin batch transaction: %w", err)
 	}
@@ -342,7 +356,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 // FindCommonAncestor 递归查找共同祖先（处理深度重组）
 // 返回共同祖先的区块号和哈希，以及需要删除的区块列表
 func (p *Processor) FindCommonAncestor(ctx context.Context, blockNum *big.Int) (*big.Int, string, []*big.Int, error) {
-	log.Printf("🔍 Finding common ancestor from block %s", blockNum.String())
+	Logger.Info("finding_common_ancestor", slog.String("from_block", blockNum.String()))
 
 	toDelete := []*big.Int{}
 	currentNum := new(big.Int).Set(blockNum)
@@ -373,8 +387,10 @@ func (p *Processor) FindCommonAncestor(ctx context.Context, blockNum *big.Int) (
 		// 检查哈希是否匹配
 		if strings.ToLower(localBlock.Hash) == strings.ToLower(rpcBlock.Hash().Hex()) {
 			// 找到共同祖先！
-			log.Printf("✅ Common ancestor found at block %s (hash: %s)",
-				currentNum.String(), localBlock.Hash)
+			Logger.Info("common_ancestor_found",
+				slog.String("block", currentNum.String()),
+				slog.String("hash", localBlock.Hash),
+			)
 			return currentNum, localBlock.Hash, toDelete, nil
 		}
 
@@ -401,7 +417,7 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 	LogReorgHandled(len(toDelete), ancestorNum.String())
 
 	// 在单个事务内执行回滚（保证原子性）
-	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin reorg transaction: %w", err)
 	}
@@ -440,8 +456,9 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 		return nil, fmt.Errorf("failed to commit reorg transaction: %w", err)
 	}
 
-	log.Printf("✅ Deep reorg handled. Safe to resume from block %s",
-		new(big.Int).Add(ancestorNum, big.NewInt(1)).String())
+	Logger.Info("deep_reorg_handled",
+		slog.String("resume_block", new(big.Int).Add(ancestorNum, big.NewInt(1)).String()),
+	)
 
 	return ancestorNum, nil
 }
