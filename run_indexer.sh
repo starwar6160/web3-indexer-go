@@ -7,6 +7,15 @@ set -e
 
 cd "$(dirname "$0")"
 
+# Make sure the database container is running so we can authenticate
+docker compose up -d db > /dev/null
+echo "⏳ Waiting for PostgreSQL to become healthy..."
+set +e
+until docker compose exec db pg_isready -U postgres >/dev/null 2>&1; do
+  sleep 1
+done
+set -e
+
 echo "🚀 启动 Web3 Indexer（持续运行模式 - 天网原型）..."
 echo "📍 配置："
 echo "   - CONTINUOUS_MODE: true（永不休眠）"

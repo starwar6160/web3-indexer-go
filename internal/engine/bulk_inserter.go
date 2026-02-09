@@ -2,12 +2,18 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+
+	"web3-indexer-go/internal/models"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jmoiron/sqlx"
-	"web3-indexer-go/internal/models"
 )
+
+type execer interface {
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
 
 // BulkInserter 使用 PostgreSQL COPY 协议进行高效批量插入
 type BulkInserter struct {
@@ -35,7 +41,7 @@ func (b *BulkInserter) InsertBlocksBatch(ctx context.Context, blocks []models.Bl
 		pgxConn, ok := driverConn.(*pgx.Conn)
 		if !ok {
 			// 回退到普通批量 INSERT
-			return b.fallbackInsertBlocks(ctx, blocks)
+			return b.fallbackInsertBlocks(ctx, b.db, blocks)
 		}
 
 		// 使用 COPY FROM 高效插入
@@ -76,7 +82,7 @@ func (b *BulkInserter) InsertTransfersBatch(ctx context.Context, transfers []mod
 	err = conn.Raw(func(driverConn interface{}) error {
 		pgxConn, ok := driverConn.(*pgx.Conn)
 		if !ok {
-			return b.fallbackInsertTransfers(ctx, transfers)
+			return b.fallbackInsertTransfers(ctx, b.db, transfers)
 		}
 
 		_, err := pgxConn.CopyFrom(
@@ -105,7 +111,7 @@ func (b *BulkInserter) InsertTransfersBatch(ctx context.Context, transfers []mod
 }
 
 // fallbackInsertBlocks 当 COPY 不可用时回退到批量 INSERT
-func (b *BulkInserter) fallbackInsertBlocks(ctx context.Context, blocks []models.Block) error {
+func (b *BulkInserter) fallbackInsertBlocks(ctx context.Context, exec execer, blocks []models.Block) error {
 	// 使用unnest批量插入
 	numbers := make([]string, len(blocks))
 	hashes := make([]string, len(blocks))
@@ -128,12 +134,12 @@ func (b *BulkInserter) fallbackInsertBlocks(ctx context.Context, blocks []models
 			timestamp = EXCLUDED.timestamp,
 			processed_at = NOW()
 	`
-	_, err := b.db.ExecContext(ctx, query, numbers, hashes, parentHashes, timestamps)
+	_, err := exec.ExecContext(ctx, query, numbers, hashes, parentHashes, timestamps)
 	return err
 }
 
 // fallbackInsertTransfers 当 COPY 不可用时回退到批量 INSERT
-func (b *BulkInserter) fallbackInsertTransfers(ctx context.Context, transfers []models.Transfer) error {
+func (b *BulkInserter) fallbackInsertTransfers(ctx context.Context, exec execer, transfers []models.Transfer) error {
 	blockNumbers := make([]string, len(transfers))
 	txHashes := make([]string, len(transfers))
 	logIndices := make([]uint64, len(transfers))
@@ -161,6 +167,22 @@ func (b *BulkInserter) fallbackInsertTransfers(ctx context.Context, transfers []
 			amount = EXCLUDED.amount,
 			token_address = EXCLUDED.token_address
 	`
-	_, err := b.db.ExecContext(ctx, query, blockNumbers, txHashes, logIndices, froms, tos, amounts, tokenAddresses)
+	_, err := exec.ExecContext(ctx, query, blockNumbers, txHashes, logIndices, froms, tos, amounts, tokenAddresses)
 	return err
+}
+
+// InsertBlocksBatchTx 批量插入区块并在给定事务内执行
+func (b *BulkInserter) InsertBlocksBatchTx(ctx context.Context, exec execer, blocks []models.Block) error {
+	if len(blocks) == 0 {
+		return nil
+	}
+	return b.fallbackInsertBlocks(ctx, exec, blocks)
+}
+
+// InsertTransfersBatchTx 批量插入转账事件并在给定事务内执行
+func (b *BulkInserter) InsertTransfersBatchTx(ctx context.Context, exec execer, transfers []models.Transfer) error {
+	if len(transfers) == 0 {
+		return nil
+	}
+	return b.fallbackInsertTransfers(ctx, exec, transfers)
 }

@@ -152,12 +152,25 @@ def simulate_transfers(contract_address):
                         "gas": 100000,
                         "gasPrice": w3.to_wei(1, 'gwei')
                     })
-                    
-                    tx_count += 1
-                    print(f"💸 Transfer #{tx_count}: {amount} tokens from {sender[:8]}... to {receiver[:8]}...")
-                    print(f"   TX: {tx_hash.hex()}")
-                    
-                    last_tx_time = now
+
+                    # ✅ 关键修复：等待交易确认，确保物理现实存在
+                    try:
+                        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=10)
+                        tx_count += 1
+                        print(f"💸 Transfer #{tx_count}: {amount} tokens from {sender[:8]}... to {receiver[:8]}...")
+                        print(f"   TX: {tx_hash.hex()}")
+                        print(f"   ✅ Confirmed in block {receipt.blockNumber}, logs: {len(receipt.logs)}")
+
+                        # 验证 Transfer 事件确实被触发
+                        if len(receipt.logs) > 0:
+                            print(f"   🎯 Transfer event emitted!")
+                        else:
+                            print(f"   ⚠️  Warning: No logs found in receipt")
+
+                        last_tx_time = now
+                    except Exception as e:
+                        print(f"❌ Transfer failed to confirm: {e}")
+                        # 继续下一次循环，不更新 last_tx_time
                 except Exception as e:
                     print(f"⚠️  Transfer failed: {e}")
             

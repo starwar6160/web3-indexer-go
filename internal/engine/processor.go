@@ -309,32 +309,31 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		return nil
 	}
 
-	// 使用 BulkInserter 进行高效批量写入（COPY 或 UNNEST）
+	tx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return fmt.Errorf("failed to begin batch transaction: %w", err)
+	}
+	defer tx.Rollback()
+
 	inserter := NewBulkInserter(p.db)
 
-	// 批量插入 blocks
-	if err := inserter.InsertBlocksBatch(ctx, validBlocks); err != nil {
+	if err := inserter.InsertBlocksBatchTx(ctx, tx, validBlocks); err != nil {
 		return fmt.Errorf("batch insert blocks failed: %w", err)
 	}
 
-	// 批量插入 transfers
 	if len(validTransfers) > 0 {
-		if err := inserter.InsertTransfersBatch(ctx, validTransfers); err != nil {
+		if err := inserter.InsertTransfersBatchTx(ctx, tx, validTransfers); err != nil {
 			return fmt.Errorf("batch insert transfers failed: %w", err)
 		}
 	}
 
-	// 更新 checkpoint 到最后一个区块
 	lastBlock := blocks[len(blocks)-1].Block
-	_, err := p.db.ExecContext(ctx, `
-		INSERT INTO sync_checkpoints (chain_id, last_synced_block)
-		VALUES ($1, $2)
-		ON CONFLICT (chain_id) DO UPDATE SET 
-			last_synced_block = EXCLUDED.last_synced_block,
-			updated_at = NOW()
-	`, chainID, lastBlock.Number().String())
-	if err != nil {
+	if err := p.updateCheckpointInTx(ctx, tx, chainID, lastBlock.Number()); err != nil {
 		return fmt.Errorf("batch checkpoint update failed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
 
 	return nil
