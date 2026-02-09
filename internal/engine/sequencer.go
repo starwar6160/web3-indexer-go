@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"math/big"
 	"sync"
 )
@@ -56,7 +57,10 @@ func NewSequencerWithFetcher(processor *Processor, fetcher *Fetcher, startBlock 
 
 // Run 启动排序处理器，按顺序处理区块
 func (s *Sequencer) Run(ctx context.Context) {
-	log.Printf("🚀 Sequencer started. Expected block: %s", s.expectedBlock.String())
+	Logger.Info("🚀 Sequencer started. Expected block: " + s.expectedBlock.String())
+	Logger.Info("📢 [Sequencer] 正在等待来自 Fetcher 的区块数据...",
+		slog.String("expected_block", s.expectedBlock.String()),
+	)
 
 	// 标记Sequencer已初始化
 	initialized := true
@@ -65,7 +69,7 @@ func (s *Sequencer) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Sequencer shutting down. Buffer size: %d", len(s.buffer))
+			Logger.Info("Sequencer shutting down. Buffer size: " + fmt.Sprintf("%d", len(s.buffer)))
 			return
 
 		case data, ok := <-s.resultCh:

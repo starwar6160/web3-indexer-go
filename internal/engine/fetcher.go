@@ -83,9 +83,17 @@ func (f *Fetcher) SetWatchedAddresses(addresses []string) {
 }
 
 func (f *Fetcher) Start(ctx context.Context, wg *sync.WaitGroup) {
+	Logger.Info("📢 [Fetcher] 引擎协程已进入 Start 函数！",
+		slog.Int("concurrency", f.concurrency),
+	)
 	for i := 0; i < f.concurrency; i++ {
 		wg.Add(1)
-		go f.worker(ctx, wg)
+		go func(workerID int) {
+			Logger.Info("🌀 [Fetcher] 循环抓取协程正式启动...",
+				slog.Int("worker_id", workerID),
+			)
+			f.worker(ctx, wg)
+		}(i)
 	}
 }
 
