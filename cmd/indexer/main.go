@@ -20,6 +20,7 @@ import (
 	"web3-indexer-go/internal/config"
 	"web3-indexer-go/internal/emulator"
 	"web3-indexer-go/internal/engine"
+	"web3-indexer-go/internal/web"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -392,22 +393,29 @@ func main() {
 	// 3. 初始化组件
 	// 根据配置设置并发和速率限制
 	fetcher := engine.NewFetcher(rpcPool, cfg.FetchConcurrency)
-	
-	// 如果并发较高（如针对 Anvil），放宽速率限制以实现“瞬间追平”
-	if cfg.FetchConcurrency > 20 {
-		// Set to effectively infinite for local Anvil
-		fetcher.SetRateLimit(100000, 100000)
-		rpcPool.SetRateLimit(100000, 100000)
-		engine.Logger.Info("overclock_mode_enabled", 
-			slog.Int("concurrency", cfg.FetchConcurrency),
-			slog.String("rps_limit", "unlimited"),
-		)
-	}
-
 	processor := engine.NewProcessor(db, rpcPool) // 传入RPC池用于reorg恢复
+
+	// 如果并发较高（如针对 Anvil），放宽速率限制以实现“瞬间追平”
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
+
+	// 初始化 WebSocket Hub
+	wsHub := web.NewHub()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		wsHub.Run()
+	}()
+
+	// 将 Processor 产生的事件对接到 WebSocket 广播
+	processor.EventHook = func(eventType string, data interface{}) {
+		engine.Logger.Debug("broadcasting_event", slog.String("type", eventType))
+		wsHub.Broadcast(web.WSEvent{
+			Type: eventType,
+			Data: data,
+		})
+	}
 
 	// 4. 初始化仿真引擎（如果启用）
 	var emulatorInstance *emulator.Emulator
@@ -504,6 +512,9 @@ func main() {
 	// Initialize health server (pass nil for sequencer, will be updated later)
 	healthServer := engine.NewHealthServer(db, rpcPool, nil, fetcher)
 	healthServer.RegisterRoutes(mux)
+
+	// 注册 WebSocket 接口
+	mux.HandleFunc("/ws", wsHub.HandleWS)
 
 	// 创建索引器服务包装器（实现IndexerService接口）
 	indexerService := &IndexerServiceWrapper{

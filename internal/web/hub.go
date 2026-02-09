@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"web3-indexer-go/internal/engine"
