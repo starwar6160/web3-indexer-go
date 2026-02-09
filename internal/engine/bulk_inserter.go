@@ -128,11 +128,7 @@ func (b *BulkInserter) fallbackInsertBlocks(ctx context.Context, exec execer, bl
 	query := `
 		INSERT INTO blocks (number, hash, parent_hash, timestamp)
 		SELECT * FROM UNNEST($1::numeric[], $2::text[], $3::text[], $4::bigint[])
-		ON CONFLICT (number) DO UPDATE SET
-			hash = EXCLUDED.hash,
-			parent_hash = EXCLUDED.parent_hash,
-			timestamp = EXCLUDED.timestamp,
-			processed_at = NOW()
+		ON CONFLICT (number) DO NOTHING
 	`
 	_, err := exec.ExecContext(ctx, query, numbers, hashes, parentHashes, timestamps)
 	return err
@@ -161,11 +157,7 @@ func (b *BulkInserter) fallbackInsertTransfers(ctx context.Context, exec execer,
 	query := `
 		INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
 		SELECT * FROM UNNEST($1::numeric[], $2::text[], $3::int[], $4::text[], $5::text[], $6::numeric[], $7::text[])
-		ON CONFLICT (block_number, log_index) DO UPDATE SET
-			from_address = EXCLUDED.from_address,
-			to_address = EXCLUDED.to_address,
-			amount = EXCLUDED.amount,
-			token_address = EXCLUDED.token_address
+		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
 	_, err := exec.ExecContext(ctx, query, blockNumbers, txHashes, logIndices, froms, tos, amounts, tokenAddresses)
 	return err

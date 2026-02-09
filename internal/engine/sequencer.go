@@ -140,19 +140,26 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 		}
 
 		// 尝试批量顺序处理
-		if blockNum != nil && blockNum.Cmp(s.expectedBlock) == 0 {
+		// 只有当当前块没有错误时才尝试批量，否则走单条处理以触发重试逻辑
+		if blockNum != nil && blockNum.Cmp(s.expectedBlock) == 0 && data.Err == nil {
 			sequentialBatch := []BlockData{data}
 			nextExpected := new(big.Int).Add(s.expectedBlock, big.NewInt(1))
 			
 			j := i + 1
 			for j < len(batch) {
-				nNum := batch[j].Number
-				if nNum == nil && batch[j].Block != nil {
-					nNum = batch[j].Block.Number()
+				nextData := batch[j]
+				// 如果发现错误，立即停止批次收集，确保错误块通过 handleBlockLocked 处理
+				if nextData.Err != nil {
+					break
+				}
+
+				nNum := nextData.Number
+				if nNum == nil && nextData.Block != nil {
+					nNum = nextData.Block.Number()
 				}
 				
 				if nNum != nil && nNum.Cmp(nextExpected) == 0 {
-					sequentialBatch = append(sequentialBatch, batch[j])
+					sequentialBatch = append(sequentialBatch, nextData)
 					nextExpected.Add(nextExpected, big.NewInt(1))
 					j++
 				} else {
