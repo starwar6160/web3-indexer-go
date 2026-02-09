@@ -765,20 +765,31 @@ func main() {
 		endBlock = new(big.Int).Set(latestBlock) // 不超过最新块
 	}
 
-	if err := fetcher.Schedule(ctx, startBlock, endBlock); err != nil {
-		engine.Logger.Error("schedule_failed",
-			slog.String("error", err.Error()),
-		)
-		os.Exit(1)
-	}
-	engine.Logger.Info("blocks_scheduled",
-		slog.String("start_block", startBlock.String()),
-		slog.String("end_block", endBlock.String()),
-		slog.String("mode", "incremental_sync"),
-	)
-
 	// 6. 启动 Sequencer - 确保顺序处理（传入 Fetcher 用于 Reorg 时暂停）
 	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, chainID, fetcher.Results, fatalErrCh, reorgCh, metrics)
+
+	// 在协程中调度任务，避免阻塞主线程
+	// 这很关键：Schedule()会发送大量任务到jobs通道，如果在主线程中同步运行，
+	// 当jobs缓冲区满了之后会阻塞，导致Sequencer无法启动，形成死锁
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := fetcher.Schedule(ctx, startBlock, endBlock); err != nil {
+			engine.Logger.Error("schedule_failed",
+				slog.String("error", err.Error()),
+			)
+			// 发送致命错误
+			select {
+			case fatalErrCh <- err:
+			case <-ctx.Done():
+			}
+		}
+		engine.Logger.Info("blocks_scheduled",
+			slog.String("start_block", startBlock.String()),
+			slog.String("end_block", endBlock.String()),
+			slog.String("mode", "incremental_sync"),
+		)
+	}()
 
 	// 把 sequencer 注入到 healthServer（使健康检查能正确报告状态）
 	healthServer.SetSequencer(sequencer)
