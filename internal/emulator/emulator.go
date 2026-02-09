@@ -75,6 +75,16 @@ func (e *Emulator) Start(ctx context.Context, addressChan chan<- common.Address)
 		slog.String("chain_id", e.chainID.String()),
 	)
 
+	// 0. 显式资金储备 (V1 Lesson 5)
+	// 给 deployer 充值 1000 ETH 以确保 Gas 充足
+	err := e.client.Client().CallContext(ctx, nil, "anvil_setBalance", e.fromAddr, "0x3635C9ADC5DEA00000") // 1000 ETH
+	if err != nil {
+		e.logger.Warn("failed_to_set_anvil_balance", slog.String("error", err.Error()))
+		// 继续运行，可能已经有余额了
+	} else {
+		e.logger.Info("deployer_account_funded", slog.String("address", e.fromAddr.Hex()))
+	}
+
 	// 1. 自动部署合约
 	deployCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	contractAddr, err := e.deployContract(deployCtx)
@@ -117,7 +127,7 @@ func (e *Emulator) Start(ctx context.Context, addressChan chan<- common.Address)
 			e.logger.Info("emulator_stopped")
 			return ctx.Err()
 		case <-blockTicker.C:
-			e.triggerNewBlock(ctx)
+			// e.triggerNewBlock(ctx) // Anvil auto-mines with --block-time 1
 		case <-txTicker.C:
 			e.sendTransfer(ctx)
 		}
@@ -209,6 +219,7 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	nonce, err := e.client.PendingNonceAt(ctx, e.fromAddr)
 	if err != nil {
 		e.logger.Error("failed_to_get_nonce_for_transfer",
+			slog.String("stage", "EMULATOR"),
 			slog.String("error", err.Error()),
 		)
 		return
@@ -217,6 +228,7 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	gasPrice, err := e.client.SuggestGasPrice(ctx)
 	if err != nil {
 		e.logger.Error("failed_to_get_gas_price_for_transfer",
+			slog.String("stage", "EMULATOR"),
 			slog.String("error", err.Error()),
 		)
 		return
@@ -236,41 +248,54 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	data = append(data, toAddr...)
 	data = append(data, amount...)
 
-	tx := types.NewTransaction(nonce, e.contract, big.NewInt(0), 100000, gasPrice, data)
+	tx := types.NewTransaction(nonce, e.contract, big.NewInt(0), 500000, gasPrice, data)
 	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(e.chainID), e.privateKey)
 	if err != nil {
 		e.logger.Error("failed_to_sign_transfer_tx",
+			slog.String("stage", "EMULATOR"),
 			slog.String("error", err.Error()),
 		)
 		return
 	}
+
+	e.logger.Info("📡 仿真器：正在发送交易...",
+		slog.String("stage", "EMULATOR"),
+		slog.String("tx_hash", signedTx.Hash().Hex()),
+		slog.String("to_contract", e.contract.Hex()),
+	)
 
 	err = e.client.SendTransaction(ctx, signedTx)
 	if err != nil {
 		e.logger.Error("failed_to_send_transfer_tx",
+			slog.String("stage", "EMULATOR"),
 			slog.String("error", err.Error()),
 		)
 		return
 	}
 
-	e.logger.Info("transfer_sent",
-		slog.String("tx_hash", signedTx.Hash().Hex()),
-		slog.String("to_address", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
-		slog.String("amount", e.txAmount.String()),
-	)
-
 	// 异步等待确认，不阻塞主循环
 	go func() {
-		_, err := e.waitForReceipt(ctx, signedTx.Hash())
+		receipt, err := e.waitForReceipt(ctx, signedTx.Hash())
 		if err != nil {
-			e.logger.Error("transfer_confirmation_timeout",
+			e.logger.Error("❌ 仿真器：交易未在限时内确认",
+				slog.String("stage", "EMULATOR"),
 				slog.String("tx_hash", signedTx.Hash().Hex()),
 				slog.String("error", err.Error()),
 			)
 		} else {
-			e.logger.Debug("transfer_confirmed",
+			e.logger.Info("✅ 仿真器：交易已物理确认入块",
+				slog.String("stage", "EMULATOR"),
 				slog.String("tx_hash", signedTx.Hash().Hex()),
+				slog.Uint64("block", receipt.BlockNumber.Uint64()),
+				slog.Uint64("status", receipt.Status),
+				slog.Int("logs_count", len(receipt.Logs)),
 			)
+			if receipt.Status == 0 {
+				e.logger.Error("transfer_reverted",
+					slog.String("stage", "EMULATOR"),
+					slog.String("tx_hash", signedTx.Hash().Hex()),
+				)
+			}
 		}
 	}()
 }
@@ -318,5 +343,7 @@ func (e *Emulator) GetContractAddress() common.Address {
 }
 
 // ERC20 合约字节码（极简实现，包含 Transfer 事件）
-// 这是一个编译后的 Solidity 合约，包含基本的 transfer 函数
-const erc20Bytecode = "608060405234801561001057600080fd5b5061012f806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a9059cbb14602d575b600080fd5b6040516001600160a01b0360443516906024359060648051918152602001908051906020019060208101906040810160405261006992919061008b565b60405180910390f35b6001600160a01b03167fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef60405180910390a3600160405180910390f3"
+// "Always Emit" bytecode: any call emits Transfer(caller, 0x7099..79C8, 1000)
+// Runtime: PUSH2 1000, PUSH1 0, MSTORE, PUSH20 to, CALLER, PUSH32 TransferHash, PUSH1 32, PUSH1 0, LOG3, STOP
+// Init: PUSH1 67, DUP1, PUSH1 11, PUSH1 0, CODECOPY, PUSH1 0, RETURN
+const erc20Bytecode = "604380600b6000396000f36103e86000527370997970C51812dc3A010C7d01b50e0d17dc79C8337fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef60206000a300"
