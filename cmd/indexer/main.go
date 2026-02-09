@@ -390,7 +390,20 @@ func main() {
 	)
 
 	// 3. 初始化组件
-	fetcher := engine.NewFetcher(rpcPool, 10)     // 10 workers, 100 rps limit
+	// 根据配置设置并发和速率限制
+	fetcher := engine.NewFetcher(rpcPool, cfg.FetchConcurrency)
+	
+	// 如果并发较高（如针对 Anvil），放宽速率限制以实现“瞬间追平”
+	if cfg.FetchConcurrency > 20 {
+		// Set to effectively infinite for local Anvil
+		fetcher.SetRateLimit(100000, 100000)
+		rpcPool.SetRateLimit(100000, 100000)
+		engine.Logger.Info("overclock_mode_enabled", 
+			slog.Int("concurrency", cfg.FetchConcurrency),
+			slog.String("rps_limit", "unlimited"),
+		)
+	}
+
 	processor := engine.NewProcessor(db, rpcPool) // 传入RPC池用于reorg恢复
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -443,14 +456,19 @@ func main() {
 	watchedAddresses := []string{}
 
 	// 优先从仿真器获取动态部署的合约地址
-	select {
-	case deployedAddr := <-emulatorAddrChan:
-		watchedAddresses = append(watchedAddresses, deployedAddr.Hex())
-		engine.Logger.Info("contract_address_from_emulator",
-			slog.String("address", deployedAddr.Hex()),
-		)
-	case <-time.After(2 * time.Second):
-		// 超时，继续使用环境变量配置
+	if emulatorInstance != nil {
+		engine.Logger.Info("waiting_for_emulator_deployment", slog.String("timeout", "30s"))
+		select {
+		case deployedAddr := <-emulatorAddrChan:
+			watchedAddresses = append(watchedAddresses, deployedAddr.Hex())
+			engine.Logger.Info("contract_address_from_emulator",
+				slog.String("address", deployedAddr.Hex()),
+			)
+		case <-time.After(30 * time.Second):
+			engine.Logger.Warn("emulator_deployment_timeout_using_env_vars")
+		}
+	} else {
+		// 如果没有启用仿真器，不等待
 	}
 
 	// 从环境变量添加额外的监控地址
@@ -823,9 +841,9 @@ func main() {
 
 	// 调度任务：从 checkpoint 同步到最新块（支持增量同步）
 	// 如果差距太大（>10000），分批同步以避免内存溢出
-	batchSize := big.NewInt(1000)
+	batchSize := big.NewInt(int64(cfg.FetchBatchSize))
 	if new(big.Int).Sub(latestBlock, startBlock).Cmp(big.NewInt(10000)) > 0 {
-		batchSize = big.NewInt(500) // 大差距时减小批次
+		batchSize = big.NewInt(int64(cfg.FetchBatchSize / 2)) // 大差距时减小批次
 	}
 
 	endBlock := new(big.Int).Add(startBlock, batchSize)
@@ -885,9 +903,17 @@ func main() {
 		slog.String("dashboard_url", "http://localhost:"+apiPort),
 	)
 
-	// 7. 优雅退出处理
+	// 7. 优雅退出处理 + 持续调度循环
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// 持续调度ticker - 每2秒检查是否需要调度更多区块
+	scheduleTicker := time.NewTicker(2 * time.Second)
+	defer scheduleTicker.Stop()
+
+	// 记录当前调度进度
+	lastScheduledBlock := new(big.Int).Set(endBlock)
+	schedulingInProgress := false
 
 	for {
 		select {
@@ -901,6 +927,68 @@ func main() {
 				slog.String("error", fatalErr.Error()),
 			)
 			goto shutdown
+		case <-scheduleTicker.C:
+			// 持续调度逻辑：确保indexer追赶链头
+			if !schedulingInProgress {
+				// 获取sequencer当前处理的区块
+				currentBlockInt := sequencer.GetExpectedBlock()
+				currentBlockStr := currentBlockInt.String()
+
+				// 获取链上最新区块
+				latestBlock, err := rpcPool.GetLatestBlockNumber(ctx)
+				if err != nil {
+					engine.Logger.Warn("failed_to_get_latest_block_for_schedule",
+						slog.String("error", err.Error()),
+					)
+					continue
+				}
+
+				// 如果当前区块接近已调度的区块，调度更多
+				blocksBehind := new(big.Int).Sub(latestBlock, currentBlockInt)
+				scheduledAhead := new(big.Int).Sub(lastScheduledBlock, currentBlockInt)
+
+				// 当已调度区块只剩不到100个，且落后链头超过10个块时，继续调度
+				if scheduledAhead.Cmp(big.NewInt(100)) < 0 && blocksBehind.Cmp(big.NewInt(10)) > 0 {
+					schedulingInProgress = true
+
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						defer func() { schedulingInProgress = false }()
+
+						// 计算下一批次的起止区块
+						nextStart := new(big.Int).Add(lastScheduledBlock, big.NewInt(1))
+						batchSize := big.NewInt(int64(cfg.FetchBatchSize)) // 每次调度 batch size 个块
+
+						nextEnd := new(big.Int).Add(nextStart, batchSize)
+						if nextEnd.Cmp(latestBlock) > 0 {
+							nextEnd = new(big.Int).Set(latestBlock)
+						}
+
+						engine.Logger.Info("📈 [Catch-up] 持续调度新区块",
+							slog.String("from", nextStart.String()),
+							slog.String("to", nextEnd.String()),
+							slog.String("current_block", currentBlockStr),
+							slog.String("latest_block", latestBlock.String()),
+							slog.Int64("blocks_behind", blocksBehind.Int64()),
+						)
+
+						if err := fetcher.Schedule(ctx, nextStart, nextEnd); err != nil {
+							engine.Logger.Error("catchup_schedule_failed",
+								slog.String("error", err.Error()),
+							)
+							return
+						}
+
+						// 更新最后调度区块
+						lastScheduledBlock.Set(nextEnd)
+
+						engine.Logger.Info("🎉 [Catch-up] 批次调度完成",
+							slog.String("scheduled_until", nextEnd.String()),
+						)
+					}()
+				}
+			}
 		case reorgEvent := <-reorgCh:
 			// 处理 reorg 事件：停止、回滚、重新调度
 			engine.Logger.Warn("reorg_event_received",

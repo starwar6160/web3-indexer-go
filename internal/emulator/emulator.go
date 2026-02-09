@@ -76,7 +76,9 @@ func (e *Emulator) Start(ctx context.Context, addressChan chan<- common.Address)
 	)
 
 	// 1. 自动部署合约
-	contractAddr, err := e.deployContract(ctx)
+	deployCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	contractAddr, err := e.deployContract(deployCtx)
+	cancel()
 	if err != nil {
 		e.logger.Error("contract_deployment_failed",
 			slog.String("error", err.Error()),

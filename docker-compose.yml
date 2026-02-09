@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database Service
   db:
@@ -9,6 +7,7 @@ services:
       POSTGRES_DB: web3_indexer
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -25,25 +24,30 @@ services:
   anvil:
     image: ghcr.io/foundry-rs/foundry:latest
     container_name: web3-indexer-anvil
-    command: anvil --host 127.0.0.1 --port 8545 --chain-id 31337 --accounts 10 --balance 10000 --block-time 1
-    network_mode: "host"
+    entrypoint: ["anvil"]
+    command: ["--host", "0.0.0.0", "--port", "8545", "--chain-id", "31337", "--accounts", "10", "--balance", "10000", "--block-time", "1"]
+    ports:
+      - "8545:8545"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8545"]
-      interval: 5s
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 3
+    networks:
+      - web3-network
 
-  # Go Indexer Service
+  # Go Indexer Service (可选，用于Docker部署)
+  # 注意：快速开发循环建议使用 go run 模式，不启动此容器
   indexer:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: web3-indexer-core
     environment:
-      # Database configuration using localhost (host mode)
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:15432/web3_indexer?sslmode=disable
-      # RPC configuration using localhost (host mode - Anvil also on host)
-      RPC_URLS: http://127.0.0.1:8545
+      # Database configuration using service name
+      DATABASE_URL: postgres://postgres:postgres@db:5432/web3_indexer?sslmode=disable
+      # RPC configuration using service name
+      RPC_URLS: http://anvil:8545
       # Chain and sync configuration
       CHAIN_ID: "31337"
       START_BLOCK: "0"
@@ -56,13 +60,16 @@ services:
       LOG_FORMAT: json
     ports:
       - "8080:8080"
-    network_mode: "host"
     depends_on:
       db:
         condition: service_healthy
       anvil:
-        condition: service_started
+        condition: service_healthy
+    networks:
+      - web3-network
     restart: unless-stopped
+    profiles:
+      - production  # 仅在production profile下启动
 
 volumes:
   postgres_data:
