@@ -513,9 +513,6 @@ func main() {
 	healthServer := engine.NewHealthServer(db, rpcPool, nil, fetcher)
 	healthServer.RegisterRoutes(mux)
 
-	// 注册 WebSocket 接口
-	mux.HandleFunc("/ws", wsHub.HandleWS)
-
 	// 创建索引器服务包装器（实现IndexerService接口）
 	indexerService := &IndexerServiceWrapper{
 		fetcher:   fetcher,
@@ -526,6 +523,12 @@ func main() {
 
 	// 初始化状态管理器
 	stateManager := engine.NewStateManager(indexerService, rpcPool)
+
+	// 注册 WebSocket 接口
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		stateManager.RecordAccess()
+		wsHub.HandleWS(w, r)
+	})
 
 	// 初始化管理员服务器
 	adminServer := engine.NewAdminServer(stateManager)
