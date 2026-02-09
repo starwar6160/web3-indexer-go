@@ -485,6 +485,7 @@ func main() {
 	// 设置监控地址
 	if len(watchedAddresses) > 0 {
 		fetcher.SetWatchedAddresses(watchedAddresses)
+		processor.SetWatchedAddresses(watchedAddresses)
 		engine.Logger.Info("watched_addresses_configured",
 			slog.Int("count", len(watchedAddresses)),
 			slog.String("addresses", strings.Join(watchedAddresses, ", ")),

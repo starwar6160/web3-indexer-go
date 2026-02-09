@@ -210,6 +210,14 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	}
 
 	logs, err := f.pool.FilterLogs(ctx, filterQuery)
+	
+	Logger.Debug("🌐 RPC：执行 eth_getLogs",
+		slog.String("stage", "FETCHER"),
+		slog.String("block", bn.String()),
+		slog.Int("logs_returned", len(logs)),
+		slog.Int("watched_addresses_count", len(f.watchedAddresses)),
+	)
+
 	if err != nil {
 		// 日志获取失败不阻塞区块处理，但记录详细错误信息
 		Logger.Warn("logs_fetch_failed",
