@@ -28,7 +28,7 @@ services:
     restart: always
     network_mode: host
     entrypoint: ["anvil"]
-    command: ["--host", "127.0.0.1", "--block-time", "1", "--chain-id", "31337", "--accounts", "10"]
+    command: ["--host", "0.0.0.0", "--block-time", "1", "--chain-id", "31337", "--accounts", "10"]
     volumes:
       - indexer_anvil_data:/root/.foundry/anvil
     environment:

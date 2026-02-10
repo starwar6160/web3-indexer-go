@@ -19,8 +19,6 @@ echo -e "${YELLOW}Step 1: 物理大扫除 (清空数据库与数据卷)...${NC}"
 # 2. 启动 Anvil (强制开启自动产块)
 echo -e "${YELLOW}Step 2: 启动本地 Anvil (Block-time: 1s)...${NC}"
 docker compose -f docker-compose.infra.yml up -d anvil
-# 强制覆盖 anvil 启动命令以确保自动产块
-docker exec -d web3-indexer-anvil anvil --host 0.0.0.0 --block-time 1 --chain-id 31337
 
 # 3. 编译并启动索引器
 echo -e "${YELLOW}Step 3: 启动热重载索引器 (物理锁定模式)...${NC}"
