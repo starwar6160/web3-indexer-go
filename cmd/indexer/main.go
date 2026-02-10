@@ -127,7 +127,16 @@ func main() {
 		if err != nil {
 			slog.Error("❌ Emulator init failed", "err", err)
 		} else {
-			emu.OnSelfHealing = func(r string) { selfHealingEvents.Add(1) }
+			emu.OnSelfHealing = func(r string) { 
+				selfHealingEvents.Add(1) 
+				wsHub.Broadcast(web.WSEvent{
+					Type: "log", 
+					Data: map[string]interface{}{
+						"message": fmt.Sprintf("🛠️  Self-Healing: %s fixed", r),
+						"level": "warn",
+					},
+				})
+			}
 			wg.Add(1)
 			go func() { defer wg.Done(); emu.Start(ctx, nil) }()
 		}
