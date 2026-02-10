@@ -70,6 +70,14 @@ func Load() *Config {
 		DemoMode:         demoMode,
 	}
 
+	// 🚨 核弹级锁定：演示模式下，物理锁死本地环境，无视所有环境变量污染
+	if cfg.DemoMode {
+		cfg.RPCURLs = []string{"http://127.0.0.1:8545"}
+		cfg.ChainID = 31337
+		cfg.RPCRateLimit = 200 // 本地环境，火力全开
+		log.Printf("🔒 SECURITY_LOCK: HARD-CODED LOCAL ANVIL MODE ENABLED")
+	}
+
 	// 打印确定性启动日志
 	networkName := "Mainnet"
 	if cfg.ChainID == 11155111 {

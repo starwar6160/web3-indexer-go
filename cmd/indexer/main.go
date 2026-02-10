@@ -252,6 +252,8 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		"sync_lag":           syncLag,
 		"total_blocks":       totalBlocks,
 		"total_transfers":    totalTransfers,
+		"tps":                currentTPS.Load(),
+		"bps":                currentBPS.Load(),
 		"is_healthy":         rpcPool.GetHealthyNodeCount() > 0,
 		"self_healing_count": selfHealingEvents.Load(),
 		"rpc_nodes": map[string]int{
@@ -261,6 +263,37 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+// 全局性能快照 (用于计算 TPS)
+var (
+	currentTPS atomic.Uint64
+	currentBPS atomic.Uint64 // Blocks Per Second
+)
+
+func startPerformanceMonitor(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var lastTx, lastBlock uint64
+	m := engine.GetMetrics()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			currTx, currBlock := m.GetSnapshot()
+			if lastTx > 0 {
+				diffTx := currTx - lastTx
+				diffBlock := currBlock - lastBlock
+				currentTPS.Store(diffTx / 2) // 2秒间隔
+				currentBPS.Store(diffBlock / 2)
+			}
+			lastTx = currTx
+			lastBlock = currBlock
+		}
+	}
 }
 
 // continuousTailFollow 持续追踪链顶，调度新区块给 Fetcher
@@ -330,11 +363,14 @@ func main() {
 	cfg = config.Load()
 	engine.InitLogger(cfg.LogLevel)
 
-	// 🚨 架构级安全锁：在演示模式下，严禁连接公网 RPC
+	// 🚨 架构级安全锁：在演示模式下，执行“零信任”白名单策略
 	if cfg.DemoMode {
 		for _, url := range cfg.RPCURLs {
-			if strings.Contains(url, "infura.io") || strings.Contains(url, "alchemy.com") || strings.Contains(url, "quiknode.pro") {
-				slog.Error("🚫 SAFETY_LOCK: Demo mode active, public RPC restricted!", "url", url)
+			isLocal := strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1")
+			if !isLocal {
+				slog.Error("🚫 ZERO_TRUST_LOCK: Demo mode RESTRICTED to local RPC only!", 
+					"attempted_url", url,
+					"hint", "Please check your .env or .air.toml settings")
 				os.Exit(1)
 			}
 		}
@@ -377,6 +413,10 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
+
+	// 启动性能监控 (用于 TPS/BPS 计算)
+	wg.Add(1)
+	go func() { defer wg.Done(); startPerformanceMonitor(ctx) }()
 
 	wsHub := web.NewHub()
 	wg.Add(1)
