@@ -1,259 +1,103 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
+    <title>Web3 Indexer Dashboard</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web3 Indexer - 实时控制面板</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #1a202c; min-height: 100vh; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        
-        /* Header */
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 20px; border-radius: 12px; color: white; text-align: center; margin-bottom: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .header h1 { font-size: 2.5rem; margin-bottom: 10px; }
-        
-        /* Stats Grid */
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #667eea; }
-        .stat-label { color: #718096; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
-        .stat-value { font-size: 1.8rem; font-weight: 700; margin-top: 5px; color: #2d3748; font-family: 'Monaco', monospace; }
-        
-        /* Live Tables */
-        .live-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #edf2f7; padding-bottom: 15px; }
-        .card-title { font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
-        
-        /* Table Styles */
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 12px; color: #718096; font-size: 0.85rem; border-bottom: 1px solid #edf2f7; }
-        td { padding: 12px; border-bottom: 1px solid #f7fafc; font-size: 0.9rem; }
-        .hash-cell { font-family: 'Monaco', monospace; color: #667eea; font-size: 0.8rem; }
-        
-        /* Animations */
-        @keyframes jumpIn {
-            0% { transform: scale(0.95); opacity: 0; background-color: #ebf4ff; }
-            50% { transform: scale(1.02); }
-            100% { transform: scale(1); opacity: 1; background-color: transparent; }
-        }
-        .new-row { animation: jumpIn 0.6s ease-out; }
-        
-        /* Connection Status */
-        .ws-status { padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: bold; }
-        .ws-online { background: #c6f6d5; color: #276749; }
-        .ws-offline { background: #fed7d7; color: #c53030; }
-
-        /* Badge Styles */
-        .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
-        .badge-synthetic { background: #feebc8; color: #c05621; }
-        .badge-real { background: #c6f6d5; color: #276749; }
-
-        @media (max-width: 900px) { .live-grid { grid-template-columns: 1fr; } }
-    </style>
+    <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>📡 Web3 Indexer <small style="font-weight: 300; font-size: 1rem;">Live Protocol</small></h1>
-            <p>实时区块链索引器 · 智能回退 · WebSockets 驱动</p>
+        <header>
+            <h1>🚀 Web3 Indexer Dashboard</h1>
+            <p class="header-subtitle">Real-time blockchain indexing with Go | Industrial Grade Architecture</p>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h2>📊 System Status</h2>
+                <div class="stat">
+                    <span class="stat-label">System State</span>
+                    <span class="stat-value" id="state">
+                        <span class="status-connecting">INITIALIZING...</span>
+                    </span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Latest Block</span>
+                    <span class="stat-value" id="latestBlock">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Total Blocks</span>
+                    <span class="stat-value" id="totalBlocks">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Total Transfers</span>
+                    <span class="stat-value" id="totalTransfers">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Sync Lag</span>
+                    <span class="stat-value" id="syncLag" style="color: #667eea;">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Self-Healing</span>
+                    <span class="stat-value" id="selfHealing" style="color: #28a745;">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Health</span>
+                    <span id="health" class="status-badge status-warning">Checking...</span>
+                </div>
+                <div class="refresh-time">Last updated: <span id="lastUpdate">-</span></div>
+            </div>
+
+            <div class="card">
+                <h2>🔗 API Endpoints</h2>
+                <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Access detailed information via REST API</p>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <a href="/healthz" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Health Check (/healthz)</a>
+                    <a href="/metrics" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Prometheus Metrics (/metrics)</a>
+                    <a href="/api/status" style="color: #667eea; text-decoration: none; font-size: 13px;">→ System Status (/api/status)</a>
+                    <a href="/api/blocks" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Latest Blocks (/api/blocks)</a>
+                    <a href="/api/transfers" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Latest Transfers (/api/transfers)</a>
+                </div>
+                <button class="action-btn" onclick="location.href='/api/admin/start-demo'">🎮 Start Demo Mode</button>
+            </div>
         </div>
 
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">System State</div>
-                <div class="stat-value" id="stat-state">CONNECTING...</div>
-            </div>
-            <div class="stat-card" style="border-left-color: #48bb78;">
-                <div class="stat-label">Latest Block</div>
-                <div class="stat-value" id="stat-block">0</div>
-            </div>
-            <div class="stat-card" style="border-left-color: #ed64a6;">
-                <div class="stat-label">Total Transfers</div>
-                <div class="stat-value" id="stat-transfers">0</div>
-            </div>
-            <div class="stat-card" style="border-left-color: #ecc94b;">
-                <div class="stat-label">Network Status</div>
-                <div id="stat-ws" class="ws-status ws-offline">OFFLINE</div>
-            </div>
+        <div class="card">
+            <h2>📦 Latest Blocks</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Block #</th>
+                        <th>Hash</th>
+                        <th>Parent Hash</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody id="blocksTable">
+                    <tr><td colspan="4" class="loading">Waiting for sync...</td></tr>
+                </tbody>
+            </table>
         </div>
 
-        <div class="live-grid">
-            <!-- Blocks Table -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">📦 Latest Blocks</h2>
-                </div>
-                <table id="blocks-table">
-                    <thead><tr><th>Number</th><th>Hash</th><th>Txs</th><th>Time</th></tr></thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-
-            <!-- Transfers Table -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">💸 Live Transfers</h2>
-                </div>
-                <table id="transfers-table">
-                    <thead><tr><th>Block</th><th>From/To</th><th>Amount</th><th>Type</th></tr></thead>
-                    <tbody></tbody>
-                </table>
-            </div>
+        <div class="card">
+            <h2>💸 Latest Transfers</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Block</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Amount</th>
+                        <th>Token</th>
+                    </tr>
+                </thead>
+                <tbody id="transfersTable">
+                    <tr><td colspan="5" class="loading">No transactions found...</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
-
-    <script>
-        let totalTransfers = 0;
-
-        // 格式化地址工具
-        function fmtAddr(addr) {
-            if (!addr) return "0x????";
-            return addr.substring(0, 6) + "..." + addr.substring(addr.length - 4);
-        }
-
-        async function init() {
-            try {
-                // 1. 获取初始状态
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                updateStats(data);
-                
-                // 2. 加载历史数据（倒序排列，最新的在上面）
-                const blocksRes = await fetch('/api/blocks');
-                const blocksData = await blocksRes.json();
-                if (blocksData.blocks) {
-                    // 清空 loading
-                    document.querySelector('#blocks-table tbody').innerHTML = "";
-                    blocksData.blocks.reverse().forEach(b => addBlockToTable(b, false));
-                }
-
-                const transfersRes = await fetch('/api/transfers');
-                const transfersData = await transfersRes.json();
-                if (transfersData.transfers) {
-                    document.querySelector('#transfers-table tbody').innerHTML = "";
-                    transfersData.transfers.reverse().forEach(t => addTransferToTable(t, false));
-                }
-            } catch (e) {
-                console.error("Init failed", e);
-            }
-
-            // 3. 建立 WebSocket
-            connectWS();
-
-            // 4. 定期刷新状态，保持后端活跃 (StateManager Keep-alive)
-            setInterval(async () => {
-                try {
-                    const res = await fetch('/api/status');
-                    const data = await res.json();
-                    updateStats(data);
-                    
-                    // 如果状态变回了 IDLE，尝试提醒用户或自动重新激活
-                    if (data.state === 'idle') {
-                        console.warn("Backend went idle, re-activating...");
-                        fetch('/api/admin/start-demo', { method: 'POST' });
-                    }
-                } catch (e) {
-                    console.error("Keep-alive failed", e);
-                }
-            }, 30000); // 每 30 秒访问一次
-        }
-
-        function connectWS() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-            const statusEl = document.getElementById('stat-ws');
-
-            ws.onopen = () => {
-                statusEl.textContent = 'ONLINE';
-                statusEl.className = 'ws-status ws-online';
-                console.log("WebSocket connected");
-            };
-
-            ws.onclose = () => {
-                statusEl.textContent = 'OFFLINE';
-                statusEl.className = 'ws-status ws-offline';
-                setTimeout(connectWS, 2000); 
-            };
-
-            ws.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                console.log("Received WS message:", msg);
-                document.getElementById('stat-ws').textContent = 'LIVE ' + new Date().toLocaleTimeString();
-                if (msg.type === 'block') {
-                    addBlockToTable(msg.data, true);
-                    updateBlockStat(msg.data.number);
-                } else if (msg.type === 'transfer') {
-                    addTransferToTable(msg.data, true);
-                    updateTransferStat();
-                }
-            };
-        }
-
-        function addBlockToTable(block, animate) {
-            const tbody = document.querySelector('#blocks-table tbody');
-            const row = tbody.insertRow(0);
-            if (animate) row.className = 'new-row';
-            
-            const num = block.number || block.block_number || "0";
-            const hash = block.hash || "0x...";
-            const txCount = block.tx_count || 0;
-            const time = block.processed_at ? new Date(block.processed_at).toLocaleTimeString() : new Date().toLocaleTimeString();
-
-            row.innerHTML = `
-                <td><strong>#${num}</strong></td>
-                <td class="hash-cell">${hash.substring(0, 16)}...</td>
-                <td>${txCount}</td>
-                <td>${time}</td>
-            `;
-            if (tbody.rows.length > 15) tbody.deleteRow(15);
-        }
-
-        function addTransferToTable(t, animate) {
-            const tbody = document.querySelector('#transfers-table tbody');
-            const row = tbody.insertRow(0);
-            if (animate) row.className = 'new-row';
-            
-            // 兼容 API 和 WS 不同的字段名
-            const blockNum = t.block_number || t.blockNumber || "0";
-            const from = t.from || t.from_address || t.From || "0x...";
-            const to = t.to || t.to_address || t.To || "0x...";
-            const value = t.value || t.amount || t.Amount || "0";
-            const logIndex = (t.log_index !== undefined) ? t.log_index : 
-                             (t.logIndex !== undefined) ? t.logIndex : 0;
-            const isSynthetic = t.is_synthetic || logIndex >= 10000;
-
-            const typeClass = isSynthetic ? 'badge-synthetic' : 'badge-real';
-            const typeText = isSynthetic ? 'SYNTH' : 'REAL';
-            
-            row.innerHTML = `
-                <td>${blockNum}</td>
-                <td class="hash-cell">
-                    ${fmtAddr(from)} &rarr; ${fmtAddr(to)}
-                </td>
-                <td><strong>${value}</strong></td>
-                <td><span class="badge ${typeClass}">${typeText}</span></td>
-            `;
-            if (tbody.rows.length > 20) tbody.deleteRow(20);
-        }
-
-        function updateStats(data) {
-            document.getElementById('stat-state').textContent = data.state.toUpperCase();
-            document.getElementById('stat-block').textContent = data.latest_block;
-            document.getElementById('stat-transfers').textContent = data.total_transfers;
-            totalTransfers = parseInt(data.total_transfers);
-        }
-
-        function updateBlockStat(num) {
-            document.getElementById('stat-block').textContent = num;
-        }
-
-        function updateTransferStat() {
-            totalTransfers++;
-            document.getElementById('stat-transfers').textContent = totalTransfers;
-        }
-
-        window.onload = init;
-    </script>
+    <script src="/static/dashboard.js"></script>
 </body>
 </html>
