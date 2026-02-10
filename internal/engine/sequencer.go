@@ -66,7 +66,7 @@ func NewSequencerWithFetcher(processor *Processor, fetcher *Fetcher, startBlock 
 func (s *Sequencer) Run(ctx context.Context) {
 	Logger.Info("🚀 Sequencer started. Expected block: " + s.expectedBlock.String())
 
-	stallTicker := time.NewTicker(5 * time.Second)
+	stallTicker := time.NewTicker(30 * time.Second)
 	defer stallTicker.Stop()
 
 	for {
@@ -94,7 +94,7 @@ func (s *Sequencer) Run(ctx context.Context) {
 			}
 			s.mu.RUnlock()
 
-			if idleTime > 10*time.Second {
+			if idleTime > 30*time.Second {
 				if bufferLen > 0 && !hasExpected {
 					// 🚨 发现幽灵空洞：缓冲区有后面块但没当前块
 					// 计算需要补齐的范围: [expected, minBuffered-1]
@@ -117,13 +117,17 @@ func (s *Sequencer) Run(ctx context.Context) {
 						go s.fetcher.Schedule(ctx, expectedCopy, gapEnd)
 						s.gapFillCount++
 					}
-				} else {
-					Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED",
-						slog.String("expected", expectedStr),
-						slog.Int("buffer_size", bufferLen),
-						slog.Duration("idle_time", idleTime),
-					)
-				}
+								} else {
+									Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", 
+										slog.String("expected", expectedStr),
+										slog.Int("buffer_size", bufferLen),
+										slog.Duration("idle_time", idleTime),
+									)
+									if expectedStr == "1" || expectedStr == "0" {
+										Logger.Info("💡 SRE_HINT: Indexer is healthy but upstream chain is idle. Please check if Anvil is mining or run 'python3 scripts/stress-test.py' to generate traffic.")
+									}
+								}
+				
 			}
 
 		case data, ok := <-s.resultCh:
