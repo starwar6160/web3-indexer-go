@@ -13,8 +13,8 @@ NC='\033[0m'
 echo -e "${BLUE}=== 启动 Web3 Indexer 工业级演示流水线 (Docker-Only) ===${NC}"
 
 # 1. 环境清理
-echo -e "${YELLOW}Step 1: 物理大扫除 (清理旧容器与数据)...${NC}"
-docker compose down -v
+echo -e "${YELLOW}Step 1: 物理大扫除 (清理旧容器、卷与孤立网络)...${NC}"
+docker compose down -v --remove-orphans
 
 # 2. 启动全栈环境
 echo -e "${YELLOW}Step 2: 启动全栈环境 (DB + Anvil + Indexer)...${NC}"
