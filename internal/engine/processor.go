@@ -128,7 +128,15 @@ func (p *Processor) ProcessBlockWithRetry(ctx context.Context, data BlockData, m
 		}
 	}
 
-	return fmt.Errorf("max retries exceeded for block %s: %w", data.Block.Number().String(), err)
+	return fmt.Errorf("max retries exceeded for block %s: %w", func() string {
+		if data.Block != nil {
+			return data.Block.Number().String()
+		}
+		if data.Number != nil {
+			return data.Number.String()
+		}
+		return "unknown"
+	}(), err)
 }
 
 // isFatalError 判断错误是否不需要重试
