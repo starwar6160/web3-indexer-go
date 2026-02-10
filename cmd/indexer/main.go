@@ -77,8 +77,8 @@ func main() {
 
 	if cfg.DemoMode {
 		for _, url := range cfg.RPCURLs {
-			if !strings.Contains(url, "localhost") && !strings.Contains(url, "127.0.0.1") {
-				slog.Error("🚫 SAFETY_LOCK: Local only in DemoMode")
+			if !strings.Contains(url, "localhost") && !strings.Contains(url, "127.0.0.1") && !strings.Contains(url, "anvil") {
+				slog.Error("🚫 SAFETY_LOCK: Local only in DemoMode (use localhost, 127.0.0.1, or anvil)")
 				os.Exit(1)
 			}
 		}
