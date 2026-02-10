@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # PostgreSQL Database Service
   db:
@@ -11,10 +13,11 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     ports:
-      - "15432:5432"  # Expose to host for indexer in host mode
+      - "15432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d web3_indexer"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -31,35 +34,27 @@ services:
     ports:
       - "8545:8545"
     healthcheck:
-      test: ["CMD-SHELL", "exit 0"]
+      test: ["CMD-SHELL", "nc -z localhost 8545 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
     networks:
       - web3-network
 
-  # Go Indexer Service (可选，用于Docker部署)
-  # 注意：快速开发循环建议使用 go run 模式，不启动此容器
+  # Web3 Indexer App Service
   indexer:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: web3-indexer-core
+    container_name: web3-indexer-app
     environment:
-      # Database configuration using service name
-      DATABASE_URL: postgres://postgres:postgres@db:5432/web3_indexer?sslmode=disable
-      # RPC configuration using service name
-      RPC_URLS: http://anvil:8545
-      # Chain and sync configuration
-      CHAIN_ID: "31337"
-      START_BLOCK: "0"
-      # Contract monitoring (ERC20 Transfer events)
-      WATCH_ADDRESSES: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
-      # API configuration
-      API_PORT: "8080"
-      # Logging
-      LOG_LEVEL: info
-      LOG_FORMAT: json
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/web3_indexer?sslmode=disable
+      - RPC_URLS=http://anvil:8545
+      - CHAIN_ID=31337
+      - START_BLOCK=0
+      - API_PORT=8080
+      - LOG_LEVEL=info
+      - DEMO_MODE=true
     ports:
       - "8080:8080"
     depends_on:
@@ -70,8 +65,6 @@ services:
     networks:
       - web3-network
     restart: unless-stopped
-    profiles:
-      - production  # 仅在production profile下启动
 
 volumes:
   postgres_data:
