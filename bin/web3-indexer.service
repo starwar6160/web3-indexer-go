@@ -1,0 +1,32 @@
+[Unit]
+Description=Web3 Indexer Go Service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/zwCode/web3-indexer-go
+# 启动前确保 Docker 基础设施已启动
+ExecStartPre=/usr/bin/docker compose -f /home/ubuntu/zwCode/web3-indexer-go/docker-compose.infra.yml up -d
+
+# 关键环境变量
+Environment=DATABASE_URL=postgres://postgres:postgres@localhost:15432/web3_indexer?sslmode=disable
+Environment=RPC_URLS=http://localhost:8545
+Environment=CHAIN_ID=31337
+Environment=START_BLOCK=0
+Environment=EMULATOR_ENABLED=true
+Environment=EMULATOR_RPC_URL=http://localhost:8545
+Environment=EMULATOR_PRIVATE_KEY=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+Environment=EMULATOR_TX_INTERVAL=333ms
+Environment=LOG_LEVEL=info
+Environment=CONTINUOUS_MODE=true
+
+ExecStart=/home/ubuntu/zwCode/web3-indexer-go/bin/indexer
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/zwCode/web3-indexer-go/bin/indexer.log
+StandardError=append:/home/ubuntu/zwCode/web3-indexer-go/bin/indexer.err.log
+
+[Install]
+WantedBy=multi-user.target
