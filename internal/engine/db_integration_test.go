@@ -20,22 +20,12 @@ import (
 
 func setupTestDB(t *testing.T) *sqlx.DB {
 	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://postgres:postgres@localhost:15432/web3_indexer?sslmode=disable"
-	}
+	require.NotEmpty(t, dsn, "DATABASE_URL 必须由 TestMain 注入")
 
 	db, err := sqlx.Connect("pgx", dsn)
 	require.NoError(t, err, "必须连接到测试数据库")
 
-	// 强制应用最新 Schema 补丁（工业级防御）
-	_, _ = db.Exec("ALTER TABLE blocks ADD COLUMN IF NOT EXISTS parent_hash VARCHAR(66) NOT NULL DEFAULT ''")
-	_, _ = db.Exec("ALTER TABLE blocks ADD COLUMN IF NOT EXISTS gas_limit BIGINT NOT NULL DEFAULT 0")
-	_, _ = db.Exec("ALTER TABLE blocks ADD COLUMN IF NOT EXISTS gas_used BIGINT NOT NULL DEFAULT 0")
-	_, _ = db.Exec("ALTER TABLE blocks ADD COLUMN IF NOT EXISTS transaction_count INTEGER NOT NULL DEFAULT 0")
-	_, _ = db.Exec("ALTER TABLE blocks ADD COLUMN IF NOT EXISTS base_fee_per_gas NUMERIC(78,0)")
-	_, _ = db.Exec("ALTER TABLE transfers ADD COLUMN IF NOT EXISTS tx_hash CHAR(66) NOT NULL DEFAULT ''")
-
-	// 测试隔离：清空表
+	// 测试隔离：清空表 (TestMain 已处理建表)
 	_, err = db.Exec("TRUNCATE blocks, transfers RESTART IDENTITY CASCADE")
 	require.NoError(t, err)
 
