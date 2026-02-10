@@ -47,7 +47,7 @@ func NewRPCClientPoolWithTimeout(urls []string, timeout time.Duration) (*RPCClie
 
 	pool := &RPCClientPool{
 		clients:     make([]*rpcNode, 0, len(urls)),
-		rateLimiter: rate.NewLimiter(rate.Inf, 0), // 彻底关闭限速
+		rateLimiter: rate.NewLimiter(rate.Limit(20), 40), // 默认 20 RPS, 40 Burst
 	}
 
 	for _, url := range urls {

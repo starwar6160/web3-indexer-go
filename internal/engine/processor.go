@@ -36,7 +36,6 @@ func (e ReorgError) Error() string {
 	return fmt.Sprintf("reorg detected at block %s", e.At.String())
 }
 
-// Processor 处理区块数据写入，支持批量和单条模式
 type Processor struct {
 	db               *sqlx.DB
 	client           RPCClient // RPC client interface for reorg recovery
@@ -47,17 +46,28 @@ type Processor struct {
 	// DLQ / Retry Queue 
 	retryQueue chan BlockData
 	maxRetries int
+
+	// Batch Checkpoint
+	checkpointBatch           int
+	blocksSinceLastCheckpoint int
 }
 
-func NewProcessor(db *sqlx.DB, client RPCClient) *Processor {
+func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int) *Processor {
 	p := &Processor{
-		db:               db,
-		client:           client,
-		watchedAddresses: make(map[common.Address]bool),
-		retryQueue:       make(chan BlockData, 100),
-		maxRetries:       3,
+		db:                        db,
+		client:                    client,
+		watchedAddresses:          make(map[common.Address]bool),
+		retryQueue:                make(chan BlockData, retryQueueSize),
+		maxRetries:                3,
+		checkpointBatch:           100, // 默认每 100 块持久化一次
+		blocksSinceLastCheckpoint: 0,
 	}
 	return p
+}
+
+// SetBatchCheckpoint 设置检查点持久化批次大小
+func (p *Processor) SetBatchCheckpoint(batchSize int) {
+	p.checkpointBatch = batchSize
 }
 
 // StartRetryWorker 启动异步重试工人
@@ -359,24 +369,29 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 					slog.String("to", txToLow),
 				)
 
-				// 构造一个合成的 Transfer 事件 (尝试从 Data 中提取金额以提高准确性)
+				// 构造一个合成的 Transfer 事件 (尝试从交易中提取真实地址)
 				input := tx.Data()
 				syntheticAmount := big.NewInt(1000) // 默认值
+				syntheticTo := txToLow
 				if len(input) >= 68 {
-					// 提取最后 32 字节作为金额 (ERC20 transfer 参数)
+					// 提取第 4-36 字节作为 To 地址 (ERC20 transfer 参数)
+					syntheticTo = common.BytesToAddress(input[16:36]).Hex()
+					// 提取最后 32 字节作为金额
 					syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
-				} else {
-					// 如果数据不足，生成一个随机小额 (演示目的)
-					r, _ := rand.Int(rand.Reader, big.NewInt(50))
-					syntheticAmount.Add(big.NewInt(10), r)
+				}
+
+				// 尝试获取发送者
+				fromAddr := "0xunknown"
+				if msg, err := tx.AsMessage(types.NewEIP155Signer(big.NewInt(1)), nil); err == nil {
+					fromAddr = msg.From().Hex()
 				}
 
 				syntheticTransfer := &models.Transfer{
 					BlockNumber:  models.BigInt{Int: blockNum},
 					TxHash:       tx.Hash().Hex(),
 					LogIndex:     syntheticIdx,
-					From:         strings.ToLower("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"), // Deployer
-					To:           strings.ToLower("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"), // User 1
+					From:         strings.ToLower(fromAddr),
+					To:           strings.ToLower(syntheticTo),
 					Amount:       models.NewUint256FromBigInt(syntheticAmount),
 					TokenAddress: txToLow,
 				}
@@ -400,9 +415,14 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		}
 	}
 
-	// 4. 更新 Checkpoint（在同一事务中保证原子性）
-	if err := p.updateCheckpointInTx(ctx, dbTx, 1, blockNum); err != nil {
-		return fmt.Errorf("failed to update checkpoint for block %s: %w", blockNum.String(), err)
+	// 4. 更新 Checkpoint（按批次更新以提升性能）
+	p.blocksSinceLastCheckpoint++
+	if p.blocksSinceLastCheckpoint >= p.checkpointBatch {
+		if err := p.updateCheckpointInTx(ctx, dbTx, 1, blockNum); err != nil {
+			return fmt.Errorf("failed to update checkpoint for block %s: %w", blockNum.String(), err)
+		}
+		p.blocksSinceLastCheckpoint = 0
+		Logger.Debug("checkpoint_persisted_batch", slog.String("block", blockNum.String()))
 	}
 
 	// 5. 提交事务
@@ -625,6 +645,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	if err := p.updateCheckpointInTx(ctx, dbTx, chainID, lastBlock.Number()); err != nil {
 		return fmt.Errorf("batch checkpoint update failed: %w", err)
 	}
+	p.blocksSinceLastCheckpoint = 0 // 重置计数器
 
 	if err := dbTx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit batch transaction: %w", err)

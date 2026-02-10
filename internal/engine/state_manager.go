@@ -221,16 +221,15 @@ func (sm *StateManager) executeTransition(ctx context.Context, newState IndexerS
 	case StateActive:
 		sm.startActiveMode(ctx)
 	case StateIdle:
-		// 闲置模式不需要特殊操作
+		// 闲置模式：不仅是停顿，还要确保资源释放
+		Logger.Info("entering_true_sleep_mode_releasing_resources")
+		sm.indexer.Stop() 
 	case StateWatching:
 		sm.startWatchingMode(ctx)
 	}
 
 	// 更新状态
 	sm.currentState.Store(int32(newState))
-
-	// 记录指标（暂时注释掉，避免编译错误）
-	// GetMetrics().RecordStateTransition(oldState.String(), newState.String())
 }
 
 // startActiveMode 启动活跃演示模式
