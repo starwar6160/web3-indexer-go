@@ -384,7 +384,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 				}
 
 				// 尝试获取发送者 (使用正确的 EIP155 Signer)
-				fromAddr := "[Internal_Call]"
+				fromAddr := "[Contract_Call]"
 				signer := types.LatestSignerForChainID(big.NewInt(p.chainID)) 
 				if sender, err := types.Sender(signer, tx); err == nil {
 					fromAddr = sender.Hex()
