@@ -390,8 +390,9 @@ func (p *RPCClientPool) GetTotalNodeCount() int {
 	return len(p.clients)
 }
 
-// SetRateLimit 动态设置限速
+// SetRateLimit 动态设置限速 (令牌桶)
 func (p *RPCClientPool) SetRateLimit(rps int, burst int) {
 	p.rateLimiter.SetLimit(rate.Limit(rps))
 	p.rateLimiter.SetBurst(burst)
+	log.Printf("RPC Pool rate limit updated: %d RPS, %d Burst", rps, burst)
 }
