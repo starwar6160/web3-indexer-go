@@ -9,9 +9,9 @@ CREATE TABLE IF NOT EXISTS blocks (
     timestamp BIGINT NOT NULL,
     gas_limit BIGINT NOT NULL,
     gas_used BIGINT NOT NULL,
-    base_fee_per_gas BIGINT,
+    base_fee_per_gas NUMERIC(78, 0),
     transaction_count INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 交易表
