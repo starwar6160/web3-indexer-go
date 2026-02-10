@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -50,9 +49,11 @@ type Processor struct {
 	// Batch Checkpoint
 	checkpointBatch           int
 	blocksSinceLastCheckpoint int
+
+	chainID int64
 }
 
-func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int) *Processor {
+func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int64) *Processor {
 	p := &Processor{
 		db:                        db,
 		client:                    client,
@@ -61,6 +62,7 @@ func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int) *Processor 
 		maxRetries:                3,
 		checkpointBatch:           100, // 默认每 100 块持久化一次
 		blocksSinceLastCheckpoint: 0,
+		chainID:                   chainID,
 	}
 	return p
 }
@@ -380,10 +382,11 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 					syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
 				}
 
-				// 尝试获取发送者
+				// 尝试获取发送者 (使用正确的 EIP155 Signer)
 				fromAddr := "0xunknown"
-				if msg, err := tx.AsMessage(types.NewEIP155Signer(big.NewInt(1)), nil); err == nil {
-					fromAddr = msg.From().Hex()
+				signer := types.LatestSignerForChainID(big.NewInt(p.chainID)) 
+				if sender, err := types.Sender(signer, tx); err == nil {
+					fromAddr = sender.Hex()
 				}
 
 				syntheticTransfer := &models.Transfer{
@@ -596,19 +599,28 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 						slog.String("to", txToLow),
 						slog.String("block", blockNum.String()),
 					)
-					// 尝试从 Data 中提取金额
+					// 尝试从 Data 中提取金额和接收者
 					input := tx.Data()
 					syntheticAmount := big.NewInt(1000)
+					syntheticTo := txToLow
 					if len(input) >= 68 {
+						syntheticTo = common.BytesToAddress(input[16:36]).Hex()
 						syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
+					}
+
+					// 尝试获取发送者
+					fromAddr := "0xunknown"
+					signer := types.LatestSignerForChainID(big.NewInt(chainID))
+					if sender, err := types.Sender(signer, tx); err == nil {
+						fromAddr = sender.Hex()
 					}
 
 					syntheticTransfer := models.Transfer{
 						BlockNumber:  models.BigInt{Int: blockNum},
 						TxHash:       tx.Hash().Hex(),
 						LogIndex:     uint(syntheticIdx),
-						From:         strings.ToLower("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-						To:           strings.ToLower("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+						From:         strings.ToLower(fromAddr),
+						To:           strings.ToLower(syntheticTo),
 						Amount:       models.NewUint256FromBigInt(syntheticAmount),
 						TokenAddress: txToLow,
 					}
