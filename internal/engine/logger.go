@@ -6,7 +6,7 @@ import (
 )
 
 // Logger 全局结构化日志器
-var Logger *slog.Logger
+var Logger = slog.Default()
 
 // InitLogger 初始化结构化日志
 func InitLogger(level string) {

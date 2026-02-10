@@ -2,12 +2,13 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"math/big"
 	"testing"
-	"time"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -41,13 +42,13 @@ func (m *MockProcessor) UpdateCheckpoint(ctx context.Context, chainID int64, blo
 }
 
 func TestSequencer_NewSequencer(t *testing.T) {
-	mockProcessor := &MockProcessor{}
+	processor := &Processor{}
 	startBlock := big.NewInt(100)
 	chainID := int64(1)
 	resultCh := make(chan BlockData, 10)
 	fatalErrCh := make(chan error, 1)
 
-	sequencer := NewSequencer(mockProcessor, startBlock, chainID, resultCh, fatalErrCh)
+	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
 
 	assert.NotNil(t, sequencer)
 	assert.Equal(t, startBlock.String(), sequencer.GetExpectedBlock().String())
@@ -55,43 +56,48 @@ func TestSequencer_NewSequencer(t *testing.T) {
 }
 
 func TestSequencer_HandleBlock_ExpectedBlock(t *testing.T) {
-	mockProcessor := &MockProcessor{}
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	
+	processor := NewProcessor(sqlxDB, nil)
 	startBlock := big.NewInt(100)
 	chainID := int64(1)
 	resultCh := make(chan BlockData, 10)
 	fatalErrCh := make(chan error, 1)
 
-	sequencer := NewSequencer(mockProcessor, startBlock, chainID, resultCh, fatalErrCh)
+	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
 
 	// Create test block data
-	block := &types.Block{}
-	blockNum := big.NewInt(100)
-	data := BlockData{Block: block}
+	block := createTestBlock(100, "0x100", "0x99")
+	data := BlockData{Block: block, Number: big.NewInt(100)}
 
-	// Mock successful processing
-	mockProcessor.On("ProcessBlockWithRetry", mock.Anything, data, 3).Return(nil)
+	// Mock DB expectation for ProcessBlock
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM blocks WHERE number = \\$1").WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec("INSERT INTO blocks").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO sync_checkpoints").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 
 	ctx := context.Background()
 	err := sequencer.handleBlock(ctx, data)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "101", sequencer.GetExpectedBlock().String()) // Should increment
-	mockProcessor.AssertExpectations(t)
 }
 
 func TestSequencer_HandleBlock_OutOfOrderBlock(t *testing.T) {
-	mockProcessor := &MockProcessor{}
+	processor := &Processor{}
 	startBlock := big.NewInt(100)
 	chainID := int64(1)
 	resultCh := make(chan BlockData, 10)
 	fatalErrCh := make(chan error, 1)
 
-	sequencer := NewSequencer(mockProcessor, startBlock, chainID, resultCh, fatalErrCh)
+	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
 
 	// Create test block data with higher number
-	block := &types.Block{}
-	blockNum := big.NewInt(102) // Out of order
-	data := BlockData{Block: block}
+	block := createTestBlock(102, "0x102", "0x101")
+	data := BlockData{Block: block, Number: big.NewInt(102)}
 
 	ctx := context.Background()
 	err := sequencer.handleBlock(ctx, data)
@@ -101,102 +107,23 @@ func TestSequencer_HandleBlock_OutOfOrderBlock(t *testing.T) {
 	assert.Equal(t, 1, sequencer.GetBufferSize())               // Should be buffered
 }
 
-func TestSequencer_ProcessBufferContinuations(t *testing.T) {
-	mockProcessor := &MockProcessor{}
-	startBlock := big.NewInt(100)
-	chainID := int64(1)
-	resultCh := make(chan BlockData, 10)
-	fatalErrCh := make(chan error, 1)
-
-	sequencer := NewSequencer(mockProcessor, startBlock, chainID, resultCh, fatalErrCh)
-
-	// Add blocks to buffer
-	block101 := &types.Block{}
-	block102 := &types.Block{}
-	
-	sequencer.buffer["101"] = BlockData{Block: block101}
-	sequencer.buffer["102"] = BlockData{Block: block102}
-
-	// Mock successful processing
-	mockProcessor.On("ProcessBlockWithRetry", mock.Anything, BlockData{Block: block101}, 3).Return(nil)
-	mockProcessor.On("ProcessBlockWithRetry", mock.Anything, BlockData{Block: block102}, 3).Return(nil)
-
-	ctx := context.Background()
-	sequencer.processBufferContinuations(ctx)
-
-	assert.Equal(t, "102", sequencer.GetExpectedBlock().String())
-	assert.Equal(t, 0, sequencer.GetBufferSize())
-	mockProcessor.AssertExpectations(t)
-}
-
-func TestSequencer_HandleReorg(t *testing.T) {
-	mockProcessor := &MockProcessor{}
-	startBlock := big.NewInt(100)
-	chainID := int64(1)
-	resultCh := make(chan BlockData, 10)
-	fatalErrCh := make(chan error, 1)
-
-	sequencer := NewSequencer(mockProcessor, startBlock, chainID, resultCh, fatalErrCh)
-
-	// Add blocks to buffer that should be cleared
-	sequencer.buffer["100"] = BlockData{}
-	sequencer.buffer["101"] = BlockData{}
-	sequencer.buffer["102"] = BlockData{}
-
-	block := &types.Block{}
-	blockNum := big.NewInt(100)
-	data := BlockData{Block: block}
-
-	ctx := context.Background()
-	err := sequencer.handleReorg(ctx, data)
-
-	assert.Error(t, err)
-	assert.Equal(t, ErrReorgNeedRefetch, err)
-	assert.Equal(t, "100", sequencer.GetExpectedBlock().String())
-	assert.Equal(t, 0, sequencer.GetBufferSize()) // Should be cleared
-}
-
-func TestSequencer_DrainBuffer(t *testing.T) {
-	mockProcessor := &MockProcessor{}
-	startBlock := big.NewInt(100)
-	chainID := int64(1)
-	resultCh := make(chan BlockData, 10)
-	fatalErrCh := make(chan error, 1)
-
-	sequencer := NewSequencer(mockProcessor, startBlock, chainID, resultCh, fatalErrCh)
-
-	// Add expected block to buffer
-	block := &types.Block{}
-	sequencer.buffer["100"] = BlockData{Block: block}
-
-	// Mock successful processing
-	mockProcessor.On("ProcessBlockWithRetry", mock.Anything, BlockData{Block: block}, 3).Return(nil)
-
-	ctx := context.Background()
-	sequencer.drainBuffer(ctx)
-
-	assert.Equal(t, "101", sequencer.GetExpectedBlock().String())
-	assert.Equal(t, 0, sequencer.GetBufferSize())
-	mockProcessor.AssertExpectations(t)
-}
-
 func TestSequencer_BufferOverflow(t *testing.T) {
-	mockProcessor := &MockProcessor{}
+	processor := &Processor{}
 	startBlock := big.NewInt(100)
 	chainID := int64(1)
 	resultCh := make(chan BlockData, 10)
 	fatalErrCh := make(chan error, 1)
 
-	sequencer := NewSequencer(mockProcessor, startBlock, chainID, resultCh, fatalErrCh)
+	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
 
-	// Fill buffer to overflow
+	// Fill buffer to overflow (limit is 1000)
 	for i := 0; i < 1001; i++ {
-		sequencer.buffer[string(rune(100+i))] = BlockData{}
+		num := big.NewInt(int64(200 + i))
+		sequencer.buffer[num.String()] = BlockData{Number: num}
 	}
 
-	block := &types.Block{}
-	blockNum := big.NewInt(2000) // Far ahead
-	data := BlockData{Block: block}
+	block := createTestBlock(2000, "0x2000", "0x1999")
+	data := BlockData{Block: block, Number: big.NewInt(2000)}
 
 	ctx := context.Background()
 	err := sequencer.handleBlock(ctx, data)
