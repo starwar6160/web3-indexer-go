@@ -27,7 +27,8 @@ services:
     container_name: web3-indexer-anvil
     restart: always
     network_mode: host
-    command: ["anvil", "--chain-id", "31337", "--accounts", "10", "--balance", "10000000000000000000000", "--block-time", "2"]
+    entrypoint: ["anvil"]
+    command: ["--host", "127.0.0.1", "--block-time", "1", "--chain-id", "31337", "--accounts", "10"]
     volumes:
       - indexer_anvil_data:/root/.foundry/anvil
     environment:
