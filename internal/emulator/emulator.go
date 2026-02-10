@@ -85,9 +85,11 @@ type Emulator struct {
 	OnSelfHealing func(reason string)
 
 	// 配置参数
-	blockInterval time.Duration
-	txInterval    time.Duration
-	txAmount      *big.Int
+	blockInterval   time.Duration
+	txInterval      time.Duration
+	txAmount        *big.Int
+	maxGasPrice     int64 // 最大允许的 Gas Price (Gwei)
+	gasSafetyMargin int   // Gas Limit 安全裕度 (%)
 
 	logger *slog.Logger
 }
@@ -116,15 +118,17 @@ func NewEmulator(rpcURL string, privKeyHex string) (*Emulator, error) {
 	}
 
 	return &Emulator{
-		client:        client,
-		privateKey:    privKey,
-		fromAddr:      fromAddr,
-		chainID:       chainID,
-		nm:            nm,
-		blockInterval: 3 * time.Second,
-		txInterval:    5 * time.Second, // 演示建议 5 秒
-		txAmount:      big.NewInt(100),
-		logger:        engine.Logger,
+		client:          client,
+		privateKey:      privKey,
+		fromAddr:        fromAddr,
+		chainID:         chainID,
+		nm:              nm,
+		blockInterval:   3 * time.Second,
+		txInterval:      5 * time.Second, // 演示建议 5 秒
+		txAmount:        big.NewInt(100),
+		maxGasPrice:     500, // 默认 500 Gwei
+		gasSafetyMargin: 20,  // 默认 20%
+		logger:          engine.Logger,
 	}, nil
 }
 
@@ -202,12 +206,20 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 		return common.Address{}, err
 	}
 
+	// 限制最大 Gas Price
+	maxPrice := new(big.Int).Mul(big.NewInt(e.maxGasPrice), big.NewInt(1e9))
+	if gasPrice.Cmp(maxPrice) > 0 {
+		e.logger.Warn("⚠️ Gas price exceeded limit, capping", slog.String("original", gasPrice.String()), slog.String("capped", maxPrice.String()))
+		gasPrice = maxPrice
+	}
+
 	bytecode := common.FromHex(erc20Bytecode)
 	estimatedGas, err := e.client.EstimateGas(ctx, ethereum.CallMsg{From: e.fromAddr, Data: bytecode})
 	if err != nil {
 		estimatedGas = 1500000
 	} else {
-		estimatedGas = estimatedGas + (estimatedGas / 5)
+		// 应用动态安全裕度
+		estimatedGas = estimatedGas + (estimatedGas * uint64(e.gasSafetyMargin) / 100)
 	}
 
 	tx := types.NewContractCreation(nonce, big.NewInt(0), estimatedGas, gasPrice, bytecode)
@@ -244,6 +256,12 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 		return
 	}
 
+	// 限制最大 Gas Price
+	maxPrice := new(big.Int).Mul(big.NewInt(e.maxGasPrice), big.NewInt(1e9))
+	if gasPrice.Cmp(maxPrice) > 0 {
+		gasPrice = maxPrice
+	}
+
 	// 演示级随机金额生成 (1-100)
 	randomVal, _ := rand.Int(rand.Reader, big.NewInt(100))
 	transferVal := new(big.Int).Add(randomVal, big.NewInt(1))
@@ -266,7 +284,8 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	if err != nil {
 		estimatedGas = 100000
 	} else {
-		estimatedGas = estimatedGas + (estimatedGas / 5)
+		// 应用动态安全裕度
+		estimatedGas = estimatedGas + (estimatedGas * uint64(e.gasSafetyMargin) / 100)
 	}
 
 	tx := types.NewTransaction(nonce, e.contract, big.NewInt(0), estimatedGas, gasPrice, data)
@@ -345,6 +364,12 @@ func (e *Emulator) SetTxAmount(amount *big.Int) {
 // GetContractAddress 返回部署的合约地址
 func (e *Emulator) GetContractAddress() common.Address {
 	return e.contract
+}
+
+// SetSecurityConfig 设置安全保护参数
+func (e *Emulator) SetSecurityConfig(maxGasPrice int64, margin int) {
+	e.maxGasPrice = maxGasPrice
+	e.gasSafetyMargin = margin
 }
 
 // erc20Bytecode 现在是动态的：它会读取 calldata 中的 amount 和 to 地址，并正确触发 Transfer 事件

@@ -408,7 +408,10 @@ func main() {
 	}
 	defer rpcPool.Close()
 
-	// 等待RPC池至少有一个健康节点，避免Anvil尚未就绪导致连接重置
+	// 应用配置的限速
+	rpcPool.SetRateLimit(cfg.RPCRateLimit, cfg.RPCRateLimit*2)
+
+	// 等待RPC池至少有一个健康节点
 	readyWait := 30 * time.Second
 	if ok := rpcPool.WaitForHealthy(readyWait); !ok {
 		engine.Logger.Error("rpc_pool_not_ready",
@@ -424,12 +427,19 @@ func main() {
 		slog.Int("healthy_nodes", healthyNodes),
 		slog.Int("total_urls", len(cfg.RPCURLs)),
 		slog.Duration("timeout", cfg.RPCTimeout),
+		slog.Int("rate_limit_rps", cfg.RPCRateLimit),
 	)
 
 	// 3. 初始化组件
-	// 根据配置设置并发和速率限制
 	fetcher := engine.NewFetcher(rpcPool, cfg.FetchConcurrency)
-	processor := engine.NewProcessor(db, rpcPool) // 传入RPC池用于reorg恢复
+	processor := engine.NewProcessor(db, rpcPool, cfg.RetryQueueSize) 
+	
+	// 应用工业级配置
+	processor.SetBatchCheckpoint(cfg.CheckpointBatch)
+	engine.Logger.Info("processor_configured", 
+		slog.Int("checkpoint_batch", cfg.CheckpointBatch),
+		slog.Int("retry_queue_size", cfg.RetryQueueSize),
+	)
 
 	// 如果并发较高（如针对 Anvil），放宽速率限制以实现“瞬间追平”
 
@@ -481,6 +491,13 @@ func main() {
 			// 配置仿真器参数
 			emulatorInstance.SetBlockInterval(emuConfig.BlockInterval)
 			emulatorInstance.SetTxInterval(emuConfig.TxInterval)
+			
+			// 注入工业级保护参数
+			emulatorInstance.SetSecurityConfig(cfg.MaxGasPrice, cfg.GasSafetyMargin)
+			engine.Logger.Info("emulator_security_configured",
+				slog.Int64("max_gas_price", cfg.MaxGasPrice),
+				slog.Int("gas_margin", cfg.GasSafetyMargin),
+			)
 
 			// 在后台启动仿真引擎
 			wg.Add(1)
@@ -740,55 +757,120 @@ func main() {
 	</div>
 
 	<script>
-		// Fetch and update data every 5 seconds
-		const updateInterval = 5000;
+		let ws;
+		const stateEl = document.getElementById('state');
+		const healthEl = document.getElementById('health');
 
-		async function fetchData() {
-			try {
-				// Fetch status
-				const statusRes = await fetch('/api/status');
-				const statusData = await statusRes.json();
-				document.getElementById('state').textContent = statusData.state || 'unknown';
-				document.getElementById('latestBlock').textContent = statusData.latest_block || '0';
-				document.getElementById('totalBlocks').textContent = statusData.total_blocks || '0';
-				document.getElementById('totalTransfers').textContent = statusData.total_transfers || '0';
-				document.getElementById('syncLag').textContent = statusData.sync_lag || '0';
-				document.getElementById('selfHealing').textContent = statusData.self_healing_count || '0';
-				document.getElementById('health').textContent = statusData.is_healthy ? '✅ Healthy' : '⚠️ Unhealthy';
-				document.getElementById('health').className = statusData.is_healthy ? 'status-badge status-healthy' : 'status-badge status-error';
+		function connectWS() {
+			const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+			const wsUrl = protocol + '//' + window.location.host + '/ws';
+			
+			stateEl.textContent = 'CONNECTING...';
+			stateEl.style.color = '#ffc107';
 
-				// Fetch blocks
-				const blocksRes = await fetch('/api/blocks');
-				const blocksData = await blocksRes.json();
-				const blocksTable = document.getElementById('blocksTable');
-				if (blocksData.blocks && blocksData.blocks.length > 0) {
-					blocksTable.innerHTML = blocksData.blocks.map(block => '<tr><td class="stat-value">' + block.number + '</td><td class="hash">' + block.hash.substring(0, 16) + '...</td><td class="hash">' + block.parent_hash.substring(0, 16) + '...</td><td>' + new Date(block.processed_at).toLocaleString() + '</td></tr>').join('');
-				} else {
-					blocksTable.innerHTML = '<tr><td colspan="4" class="loading">No blocks yet</td></tr>';
+			ws = new WebSocket(wsUrl);
+
+			ws.onopen = () => {
+				stateEl.textContent = 'LIVE';
+				stateEl.style.color = '#28a745';
+				healthEl.textContent = '✅ Healthy';
+				healthEl.className = 'status-badge status-healthy';
+				console.log('✅ WebSocket Connected');
+				// Initial fetch to fill the tables
+				fetchData();
+			};
+
+			ws.onmessage = (event) => {
+				const msg = JSON.parse(event.data);
+				if (msg.type === 'block') {
+					updateBlocksTable(msg.data);
+					// Also update status counts
+					fetchStatus();
+				} else if (msg.type === 'transfer') {
+					updateTransfersTable(msg.data);
 				}
+			};
 
-				// Fetch transfers
-				const transfersRes = await fetch('/api/transfers');
-				const transfersData = await transfersRes.json();
-				const transfersTable = document.getElementById('transfersTable');
-				if (transfersData.transfers && transfersData.transfers.length > 0) {
-					transfersTable.innerHTML = transfersData.transfers.map(transfer => '<tr><td class="stat-value">' + transfer.block_number + '</td><td class="address">' + transfer.from_address.substring(0, 10) + '...</td><td class="address">' + transfer.to_address.substring(0, 10) + '...</td><td class="stat-value">' + transfer.amount + '</td><td class="address">' + transfer.token_address.substring(0, 10) + '...</td></tr>').join('');
-				} else {
-					transfersTable.innerHTML = '<tr><td colspan="5" class="loading">No transfers yet</td></tr>';
-				}
+			ws.onclose = () => {
+				stateEl.textContent = 'DISCONNECTED';
+				stateEl.style.color = '#dc3545';
+				console.log('❌ WebSocket Disconnected. Retrying in 5s...');
+				setTimeout(connectWS, 5000);
+			};
 
-				document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-			} catch (error) {
-				console.error('Error fetching data:', error);
-				document.getElementById('lastUpdate').textContent = 'Error: ' + error.message;
-			}
+			ws.onerror = (err) => {
+				console.error('WebSocket Error:', err);
+				ws.close();
+			};
 		}
 
-		// Initial fetch
-		fetchData();
+		async function fetchStatus() {
+			try {
+				const res = await fetch('/api/status');
+				const data = await res.json();
+				document.getElementById('latestBlock').textContent = data.latest_chain_block || '0';
+				document.getElementById('totalBlocks').textContent = data.total_blocks || '0';
+				document.getElementById('totalTransfers').textContent = data.total_transfers || '0';
+				document.getElementById('syncLag').textContent = data.sync_lag || '0';
+				document.getElementById('selfHealing').textContent = data.self_healing_count || '0';
+				document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+			} catch (e) { console.error(e); }
+		}
 
-		// Set up polling
-		setInterval(fetchData, updateInterval);
+		function updateBlocksTable(block) {
+			const table = document.getElementById('blocksTable');
+			// Remove loading row if exists
+			if (table.querySelector('.loading')) table.innerHTML = '';
+			
+			const row = `<tr>
+				<td class="stat-value">${block.number}</td>
+				<td class="hash">${block.hash.substring(0, 16)}...</td>
+				<td class="hash">${block.hash.substring(0, 16)}...</td>
+				<td>${new Date().toLocaleTimeString()}</td>
+			</tr>`;
+			table.insertAdjacentHTML('afterbegin', row);
+			
+			// Keep only last 10
+			if (table.rows.length > 10) table.deleteRow(10);
+		}
+
+		function updateTransfersTable(tx) {
+			const table = document.getElementById('transfersTable');
+			if (table.querySelector('.loading')) table.innerHTML = '';
+
+			const row = `<tr>
+				<td class="stat-value">${tx.block_number}</td>
+				<td class="address">${tx.from.substring(0, 10)}...</td>
+				<td class="address">${tx.to.substring(0, 10)}...</td>
+				<td class="stat-value" style="color: #667eea;">${tx.value}</td>
+				<td class="address">${tx.token_address.substring(0, 10)}...</td>
+			</tr>`;
+			table.insertAdjacentHTML('afterbegin', row);
+			if (table.rows.length > 10) table.deleteRow(10);
+		}
+
+		async function fetchData() {
+			await fetchStatus();
+			// Initial full list fetch
+			try {
+				const [blocksRes, txRes] = await Promise.all([fetch('/api/blocks'), fetch('/api/transfers')]);
+				const blocksData = await blocksRes.json();
+				const txData = await txRes.json();
+				
+				if (blocksData.blocks) {
+					const table = document.getElementById('blocksTable');
+					table.innerHTML = blocksData.blocks.map(b => `<tr><td class="stat-value">${b.number}</td><td class="hash">${b.hash.substring(0, 16)}...</td><td class="hash">${b.parent_hash.substring(0, 16)}...</td><td>${new Date(b.processed_at).toLocaleString()}</td></tr>`).join('');
+				}
+				
+				if (txData.transfers) {
+					const table = document.getElementById('transfersTable');
+					table.innerHTML = txData.transfers.map(t => `<tr><td class="stat-value">${t.block_number}</td><td class="address">${t.from_address.substring(0, 10)}...</td><td class="address">${t.to_address.substring(0, 10)}...</td><td class="stat-value">${t.amount}</td><td class="address">${t.token_address.substring(0, 10)}...</td></tr>`).join('');
+				}
+			} catch (e) { console.error(e); }
+		}
+
+		// Init
+		connectWS();
 	</script>
 </body>
 </html>`)
