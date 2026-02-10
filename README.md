@@ -8,17 +8,17 @@
 
 ## 🛠️ Quick Start (3 Minutes)
 
-为了方便面试官/猎头快速复现，本项目支持一键启动完整的端到端环境（包含 Anvil 私有链、Postgres 数据库及高频交易压测）：
+为了实现真正的“开箱即用”，本项目已实现全栈容器化。**面试官的机器上只需安装 Docker**，即可一键启动完整的端到端环境（包含 Anvil 私有链、Postgres 数据库及高频交易压测）：
 
 ```bash
-git clone https://github.com/username/web3-indexer-go
+git clone https://github.com/starwar6160/web3-indexer-go
 cd web3-indexer-go
 
-# 一键启动演示流水线 (重置环境 + 实时产块 + 高频交易模拟)
+# 一键启动演示流水线 (全栈 Docker 化，无需本地安装 Go/Postgres)
 make demo 
 ```
 
-*`make demo` 内部集成了：`clean-env` -> `docker-compose up` -> `db-migrate` -> `indexer-start` -> `stress-test`.*
+*`make demo` 内部集成了：`docker compose down` -> `docker compose up --build` -> `stress-test`.*
 
 ---
 
