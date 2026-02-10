@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -57,10 +58,13 @@ func NewHub() *Hub {
 	}
 }
 
-func (h *Hub) Run() {
+func (h *Hub) Run(ctx context.Context) {
 	h.logger.Info("websocket_hub_started")
 	for {
 		select {
+		case <-ctx.Done():
+			h.logger.Info("websocket_hub_stopping")
+			return
 		case client := <-h.register:
 			h.clients[client] = true
 			h.logger.Info("ws_client_connected", slog.Int("total_clients", len(h.clients)))

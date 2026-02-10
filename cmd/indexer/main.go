@@ -405,7 +405,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		wsHub.Run()
+		wsHub.Run(ctx)
 	}()
 
 	// 将 Processor 产生的事件对接到 WebSocket 广播

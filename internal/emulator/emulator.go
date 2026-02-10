@@ -3,6 +3,7 @@ package emulator
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -41,18 +42,12 @@ func NewNonceManager(client *ethclient.Client, addr common.Address, logger *slog
 	}, nil
 }
 
-// GetNextNonce 获取并递增 Nonce
 func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 
-	// 每次获取前，先检查链上实际状态，防止外部干扰或本地缓存漂移
 	currentChainNonce, err := nm.client.PendingNonceAt(ctx, nm.address)
-	if err != nil {
-		return 0, err
-	}
-
-	if currentChainNonce > nm.pendingNonce {
+	if err == nil && currentChainNonce > nm.pendingNonce {
 		nm.logger.Warn("nonce_drift_detected_fixing",
 			slog.Uint64("local", nm.pendingNonce),
 			slog.Uint64("chain", currentChainNonce),
@@ -65,7 +60,6 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	return nonce, nil
 }
 
-// ResyncNonce 强制从链上同步 Nonce
 func (nm *NonceManager) ResyncNonce(ctx context.Context) error {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
@@ -79,7 +73,6 @@ func (nm *NonceManager) ResyncNonce(ctx context.Context) error {
 }
 
 // Emulator 是内置的流量生成引擎
-// 它自动部署 ERC20 合约并定期发送转账交易
 type Emulator struct {
 	client     *ethclient.Client
 	privateKey *ecdsa.PrivateKey
@@ -89,21 +82,19 @@ type Emulator struct {
 	nm         *NonceManager
 
 	// 配置参数
-	blockInterval time.Duration // 触发新区块的间隔
-	txInterval    time.Duration // 发送交易的间隔
-	txAmount      *big.Int      // 每笔转账的金额
+	blockInterval time.Duration
+	txInterval    time.Duration
+	txAmount      *big.Int
 
 	logger *slog.Logger
 }
 
-// NewEmulator 创建一个新的仿真器实例
 func NewEmulator(rpcURL string, privKeyHex string) (*Emulator, error) {
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to RPC: %w", err)
 	}
 
-	// 解析私钥
 	privKeyHex = strings.TrimPrefix(privKeyHex, "0x")
 	privKey, err := crypto.HexToECDSA(privKeyHex)
 	if err != nil {
@@ -128,26 +119,42 @@ func NewEmulator(rpcURL string, privKeyHex string) (*Emulator, error) {
 		chainID:       chainID,
 		nm:            nm,
 		blockInterval: 3 * time.Second,
-		txInterval:    8 * time.Second,
-		txAmount:      big.NewInt(1000),
+		txInterval:    5 * time.Second, // 演示建议 5 秒
+		txAmount:      big.NewInt(100),
 		logger:        engine.Logger,
 	}, nil
 }
 
-// Start 启动仿真引擎
-// 它会自动部署合约，然后定期发送交易
+// ensureBalance 演示级余额补给逻辑
+func (e *Emulator) ensureBalance(ctx context.Context) error {
+	balance, err := e.client.BalanceAt(ctx, e.fromAddr, nil)
+	if err != nil {
+		return err
+	}
+
+	// 阈值：50 ETH
+	threshold := new(big.Int).Mul(big.NewInt(50), big.NewInt(1e18))
+	if balance.Cmp(threshold) < 0 {
+		e.logger.Info("🚨 余额不足，正在自动执行演示级补给...", slog.String("current", balance.String()))
+		// 使用 Anvil 特有的 setBalance 方法
+		err := e.client.Client().CallContext(ctx, nil, "anvil_setBalance", e.fromAddr, "0x3635C9ADC5DEA00000") // 1000 ETH
+		if err != nil {
+			return fmt.Errorf("auto_topup_failed: %w", err)
+		}
+		e.logger.Info("✅ 余额补给成功！", slog.String("address", e.fromAddr.Hex()))
+	}
+	return nil
+}
+
 func (e *Emulator) Start(ctx context.Context, addressChan chan<- common.Address) error {
 	e.logger.Info("emulator_starting",
 		slog.String("from_address", e.fromAddr.Hex()),
 		slog.String("chain_id", e.chainID.String()),
 	)
 
-	// 0. 显式资金储备
-	err := e.client.Client().CallContext(ctx, nil, "anvil_setBalance", e.fromAddr, "0x3635C9ADC5DEA00000") // 1000 ETH
-	if err != nil {
-		e.logger.Warn("failed_to_set_anvil_balance", slog.String("error", err.Error()))
-	} else {
-		e.logger.Info("deployer_account_funded", slog.String("address", e.fromAddr.Hex()))
+	// 初始充值
+	if err := e.ensureBalance(ctx); err != nil {
+		e.logger.Warn("initial_funding_failed_proceeding", slog.String("error", err.Error()))
 	}
 
 	// 1. 自动部署合约
@@ -155,47 +162,32 @@ func (e *Emulator) Start(ctx context.Context, addressChan chan<- common.Address)
 	contractAddr, err := e.deployContract(deployCtx)
 	cancel()
 	if err != nil {
-		e.logger.Error("contract_deployment_failed", slog.String("error", err.Error()))
 		return err
 	}
 	e.contract = contractAddr
 	e.logger.Info("contract_deployed", slog.String("address", contractAddr.Hex()))
 
-	// 2. 将新地址发送给 Indexer 自动配置
 	if addressChan != nil {
 		select {
 		case addressChan <- contractAddr:
-			e.logger.Info("contract_address_sent_to_indexer")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 
-	// 3. 启动定时器循环
-	blockTicker := time.NewTicker(e.blockInterval)
 	txTicker := time.NewTicker(e.txInterval)
-	defer blockTicker.Stop()
 	defer txTicker.Stop()
-
-	e.logger.Info("emulator_loop_started",
-		slog.String("block_interval", e.blockInterval.String()),
-		slog.String("tx_interval", e.txInterval.String()),
-	)
 
 	for {
 		select {
 		case <-ctx.Done():
-			e.logger.Info("emulator_stopped")
 			return ctx.Err()
-		case <-blockTicker.C:
-			// Anvil auto-mines
 		case <-txTicker.C:
 			e.sendTransfer(ctx)
 		}
 	}
 }
 
-// deployContract 部署一个简单的 ERC20 合约
 func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 	nonce, err := e.nm.GetNextNonce(ctx)
 	if err != nil {
@@ -208,17 +200,10 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 	}
 
 	bytecode := common.FromHex(erc20Bytecode)
-
-	// 动态估算部署 Gas
-	estimatedGas, err := e.client.EstimateGas(ctx, ethereum.CallMsg{
-		From: e.fromAddr,
-		Data: bytecode,
-	})
+	estimatedGas, err := e.client.EstimateGas(ctx, ethereum.CallMsg{From: e.fromAddr, Data: bytecode})
 	if err != nil {
-		e.logger.Warn("gas_estimation_failed_using_default", slog.String("error", err.Error()))
-		estimatedGas = 1500000 // Fallback
+		estimatedGas = 1500000
 	} else {
-		// 增加 20% 安全裕度
 		estimatedGas = estimatedGas + (estimatedGas / 5)
 	}
 
@@ -228,9 +213,8 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	err = e.client.SendTransaction(ctx, signedTx)
-	if err != nil {
-		e.nm.ResyncNonce(ctx) // 发送失败需重同步 Nonce
+	if err := e.client.SendTransaction(ctx, signedTx); err != nil {
+		e.nm.ResyncNonce(ctx)
 		return common.Address{}, err
 	}
 
@@ -238,76 +222,68 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 	if err != nil {
 		return common.Address{}, err
 	}
-
 	return receipt.ContractAddress, nil
 }
 
-// sendTransfer 发送 ERC20 转账交易
 func (e *Emulator) sendTransfer(ctx context.Context) {
+	// 每次发送前检查并补充余额 (6个9持久性保障)
+	if err := e.ensureBalance(ctx); err != nil {
+		e.logger.Warn("balance_check_failed", slog.String("error", err.Error()))
+	}
+
 	nonce, err := e.nm.GetNextNonce(ctx)
 	if err != nil {
-		e.logger.Error("failed_to_get_nonce", slog.String("error", err.Error()))
 		return
 	}
 
 	gasPrice, err := e.client.SuggestGasPrice(ctx)
 	if err != nil {
-		e.logger.Error("failed_to_get_gas_price", slog.String("error", err.Error()))
 		return
 	}
+
+	// 演示级随机金额生成 (1-100)
+	randomVal, _ := rand.Int(rand.Reader, big.NewInt(100))
+	transferVal := new(big.Int).Add(randomVal, big.NewInt(1))
 
 	methodID := common.FromHex("0xa9059cbb")
 	targetAddr := common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
 	toAddr := common.LeftPadBytes(targetAddr.Bytes(), 32)
-	amount := common.LeftPadBytes(e.txAmount.Bytes(), 32)
+	amount := common.LeftPadBytes(transferVal.Bytes(), 32)
 
 	var data []byte
 	data = append(data, methodID...)
 	data = append(data, toAddr...)
 	data = append(data, amount...)
 
-	// 动态估算转账 Gas
-	estimatedGas, err := e.client.EstimateGas(ctx, ethereum.CallMsg{
-		From: e.fromAddr,
-		To:   &e.contract,
-		Data: data,
-	})
+	estimatedGas, err := e.client.EstimateGas(ctx, ethereum.CallMsg{From: e.fromAddr, To: &e.contract, Data: data})
 	if err != nil {
-		e.logger.Warn("transfer_gas_estimation_failed_using_default", slog.String("error", err.Error()))
-		estimatedGas = 100000 // Fallback
+		estimatedGas = 100000
 	} else {
-		estimatedGas = estimatedGas + (estimatedGas / 5) // 20% 裕度
+		estimatedGas = estimatedGas + (estimatedGas / 5)
 	}
 
 	tx := types.NewTransaction(nonce, e.contract, big.NewInt(0), estimatedGas, gasPrice, data)
 	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(e.chainID), e.privateKey)
 	if err != nil {
-		e.logger.Error("failed_to_sign_transfer_tx", slog.String("error", err.Error()))
 		return
 	}
 
-	err = e.client.SendTransaction(ctx, signedTx)
-	if err != nil {
-		e.logger.Error("failed_to_send_transfer_tx", slog.String("error", err.Error()))
+	if err := e.client.SendTransaction(ctx, signedTx); err != nil {
+		e.logger.Error("send_failed", slog.String("error", err.Error()))
 		e.nm.ResyncNonce(ctx)
 		return
 	}
 
 	e.logger.Info("📤 [Emulator] Sent REAL Transfer",
 		slog.String("tx_hash", signedTx.Hash().Hex()),
+		slog.String("amount", transferVal.String()),
 		slog.Uint64("nonce", nonce),
-		slog.Uint64("gas_limit", estimatedGas),
 	)
 
 	go func() {
 		receipt, err := e.waitForReceipt(ctx, signedTx.Hash())
-		if err != nil {
-			e.logger.Error("❌ [Emulator] Confirmation timeout", slog.String("tx_hash", signedTx.Hash().Hex()))
-		} else {
-			e.logger.Info("✅ [Emulator] Confirmed in block",
-				slog.String("tx_hash", signedTx.Hash().Hex()),
-				slog.Uint64("block", receipt.BlockNumber.Uint64()),
-			)
+		if err == nil {
+			e.logger.Info("✅ [Emulator] Confirmed", slog.String("hash", signedTx.Hash().Hex()[:10]), slog.Uint64("block", receipt.BlockNumber.Uint64()))
 		}
 	}()
 }
@@ -316,7 +292,6 @@ func (e *Emulator) waitForReceipt(ctx context.Context, hash common.Hash) (*types
 	deadline := time.Now().Add(30 * time.Second)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -327,7 +302,7 @@ func (e *Emulator) waitForReceipt(ctx context.Context, hash common.Hash) (*types
 				return receipt, nil
 			}
 			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("timeout waiting for receipt %s", hash.Hex())
+				return nil, fmt.Errorf("timeout")
 			}
 		}
 	}

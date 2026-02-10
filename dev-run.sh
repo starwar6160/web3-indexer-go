@@ -62,7 +62,16 @@ go build -o bin/indexer cmd/indexer/main.go
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}编译成功！服务启动中...${NC}"
     echo -e "${BLUE}Dashboard: http://localhost:8080${NC}"
-    ./bin/indexer
+    
+    # 正常启动 indexer，并捕获它的 PID
+    ./bin/indexer &
+    INDEXER_PID=$!
+
+    # 捕获 Ctrl+C 并优雅关闭
+    trap "echo -e '\n${YELLOW}正在优雅关闭...${NC}'; kill -SIGINT $INDEXER_PID; docker compose stop anvil; wait $INDEXER_PID; echo -e '${RED}所有服务已停止${NC}'; exit" INT
+
+    # 持续等待子进程
+    wait $INDEXER_PID
 else
     echo -e "${RED}编译失败，请检查代码错误${NC}"
     exit 1
