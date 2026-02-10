@@ -1,86 +1,88 @@
-# 🚀 Web3 Indexer Dashboard
+Web3 Indexer Dashboard — 项目简介（简洁、便于技术验证）
 
-**Live Demo:** [https://demo2.st6160.click/](https://demo2.st6160.click/)
+Live demo: https://demo2.st6160.click/
 
-> **Engineering Philosophy**: 20 年后端架构经验沉淀，专注于 Web3 基础设施的稳定性（SRE 级可靠性）与可观测性。本项目展示了如何将传统高性能分布式系统设计（Fetcher/Sequencer 解耦、流水线架构）与区块链技术栈深度融合。
+概述
+- 一个全栈容器化的 Web3 索引器示例工程，侧重可观测性与稳定性。实现了 Fetcher / Sequencer / Processor 解耦的流水线设计、RPC 池的自动故障转移、以及面向高频交易场景的 nonce 对齐与状态持久化。工程以可复现的方式提供端到端环境，便于技术人员验证功能与性能指标。
 
----
+快速启动（最少依赖）
+- 前提：目标机器安装了 Docker 与 Docker Compose。
+- 克隆并启动示例环境：
+  ```
+  git clone https://github.com/starwar6160/web3-indexer-go
+  cd web3-indexer-go
+  make demo
+  ```
+  make demo 的流程：docker compose down -> docker compose up --build -> stress-test（包含 Anvil 私链、Postgres、Indexer、Dashboard 与压测工具）。
 
-## 🛠️ Quick Start (3 Minutes)
-
-为了实现真正的“开箱即用”，本项目已实现全栈容器化。**面试官的机器上只需安装 Docker**，即可一键启动完整的端到端环境（包含 Anvil 私有链、Postgres 数据库及高频交易压测）：
-
-```bash
-git clone https://github.com/starwar6160/web3-indexer-go
-cd web3-indexer-go
-
-# 一键启动演示流水线 (全栈 Docker 化，无需本地安装 Go/Postgres)
-make demo 
+如何验证（建议步骤）
+1. 检查容器状态
+  ```
+  docker compose ps
+  docker logs -f web3-indexer-indexer
+  ```
+2. 发送一笔手动交易（在 anvil 容器内使用 cast）
 ```
-
-*`make demo` 内部集成了：`docker compose down` -> `docker compose up --build` -> `stress-test`.*
-
----
-
-## 🧠 核心研发要点 (Key Insights)
-
-* **状态自愈与高吞吐**：针对高频转账（TPS ~50）场景，实现了基于 `Fetcher-Sequencer-Processor` 的解耦流水线架构。内置 `nonce_drift` 自动对齐逻辑，确保在高负载下索引不中断且数据 100% 一致。
-* **智能休眠系统 (Smart Sleep)**：
-    - **Active Mode**: 5分钟高性能演示模式。
-    - **Idle Mode**: 无活动时自动进入，RPC 消耗降至 0。
-    - **Watching Mode**: 通过 WebSocket 监听实现极低成本实时监控（97% 成本节省）。
-* **SRE 级防御与穿透**：通过 Cloudflare Tunnel 实现零信任内网穿透，将内网物理节点（MiniPC）安全暴露至公网。配置边缘 WAF 规则，精准拦截恶意爬虫，保障服务在公网的稳定性。
-* **高可用 RPC 池**：内置多节点故障转移机制，支持 RPC 节点自动健康检查与切换，确保 99.9% 的可用性。
-* **实时可观测性**：基于 WebSocket 的持久连接，内置 Ping/Pong 心跳机制，有效应对 CDN 代理导致的静默断连，Dashboard 实时展示 TPS、区块高度及系统状态。
-
----
-
-## ✨ 核心特性
-
-### 🎯 成本优化
-| 模式 | RPC配额使用 | 节省比例 | 适用场景 |
-|------|-------------|----------|----------|
-| **Active** | ~2.4M credits/day | 0% | 演示模式 |
-| **Idle** | ~0 credits/day | **100%** | 长期休眠 |
-| **Watching** | ~0.1M credits/day | **97%** | 低功耗监控 |
-
-### 🛡️ 稳定性保障
-- **优雅停机**: 完整 Checkpoint 持久化，数据零丢失。
-- **并发性能**: 基于 Go Coroutine 池，支持 10+ 并发 Worker。
-- **内存优化**: 运行时内存占用 < 200MB。
-
----
-
-## ⚙️ 技术栈
-
-- **Language**: Go 1.21+ (Concurrency, Context management)
-- **Persistence**: PostgreSQL
-- **Infrastructure**: Docker & Docker Compose
-- **Dev Chain**: Anvil (Foundry)
-- **Monitoring**: Prometheus & Web Dashboard (Vanilla JS/CSS for zero-dependency)
-- **Deployment**: Cloudflare Tunnel (Zero Trust Architecture)
-
----
-
-## 📂 项目结构
-
+# 进入 anvil 容器手动打一笔钱
+docker exec -it web3-indexer-anvil cast send --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --value 1ether 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 --rpc-url http://127.0.0.1:8545
 ```
+  验证点：Indexer 日志应记录该交易并写入数据库；Dashboard（由 docker-compose 暴露的端口）会在近期区块/交易数展示相关变化。
+
+3. 运行或观察压测（make demo 已包含）
+  - 观察 TPS、区块高度、索引延迟变化。
+  - 在 Postgres 中比对交易条目数：
+    ```
+    psql -h localhost -p <pg-port> -U <user> -d <db> -c "SELECT COUNT(*) FROM txs;"
+    ```
+    与链上区块/交易数量进行对应比对，确认数据一致性。
+
+关键实现点（便于验证与代码审查）
+- 架构：Fetcher → Sequencer → Processor 三阶段流水线，职责分离，便于扩展与单元测试。
+- 非常规场景处理：
+  - nonce_drift 自动对齐：处理并发发送时的 nonce 冲突，保证在高负载下索引的一致性。
+  - Checkpoint 持久化：关键进度点（例如已处理区块高度/交易指针）持久写入 Postgres，以支持优雅停机与恢复。
+- Smart Sleep 模式（节省 RPC 调用）：
+  - Active（高性能短时运行）
+  - Watching（通过 WebSocket 低频监听，显著降低 RPC 消耗）
+  - Idle（无活动时几乎不消耗 RPC 配额）
+  验证方式：切换场景并观察 RPC 请求量、Dashboard 状态与日志中模式切换记录。
+- RPC 池：支持多节点健康检查与故障切换，验证方法为模拟 RPC 节点下线并观察自动切换与重试行为。
+- 连接稳定性：WebSocket 持久连接 + Ping/Pong 心跳，缓解 CDN/代理导致的静默断连问题。可以通过主动断连/代理模拟来验证重连逻辑。
+- 并发与资源：基于 Go 的协程池，支持 10+ 并发 worker；运行时内存占用控制在较低范围（工程中目标 <200MB）。可通过容器监控（docker stats / Prometheus 指标）验证。
+
+可观测性与 SRE 实践
+- Prometheus 指标 + Dashboard（Vanilla JS）展示 TPS、区块高度、队列长度、RPC 健康等。
+- 日志与指标用于定位瓶颈：Fetcher/Sequencer/Processor 的延迟、重试计数与失败率均可在指标中分解查看。
+- 可安全暴露内网节点（示例使用 Cloudflare Tunnel 配置），生产部署应注意访问控制与 WAF 规则配置。
+
+技术栈
+- Go 1.21+（并发与 Context 管理）
+- PostgreSQL（持久化与 Checkpoint）
+- Docker / Docker Compose（环境复现）
+- Anvil (Foundry) 作本地开发链
+- Prometheus + 简易 Web Dashboard（零前端依赖）
+- Cloudflare Tunnel（示例的内网穿透/零信任方案）
+
+项目结构（便于定位实现）
 web3-indexer-go/
-├── cmd/indexer/           # 主程序入口 (Service Manager)
+├── cmd/indexer/           # 主程序入口（Service Manager）
 ├── internal/
-│   ├── engine/           # 核心引擎 (Fetcher, Sequencer, Processor)
-│   ├── rpc_pool/         # 多节点故障转移池
-│   ├── state_manager/    # 智能状态转换机
-│   └── web/              # WebSocket Dashboard
-├── scripts/              # 数据库初始化与自动化脚本
-├── Makefile              # 工业级控制台
-└── docker-compose.yml    # 基础设施容器化配置
-```
+│   ├── engine/            # 核心引擎（Fetcher, Sequencer, Processor）
+│   ├── rpc_pool/          # 多节点故障转移池与健康检查实现
+│   ├── state_manager/     # 状态机与 Checkpoint 持久化
+│   └── web/               # WebSocket / Dashboard 后端
+├── scripts/               # 数据库初始化与自动化脚本
+├── Makefile               # 启动、压测与辅助命令
+└── docker-compose.yml     # 基础设施容器化配置
 
----
+验证提示与常见检查点
+- 日志中应有三阶段流水线的处理记录（fetch → seq → process）。
+- Postgres 中的表（例如 txs、checkpoints）应随压测产生预期数据量。
+- 在模拟 RPC 节点不可用时，RPC 池应自动切换且系统保持可用。
+- 模式切换（Active/Watching/Idle）应在指标与日志中可见，并对应 RPC 使用量变化。
 
-## 🤝 Contact & Feedback
+联系方式
+- 项目仓库：https://github.com/starwar6160/web3-indexer-go
+- 欢迎通过仓库 Issue 或 PR 交流具体实现与复现步骤。
 
-本项目由 Senior Web3 Developer 开发。如果您对高性能索引器架构或 Web3 基础设施感兴趣，欢迎交流。
-
-**🚀 立即开始: `make demo`**
+若需要，我可以把针对某个验证项（如 nonce_drift 的执行路径、RPC 池的健康检查实现或 Checkpoint 恢复逻辑）抽出具体文件与代码片段，便于逐步审查。
