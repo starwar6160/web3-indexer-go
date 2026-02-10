@@ -41,7 +41,8 @@ tmp_dir = "tmp"
     "EMULATOR_ENABLED=true",
     "EMULATOR_TX_INTERVAL=500ms",
     "LOG_LEVEL=debug",
-    "CONTINUOUS_MODE=true"
+    "CONTINUOUS_MODE=true",
+    "DEMO_MODE=true"
   ]
   # 每次启动时清空旧数据，方便观察实时效果
   args = ["--reset"]

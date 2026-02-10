@@ -26,10 +26,14 @@ type Config struct {
 	GasSafetyMargin  int           // Gas Limit 的安全裕度百分比 (默认 20)
 	CheckpointBatch  int           // 多少个区块更新一次数据库检查点 (默认 100)
 	RetryQueueSize   int           // 失败任务重试队列的大小 (默认 500)
+	DemoMode         bool          // 是否开启演示模式
 }
 
 func Load() *Config {
 	_ = godotenv.Load()
+
+	// 明确演示模式
+	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == "true" || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == "true"
 
 	// 解析RPC URL列表
 	rpcUrlsStr := getEnv("RPC_URLS", "https://eth.llamarpc.com")
@@ -47,7 +51,7 @@ func Load() *Config {
 	checkpointBatch := int(getEnvAsInt64("CHECKPOINT_BATCH", 100))
 	retryQueueSize := int(getEnvAsInt64("RETRY_QUEUE_SIZE", 500))
 
-	return &Config{
+	cfg := &Config{
 		DatabaseURL:      getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
 		RPCURLs:          rpcUrls,
 		WSSURL:           getEnv("WSS_URL", ""),
@@ -63,7 +67,20 @@ func Load() *Config {
 		GasSafetyMargin:  gasSafetyMargin,
 		CheckpointBatch:  checkpointBatch,
 		RetryQueueSize:   retryQueueSize,
+		DemoMode:         demoMode,
 	}
+
+	// 打印确定性启动日志
+	networkName := "Mainnet"
+	if cfg.ChainID == 11155111 {
+		networkName = "Sepolia"
+	} else if cfg.ChainID == 31337 {
+		networkName = "Anvil"
+	}
+	log.Printf("🚀 Architecture Loaded: mode=%v network=%s rps=%d targets=%d", 
+		cfg.DemoMode, networkName, cfg.RPCRateLimit, len(cfg.RPCURLs))
+
+	return cfg
 }
 
 func getEnv(key, defaultValue string) string {
