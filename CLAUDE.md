@@ -8,6 +8,16 @@
 
 ### 构建和运行
 ```bash
+# 开发环境热重载 (推荐)
+air
+
+# 生产级编译与部署
+./scripts/publish.sh
+./scripts/deploy-prod.sh
+
+# 环境重置 (演示专用)
+./scripts/clean-env.sh
+
 # 构建
 make build
 # 或者
@@ -292,3 +302,12 @@ LOG_LEVEL=info
 3. 更新文档
 4. 提交前运行 `make test`
 5. 遵循语义化版本控制
+
+
+- Default to gemini-2.5-flash for general queries.
+- Only suggest upgrading to gemini-3-pro for complex architectural reviews or security audits.
+- Focus on ERC20 best practices: Check for reentrancy and decimal precision.
+
+- Default to gemini-2.5-flash for general queries.
+- Only suggest upgrading to gemini-3-pro for complex architectural reviews or security audits.
+- Focus on ERC20 best practices: Check for reentrancy and decimal precision.

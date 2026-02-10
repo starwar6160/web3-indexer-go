@@ -76,7 +76,7 @@ async function fetchStatus() {
 }
 
 function updateBlocksTable(block) {
-    if (!block) return;
+    if (!block || !block.hash) return;
     // 💡 只要收到区块，说明链路必通，强制点绿
     if (!isWSConnected) {
         isWSConnected = true;
@@ -85,25 +85,40 @@ function updateBlocksTable(block) {
 
     const table = document.getElementById('blocksTable');
     if (table.querySelector('.loading')) table.innerHTML = '';
+    const hashStr = block.hash || '0x0000...';
     const row = `<tr>
-        <td class="stat-value">${block.number}</td>
-        <td class="hash">${block.hash.substring(0, 16)}...</td>
-        <td class="hash">${block.hash.substring(0, 16)}...</td>
+        <td class="stat-value">${block.number || '0'}</td>
+        <td class="hash">${hashStr.substring(0, 16)}...</td>
+        <td class="hash">${(block.parent_hash || hashStr).substring(0, 16)}...</td>
         <td>${new Date().toLocaleTimeString()}</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
     if (table.rows.length > 10) table.deleteRow(10);
 }
 
+function formatAmount(amt) {
+    if (!amt) return '0';
+    const s = amt.toString();
+    if (s.length > 20) {
+        return s.substring(0, 6) + '...' + s.substring(s.length - 6);
+    }
+    return s;
+}
+
 function updateTransfersTable(tx) {
+    if (!tx) return;
     const table = document.getElementById('transfersTable');
     if (table.querySelector('.loading')) table.innerHTML = '';
+    const from = tx.from || '0xunknown';
+    const to = tx.to || '0xunknown';
+    const token = tx.token_address || '0xunknown';
+    const displayAmount = formatAmount(tx.amount || tx.value);
     const row = `<tr>
-        <td class="stat-value">${tx.block_number}</td>
-        <td class="address">${tx.from.substring(0, 10)}...</td>
-        <td class="address">${tx.to.substring(0, 10)}...</td>
-        <td class="stat-value" style="color: #667eea;">${tx.amount || tx.value}</td>
-        <td class="address">${tx.token_address.substring(0, 10)}...</td>
+        <td class="stat-value">${tx.block_number || '0'}</td>
+        <td class="address">${from.substring(0, 10)}...</td>
+        <td class="address">${to.substring(0, 10)}...</td>
+        <td class="stat-value" style="color: #667eea;" title="${tx.amount || tx.value}">${displayAmount}</td>
+        <td class="address">${token.substring(0, 10)}...</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
     if (table.rows.length > 10) table.deleteRow(10);
@@ -116,17 +131,39 @@ async function fetchData() {
         const blocksData = await blocksRes.json();
         const txData = await txRes.json();
 
-        if (blocksData.blocks) {
+        if (blocksData && blocksData.blocks) {
             const table = document.getElementById('blocksTable');
-            table.innerHTML = blocksData.blocks.map(b => `<tr><td class="stat-value">${b.number}</td><td class="hash">${b.hash.substring(0, 16)}...</td><td class="hash">${b.parent_hash.substring(0, 16)}...</td><td>${new Date(b.processed_at).toLocaleString()}</td></tr>`).join('');
+            table.innerHTML = blocksData.blocks.map(b => {
+                const hash = b.hash || '0x...';
+                const parent = b.parent_hash || '0x...';
+                return `<tr>
+                    <td class="stat-value">${b.number || '0'}</td>
+                    <td class="hash">${hash.substring(0, 16)}...</td>
+                    <td class="hash">${parent.substring(0, 16)}...</td>
+                    <td>${new Date(b.processed_at).toLocaleString()}</td>
+                </tr>`;
+            }).join('');
         }
 
-        if (txData.transfers) {
+        if (txData && txData.transfers) {
             const table = document.getElementById('transfersTable');
-            table.innerHTML = txData.transfers.map(t => `<tr><td class="stat-value">${t.block_number}</td><td class="address">${t.from_address.substring(0, 10)}...</td><td class="address">${t.to_address.substring(0, 10)}...</td><td class="stat-value">${t.amount}</td><td class="address">${t.token_address.substring(0, 10)}...</td></tr>`).join('');
+            table.innerHTML = txData.transfers.map(t => {
+                const from = t.from_address || '0x...';
+                const to = t.to_address || '0x...';
+                const token = t.token_address || '0x...';
+                const displayAmount = formatAmount(t.amount || '0');
+                return `<tr>
+                    <td class="stat-value">${t.block_number || '0'}</td>
+                    <td class="address">${from.substring(0, 10)}...</td>
+                    <td class="address">${to.substring(0, 10)}...</td>
+                    <td class="stat-value" title="${t.amount || '0'}">${displayAmount}</td>
+                    <td class="address">${token.substring(0, 10)}...</td>
+                </tr>`;
+            }).join('');
         }
     } catch (e) { console.error('Fetch Error:', e); }
 }
 
 fetchData();
 connectWS();
+setInterval(fetchStatus, 5000);
