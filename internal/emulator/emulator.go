@@ -81,6 +81,9 @@ type Emulator struct {
 	chainID    *big.Int
 	nm         *NonceManager
 
+	// 回调
+	OnSelfHealing func(reason string)
+
 	// 配置参数
 	blockInterval time.Duration
 	txInterval    time.Duration
@@ -274,7 +277,18 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 
 	if err := e.client.SendTransaction(ctx, signedTx); err != nil {
 		e.logger.Error("send_failed", slog.String("error", err.Error()))
-		e.nm.ResyncNonce(ctx)
+		// ---------------- 自修复逻辑 ----------------
+		// 如果发现 nonce 错误（通常是由于环境重置或漂移），立即强制重同步
+		if strings.Contains(err.Error(), "nonce too low") || strings.Contains(err.Error(), "already known") {
+			e.logger.Warn("🚨 NONCE_OUT_OF_SYNC_DETECTED", slog.String("action", "immediate_resync"))
+			if e.OnSelfHealing != nil {
+				e.OnSelfHealing("nonce_mismatch")
+			}
+			e.nm.ResyncNonce(ctx)
+		} else {
+			e.nm.ResyncNonce(ctx) // 其他错误也尝试重同步以保持稳健
+		}
+		// -------------------------------------------
 		return
 	}
 
