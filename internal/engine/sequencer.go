@@ -131,6 +131,12 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// 背压控制：如果缓冲区过大，暂停 Fetcher
+	if s.fetcher != nil && len(s.buffer) > 800 && !s.fetcher.IsPaused() {
+		Logger.Warn("⚠️ sequencer_buffer_high_pausing_fetcher", slog.Int("buffer_size", len(s.buffer)))
+		s.fetcher.Pause()
+	}
+
 	i := 0
 	for i < len(batch) {
 		data := batch[i]
@@ -265,6 +271,12 @@ func (s *Sequencer) processBufferContinuationsLocked(ctx context.Context) {
 			s.buffer[nextNumStr] = data
 			break
 		}
+	}
+
+	// 缓冲区降至安全水位，恢复 Fetcher
+	if s.fetcher != nil && len(s.buffer) < 200 && s.fetcher.IsPaused() {
+		Logger.Info("✅ sequencer_buffer_low_resuming_fetcher", slog.Int("buffer_size", len(s.buffer)))
+		s.fetcher.Resume()
 	}
 }
 
