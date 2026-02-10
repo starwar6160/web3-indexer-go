@@ -30,6 +30,7 @@ type Fetcher struct {
 	limiter     *rate.Limiter // 速率限制器
 	stopCh      chan struct{} // 用于停止调度
 	stopOnce    sync.Once     // 确保只停止一次
+	metrics     *Metrics      // Prometheus metrics
 
 	// Pause/Resume 机制：用 sync.Cond 替代 channel 避免竞态
 	pauseMu   sync.Mutex
@@ -38,6 +39,18 @@ type Fetcher struct {
 
 	// Watched addresses for contract monitoring
 	watchedAddresses []common.Address
+
+	headerOnlyMode bool // 低成本模式：仅获取区块头，不获取Logs
+}
+
+// SetHeaderOnlyMode enables/disables low-cost mode
+func (f *Fetcher) SetHeaderOnlyMode(enabled bool) {
+	f.headerOnlyMode = enabled
+	if enabled {
+		Logger.Info("fetcher_switched_to_low_cost_header_only_mode")
+	} else {
+		Logger.Info("fetcher_switched_to_full_data_mode")
+	}
 }
 
 func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
@@ -52,6 +65,7 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 		limiter:     limiter,
 		stopCh:      make(chan struct{}),
 		paused:      false,
+		metrics:     GetMetrics(),
 	}
 	f.pauseCond = sync.NewCond(&f.pauseMu)
 	return f
@@ -68,6 +82,7 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency int, rps int, burst int) 
 		limiter:     limiter,
 		stopCh:      make(chan struct{}),
 		paused:      false,
+		metrics:     GetMetrics(),
 	}
 	f.pauseCond = sync.NewCond(&f.pauseMu)
 	return f
@@ -191,6 +206,11 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// 低成本模式优化：跳过日志获取
+	if f.headerOnlyMode {
+		return block, []types.Log{}, nil
 	}
 
 	// 获取该区块的日志（Transfer事件）
