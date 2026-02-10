@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,6 +31,9 @@ import (
 )
 
 var cfg *config.Config
+
+// 全局自修复事件计数器 (用于监控自愈频率)
+var selfHealingEvents atomic.Uint64
 
 // IndexerServiceWrapper 实现IndexerService接口
 type IndexerServiceWrapper struct {
@@ -128,31 +132,44 @@ func maskDatabaseURL(url string) string {
 	return "***"
 }
 
-// getStartBlockFromCheckpoint 从数据库获取起始区块号
-func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, chainID int64) (*big.Int, error) {
+// getStartBlockFromCheckpoint 从数据库获取起始区块号，并具备自修复能力
+func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool *engine.RPCClientPool, chainID int64) (*big.Int, error) {
 	var lastSyncedBlock string
 	err := db.GetContext(ctx, &lastSyncedBlock,
 		"SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
 
+	// 获取链上最新块高用于对比
+	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
+
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
-			// 没有checkpoint，从0开始
-			engine.Logger.Info("no_checkpoint_found",
-				slog.Int64("chain_id", chainID),
-				slog.String("action", "starting_from_block_0"),
-			)
+			engine.Logger.Info("no_checkpoint_found", slog.Int64("chain_id", chainID), slog.String("action", "starting_from_0"))
 			return big.NewInt(0), nil
 		}
 		return nil, err
 	}
 
-	// 解析区块号
 	blockNum, ok := new(big.Int).SetString(lastSyncedBlock, 10)
 	if !ok {
-		return nil, fmt.Errorf("invalid block number in checkpoint: %s", lastSyncedBlock)
+		return nil, fmt.Errorf("invalid block number: %s", lastSyncedBlock)
 	}
 
-	// 从下一个区块开始
+	// ---------------- 自修复逻辑 ----------------
+	if rpcErr == nil {
+		// 如果数据库记录的块比链上最新块还要大（说明链可能重置了），自动纠偏
+		if blockNum.Cmp(latestChainBlock) > 0 {
+			selfHealingEvents.Add(1)
+			engine.Logger.Warn("🚨 CHECKPOINT_DRIFT_DETECTED",
+				slog.String("db_checkpoint", blockNum.String()),
+				slog.String("chain_tip", latestChainBlock.String()),
+				slog.String("action", "auto_resetting_to_chain_tip"),
+			)
+			// 既然链重置了，我们也应该重置，这里保守起见重置到链当前的最新块
+			return latestChainBlock, nil
+		}
+	}
+	// -------------------------------------------
+
 	startBlock := new(big.Int).Add(blockNum, big.NewInt(1))
 	engine.LogCheckpointResumed(blockNum.String(), startBlock.String())
 
@@ -256,33 +273,44 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// Get latest block number
-	var latestBlock string
-	err := db.GetContext(ctx, &latestBlock,
+	// 1. 获取链上最新块 (用于计算延迟)
+	latestChainBlock, _ := rpcPool.GetLatestBlockNumber(ctx)
+
+	// 2. 获取数据库进度
+	var latestIndexedBlock string
+	err := db.GetContext(ctx, &latestIndexedBlock,
 		"SELECT COALESCE(MAX(number), '0') FROM blocks")
 	if err != nil {
-		latestBlock = "0"
+		latestIndexedBlock = "0"
 	}
 
-	// Get total blocks
+	// 3. 计算延迟 (Sync Lag)
+	var syncLag int64 = 0
+	if latestChainBlock != nil {
+		lib, _ := strconv.ParseInt(latestIndexedBlock, 10, 64)
+		syncLag = latestChainBlock.Int64() - lib
+	}
+
+	// 4. 获取总量统计
 	var totalBlocks int64
 	db.GetContext(ctx, &totalBlocks, "SELECT COUNT(*) FROM blocks")
 
-	// Get total transfers
 	var totalTransfers int64
 	db.GetContext(ctx, &totalTransfers, "SELECT COUNT(*) FROM transfers")
 
-	// Get RPC health
-	healthyNodes := rpcPool.GetHealthyNodeCount()
-	isHealthy := healthyNodes > 0
-
-	status := StatusResponse{
-		State:          "active",
-		LatestBlock:    latestBlock,
-		SyncLag:        0,
-		TotalBlocks:    totalBlocks,
-		TotalTransfers: totalTransfers,
-		IsHealthy:      isHealthy,
+	status := map[string]interface{}{
+		"state":              "active",
+		"latest_chain_block": latestChainBlock.String(),
+		"latest_indexed":     latestIndexedBlock,
+		"sync_lag":           syncLag,
+		"total_blocks":       totalBlocks,
+		"total_transfers":    totalTransfers,
+		"is_healthy":         rpcPool.GetHealthyNodeCount() > 0,
+		"self_healing_count": selfHealingEvents.Load(),
+		"rpc_nodes": map[string]int{
+			"healthy": rpcPool.GetHealthyNodeCount(),
+			"total":   rpcPool.GetTotalNodeCount(),
+		},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -445,6 +473,11 @@ func main() {
 			)
 			// 不中断主程序，仅记录警告
 		} else {
+			// 注入自修复统计回调
+			emulatorInstance.OnSelfHealing = func(reason string) {
+				selfHealingEvents.Add(1)
+			}
+
 			// 配置仿真器参数
 			emulatorInstance.SetBlockInterval(emuConfig.BlockInterval)
 			emulatorInstance.SetTxInterval(emuConfig.TxInterval)
@@ -638,6 +671,14 @@ func main() {
 					<span class="stat-value" id="totalTransfers">Loading...</span>
 				</div>
 				<div class="stat">
+					<span class="stat-label">Sync Lag</span>
+					<span class="stat-value" id="syncLag" style="color: #667eea;">0</span>
+				</div>
+				<div class="stat">
+					<span class="stat-label">Self-Healing</span>
+					<span class="stat-value" id="selfHealing" style="color: #28a745;">0</span>
+				</div>
+				<div class="stat">
 					<span class="stat-label">Health</span>
 					<span id="health" class="status-badge status-warning">Checking...</span>
 				</div>
@@ -711,6 +752,8 @@ func main() {
 				document.getElementById('latestBlock').textContent = statusData.latest_block || '0';
 				document.getElementById('totalBlocks').textContent = statusData.total_blocks || '0';
 				document.getElementById('totalTransfers').textContent = statusData.total_transfers || '0';
+				document.getElementById('syncLag').textContent = statusData.sync_lag || '0';
+				document.getElementById('selfHealing').textContent = statusData.self_healing_count || '0';
 				document.getElementById('health').textContent = statusData.is_healthy ? '✅ Healthy' : '⚠️ Unhealthy';
 				document.getElementById('health').className = statusData.is_healthy ? 'status-badge status-healthy' : 'status-badge status-error';
 
@@ -836,7 +879,7 @@ func main() {
 	chainID := cfg.ChainID
 
 	// 优先从 sync_status 表恢复（持久性检查点），其次从 checkpoint 表
-	startBlock, err := getStartBlockFromCheckpoint(ctx, db, chainID)
+	startBlock, err := getStartBlockFromCheckpoint(ctx, db, rpcPool, chainID)
 	if err != nil {
 		engine.Logger.Error("checkpoint_recovery_failed",
 			slog.String("error", err.Error()),

@@ -46,6 +46,47 @@ func (h *HealthServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", h.Healthz)
 	mux.HandleFunc("/healthz/ready", h.Ready)
 	mux.HandleFunc("/healthz/live", h.Live)
+	mux.HandleFunc("/api/status", h.Status) // 详细的状态 API
+}
+
+// Status 返回索引器的实时运行状态
+func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	// 1. 获取链上最新块
+	latestChainBlock, _ := h.rpcPool.GetLatestBlockNumber(ctx)
+	
+	// 2. 获取索引器进度
+	var expectedBlock string
+	bufferSize := 0
+	if h.sequencer != nil {
+		expectedBlock = h.sequencer.GetExpectedBlock().String()
+		bufferSize = h.sequencer.GetBufferSize()
+	}
+
+	// 3. 计算延迟 (Sync Lag)
+	var syncLag int64 = 0
+	if latestChainBlock != nil && h.sequencer != nil {
+		syncLag = latestChainBlock.Int64() - h.sequencer.GetExpectedBlock().Int64()
+	}
+
+	status := map[string]interface{}{
+		"is_healthy":         h.rpcPool.GetHealthyNodeCount() > 0,
+		"latest_chain_block": latestChainBlock.String(),
+		"indexed_block":      expectedBlock,
+		"sync_lag":           syncLag,
+		"buffer_size":        bufferSize,
+		"rpc_nodes": map[string]int{
+			"healthy": h.rpcPool.GetHealthyNodeCount(),
+			"total":   h.rpcPool.GetTotalNodeCount(),
+		},
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(status)
 }
 
 // Healthz 完整健康检查
