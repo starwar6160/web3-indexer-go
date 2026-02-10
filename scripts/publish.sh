@@ -17,7 +17,7 @@ echo -e "${BLUE}=== 启动 Web3 Indexer 生产级编译流程 ===${NC}"
 # 1. 编译二进制文件 (启用静态链接)
 echo -e "${YELLOW}Step 1: 正在编译二进制文件...${NC}"
 mkdir -p bin
-CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/indexer cmd/indexer/main.go
+CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/indexer ./cmd/indexer
 echo -e "${GREEN}✅ 编译完成: bin/indexer (静态链接版)${NC}"
 
 # 2. 生成 systemd 服务配置文件
