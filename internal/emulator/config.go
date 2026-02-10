@@ -22,15 +22,21 @@ func LoadConfig() Config {
 
 	blockIntervalStr := os.Getenv("EMULATOR_BLOCK_INTERVAL")
 	if blockIntervalStr == "" {
-		blockIntervalStr = "3s"
+		blockIntervalStr = "3s" // 默认出块时间
 	}
-	blockInterval, _ := time.ParseDuration(blockIntervalStr)
+	blockInterval, err := time.ParseDuration(blockIntervalStr)
+	if err != nil {
+		blockInterval = 3 * time.Second
+	}
 
 	txIntervalStr := os.Getenv("EMULATOR_TX_INTERVAL")
 	if txIntervalStr == "" {
-		txIntervalStr = "8s"
+		txIntervalStr = "5s" // 默认交易频率
 	}
-	txInterval, _ := time.ParseDuration(txIntervalStr)
+	txInterval, err := time.ParseDuration(txIntervalStr)
+	if err != nil {
+		txInterval = 5 * time.Second
+	}
 
 	return Config{
 		Enabled:       enabled,

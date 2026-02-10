@@ -59,8 +59,8 @@ func TestSequencer_HandleBlock_ExpectedBlock(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	
-	processor := NewProcessor(sqlxDB, nil)
+
+	processor := NewProcessor(sqlxDB, nil, 500, 1)
 	startBlock := big.NewInt(100)
 	chainID := int64(1)
 	resultCh := make(chan BlockData, 10)
@@ -76,7 +76,7 @@ func TestSequencer_HandleBlock_ExpectedBlock(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM blocks WHERE number = \\$1").WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec("INSERT INTO blocks").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO sync_checkpoints").WillReturnResult(sqlmock.NewResult(1, 1))
+	// checkpoint is batched (every 100 blocks), no checkpoint exec for single block
 	mock.ExpectCommit()
 
 	ctx := context.Background()
@@ -104,7 +104,7 @@ func TestSequencer_HandleBlock_OutOfOrderBlock(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "100", sequencer.GetExpectedBlock().String()) // Should not change
-	assert.Equal(t, 1, sequencer.GetBufferSize())               // Should be buffered
+	assert.Equal(t, 1, sequencer.GetBufferSize())                 // Should be buffered
 }
 
 func TestSequencer_BufferOverflow(t *testing.T) {

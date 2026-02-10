@@ -31,7 +31,7 @@ func TestSequencerStartup(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool)
+	processor := NewProcessor(db, rpcPool, 500, 11155111)
 	metrics := GetMetrics()
 
 	// 创建Sequencer
@@ -65,7 +65,7 @@ func TestSequencerBlockProcessing(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool)
+	processor := NewProcessor(db, rpcPool, 500, 1)
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)
@@ -106,7 +106,7 @@ func TestSequencerBuffering(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool)
+	processor := NewProcessor(db, rpcPool, 500, 1)
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)
@@ -123,11 +123,11 @@ func TestSequencerBuffering(t *testing.T) {
 	// Block 100
 	h100 := &types.Header{Number: big.NewInt(100), Time: baseTime}
 	block100 := types.NewBlockWithHeader(h100)
-	
+
 	// Block 101
 	h101 := &types.Header{Number: big.NewInt(101), Time: baseTime + 1, ParentHash: block100.Hash()}
 	block101 := types.NewBlockWithHeader(h101)
-	
+
 	// Block 102
 	h102 := &types.Header{Number: big.NewInt(102), Time: baseTime + 2, ParentHash: block101.Hash()}
 	block102 := types.NewBlockWithHeader(h102)
@@ -181,7 +181,7 @@ func TestSequencerWithRealRPC(t *testing.T) {
 	require.NoError(t, err, "RPC connection failed")
 
 	// 创建Processor和Metrics
-	processor := NewProcessor(db, rpcPool)
+	processor := NewProcessor(db, rpcPool, 500, 11155111)
 	metrics := GetMetrics()
 
 	// 创建Sequencer
@@ -214,7 +214,7 @@ func TestSequencerGoroutinePanic(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool)
+	processor := NewProcessor(db, rpcPool, 500, 1)
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)
@@ -266,7 +266,7 @@ func TestSequencerContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool)
+	processor := NewProcessor(db, rpcPool, 500, 1)
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)

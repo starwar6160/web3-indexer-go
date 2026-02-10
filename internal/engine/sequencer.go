@@ -32,6 +32,7 @@ type Sequencer struct {
 	metrics       *Metrics             // Prometheus metrics
 
 	lastProgressAt time.Time // 上次处理成功的时刻
+	gapFillCount   int       // 连续 gap-fill 尝试次数（防止无限重试）
 }
 
 func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resultCh <-chan BlockData, fatalErrCh chan<- error, metrics *Metrics) *Sequencer {
@@ -49,22 +50,23 @@ func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resu
 
 func NewSequencerWithFetcher(processor *Processor, fetcher *Fetcher, startBlock *big.Int, chainID int64, resultCh <-chan BlockData, fatalErrCh chan<- error, reorgCh chan<- ReorgEvent, metrics *Metrics) *Sequencer {
 	return &Sequencer{
-		expectedBlock: new(big.Int).Set(startBlock),
-		buffer:        make(map[string]BlockData),
-		processor:     processor,
-		fetcher:       fetcher,
-		resultCh:      resultCh,
-		fatalErrCh:    fatalErrCh,
-		reorgCh:       reorgCh,
-		chainID:       chainID,
-		metrics:       metrics,
+		expectedBlock:  new(big.Int).Set(startBlock),
+		buffer:         make(map[string]BlockData),
+		processor:      processor,
+		fetcher:        fetcher,
+		resultCh:       resultCh,
+		fatalErrCh:     fatalErrCh,
+		reorgCh:        reorgCh,
+		chainID:        chainID,
+		metrics:        metrics,
+		lastProgressAt: time.Now(),
 	}
 }
 
 func (s *Sequencer) Run(ctx context.Context) {
 	Logger.Info("🚀 Sequencer started. Expected block: " + s.expectedBlock.String())
 
-	stallTicker := time.NewTicker(30 * time.Second)
+	stallTicker := time.NewTicker(5 * time.Second)
 	defer stallTicker.Stop()
 
 	for {
@@ -73,29 +75,50 @@ func (s *Sequencer) Run(ctx context.Context) {
 			return
 
 		case <-stallTicker.C:
-			// 巡检：如果停留在同一个块超过 30s，说明可能遇到了哈希洞或逻辑死锁
+			// 巡检：如果停留在同一个块超过 10s，说明可能遇到了哈希洞或逻辑死锁
 			s.mu.RLock()
 			expectedStr := s.expectedBlock.String()
+			expectedCopy := new(big.Int).Set(s.expectedBlock)
 			_, hasExpected := s.buffer[expectedStr]
 			bufferLen := len(s.buffer)
 			idleTime := time.Since(s.lastProgressAt)
+
+			// 扫描 buffer 找到最小的已缓冲区块号，确定 gap 范围
+			var minBuffered *big.Int
+			for numStr := range s.buffer {
+				if n, ok := new(big.Int).SetString(numStr, 10); ok {
+					if minBuffered == nil || n.Cmp(minBuffered) < 0 {
+						minBuffered = n
+					}
+				}
+			}
 			s.mu.RUnlock()
 
-			if idleTime > 30*time.Second {
+			if idleTime > 10*time.Second {
 				if bufferLen > 0 && !hasExpected {
 					// 🚨 发现幽灵空洞：缓冲区有后面块但没当前块
-					Logger.Error("🚨 CRITICAL_GAP_DETECTED", 
-						slog.String("missing_block", expectedStr),
+					// 计算需要补齐的范围: [expected, minBuffered-1]
+					gapEnd := new(big.Int).Sub(minBuffered, big.NewInt(1))
+					gapSize := new(big.Int).Sub(minBuffered, expectedCopy).Int64()
+					Logger.Error("🚨 CRITICAL_GAP_DETECTED",
+						slog.String("missing_from", expectedStr),
+						slog.String("missing_to", gapEnd.String()),
+						slog.Int64("gap_size", gapSize),
 						slog.Int("buffered_blocks", bufferLen),
+						slog.Int("gap_fill_attempt", s.gapFillCount+1),
 					)
-					
-					// 触发自愈：强制 Fetcher 重新调度这个缺失的单块
-					if s.fetcher != nil {
-						Logger.Info("🛡️ SELF_HEALING: Triggering emergency fetch", slog.String("block", expectedStr))
-						go s.fetcher.Schedule(ctx, s.expectedBlock, s.expectedBlock)
+
+					// 触发自愈：强制 Fetcher 批量重新调度所有缺失的块
+					if s.fetcher != nil && s.gapFillCount < 10 {
+						Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill",
+							slog.String("from", expectedStr),
+							slog.String("to", gapEnd.String()),
+						)
+						go s.fetcher.Schedule(ctx, expectedCopy, gapEnd)
+						s.gapFillCount++
 					}
 				} else {
-					Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", 
+					Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED",
 						slog.String("expected", expectedStr),
 						slog.Int("buffer_size", bufferLen),
 						slog.Duration("idle_time", idleTime),
@@ -112,11 +135,11 @@ func (s *Sequencer) Run(ctx context.Context) {
 			// 收集一个批次的连续区块进行批量处理
 			batch := []BlockData{data}
 			maxBatchSize := 100
-			
+
 			// 给予一个小小的等待时间（10ms），让更多块进入 channel
 			// 这能显著提升批量处理的机会
 			timeout := time.After(10 * time.Millisecond)
-			
+
 		collect_loop:
 			for len(batch) < maxBatchSize {
 				select {
@@ -146,10 +169,14 @@ func (s *Sequencer) Run(ctx context.Context) {
 				if n2 == nil && batch[j].Block != nil {
 					n2 = batch[j].Block.Number()
 				}
-				
-				if n1 == nil { return true } // nil first (error handling)
-				if n2 == nil { return false }
-				
+
+				if n1 == nil {
+					return true
+				} // nil first (error handling)
+				if n2 == nil {
+					return false
+				}
+
 				return n1.Cmp(n2) < 0
 			})
 
@@ -187,7 +214,7 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 		if blockNum != nil && blockNum.Cmp(s.expectedBlock) == 0 && data.Err == nil {
 			sequentialBatch := []BlockData{data}
 			nextExpected := new(big.Int).Add(s.expectedBlock, big.NewInt(1))
-			
+
 			j := i + 1
 			for j < len(batch) {
 				nextData := batch[j]
@@ -200,7 +227,7 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 				if nNum == nil && nextData.Block != nil {
 					nNum = nextData.Block.Number()
 				}
-				
+
 				if nNum != nil && nNum.Cmp(nextExpected) == 0 {
 					sequentialBatch = append(sequentialBatch, nextData)
 					nextExpected.Add(nextExpected, big.NewInt(1))
@@ -211,7 +238,7 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 			}
 
 			if len(sequentialBatch) > 1 {
-				Logger.Info("sequencer_processing_batch", 
+				Logger.Info("sequencer_processing_batch",
 					slog.Int("size", len(sequentialBatch)),
 					slog.String("from", sequentialBatch[0].Number.String()),
 					slog.String("to", sequentialBatch[len(sequentialBatch)-1].Number.String()),
@@ -294,6 +321,7 @@ func (s *Sequencer) processSequentialLocked(ctx context.Context, data BlockData)
 	}
 	s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
 	s.lastProgressAt = time.Now() // 💡 成功推进，重置计时
+	s.gapFillCount = 0            // 重置 gap-fill 计数器
 	return nil
 }
 

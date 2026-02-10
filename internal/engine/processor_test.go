@@ -78,7 +78,7 @@ func TestProcessor_NewProcessor(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	mockRPC := NewMockProcessorRPCClient()
 
-	processor := NewProcessor(sqlxDB, mockRPC)
+	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
 
 	assert.NotNil(t, processor)
 	assert.Equal(t, sqlxDB, processor.db)
@@ -93,30 +93,27 @@ func TestProcessor_ProcessBlock_Success(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	mockRPC := NewMockProcessorRPCClient()
 
-	processor := NewProcessor(sqlxDB, mockRPC)
+	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
 
 	// Setup mock expectations
 	mock.ExpectBegin()
-	
+
 	// Mock parent block query
 	mock.ExpectQuery("SELECT .* FROM blocks WHERE number = \\$1").
 		WithArgs("99").
 		WillReturnError(sql.ErrNoRows)
-	
+
 	// Mock block insert (updated to 8 columns, using regexp for flexibility)
 	mock.ExpectExec("INSERT INTO blocks").
 		WithArgs("100", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	
-	// Mock checkpoint update
-	mock.ExpectExec("INSERT INTO sync_checkpoints").
-		WithArgs(1, "100").
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	
+
+	// Note: checkpoint is batched (every 100 blocks), so no checkpoint exec expected for a single block
+
 	mock.ExpectCommit()
 
 	// Create test block with valid hex hash
-	block := createTestBlock(100, "0x" + strings.Repeat("a", 64), "0x" + strings.Repeat("b", 64))
+	block := createTestBlock(100, "0x"+strings.Repeat("a", 64), "0x"+strings.Repeat("b", 64))
 	data := BlockData{Block: block, Number: big.NewInt(100), Logs: []types.Log{}}
 
 	ctx := context.Background()
@@ -134,20 +131,20 @@ func TestProcessor_ProcessBlock_ReorgDetected(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	mockRPC := NewMockProcessorRPCClient()
 
-	processor := NewProcessor(sqlxDB, mockRPC)
+	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
 
 	mock.ExpectBegin()
-	
+
 	rows := sqlmock.NewRows([]string{"number", "hash", "parent_hash", "timestamp"}).
 		AddRow("99", "0xold", "0x98", 1234567890)
 	mock.ExpectQuery("SELECT .* FROM blocks WHERE number = \\$1").
 		WithArgs("99").
 		WillReturnRows(rows)
-	
+
 	mock.ExpectRollback()
 
 	// Parent hash mismatch: block expects 0xnew, DB has 0xold
-	block := createTestBlock(100, "0xabc", "0xnew") 
+	block := createTestBlock(100, "0xabc", "0xnew")
 	data := BlockData{Block: block, Number: big.NewInt(100), Logs: []types.Log{}}
 
 	ctx := context.Background()
@@ -163,7 +160,7 @@ func TestProcessor_UpdateCheckpoint(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	processor := NewProcessor(sqlxDB, nil)
+	processor := NewProcessor(sqlxDB, nil, 500, 1)
 
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO sync_checkpoints").
@@ -179,7 +176,7 @@ func TestProcessor_UpdateCheckpoint(t *testing.T) {
 }
 
 func TestProcessor_ExtractTransfer(t *testing.T) {
-	processor := NewProcessor(nil, nil)
+	processor := NewProcessor(nil, nil, 500, 1)
 
 	fromAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	toAddr := common.HexToAddress("0x9876543210987654321098765432109876543210")
@@ -214,7 +211,7 @@ func TestProcessor_ExtractTransfer_InvalidEvent(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	mockRPC := NewMockProcessorRPCClient()
 
-	processor := NewProcessor(sqlxDB, mockRPC)
+	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
 
 	// Create an invalid log (wrong event signature)
 	log := types.Log{
@@ -236,7 +233,7 @@ func TestProcessor_FindCommonAncestor(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	mockRPC := NewMockProcessorRPCClient()
 
-	processor := NewProcessor(sqlxDB, mockRPC)
+	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
 
 	// Setup RPC blocks (Ancestor at 99)
 	block100 := createTestBlock(100, "0x100", "0x99")
