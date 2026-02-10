@@ -190,6 +190,10 @@ func (b *BigInt) Scan(value interface{}) error {
 			return fmt.Errorf("failed to convert %s to BigInt", v)
 		}
 		b.Int = i
+	case int64:
+		b.Int = big.NewInt(v)
+	case int:
+		b.Int = big.NewInt(int64(v))
 	default:
 		return fmt.Errorf("unsupported type for BigInt: %T", v)
 	}
