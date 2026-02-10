@@ -566,7 +566,7 @@ func main() {
 				// Fallback: serve a comprehensive HTML dashboard with real data
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `<!DOCTYPE html>
+				fmt.Fprint(w, `<!DOCTYPE html>
 <html>
 <head>
 	<title>Web3 Indexer Dashboard</title>
