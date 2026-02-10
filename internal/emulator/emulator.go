@@ -246,7 +246,11 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	transferVal := new(big.Int).Add(randomVal, big.NewInt(1))
 
 	methodID := common.FromHex("0xa9059cbb")
-	targetAddr := common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+	// 演示级：随机生成接收地址，增加视觉丰富度
+	randomAddrBytes := make([]byte, 20)
+	rand.Read(randomAddrBytes)
+	targetAddr := common.BytesToAddress(randomAddrBytes)
+
 	toAddr := common.LeftPadBytes(targetAddr.Bytes(), 32)
 	amount := common.LeftPadBytes(transferVal.Bytes(), 32)
 
@@ -276,6 +280,7 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 
 	e.logger.Info("📤 [Emulator] Sent REAL Transfer",
 		slog.String("tx_hash", signedTx.Hash().Hex()),
+		slog.String("to", targetAddr.Hex()),
 		slog.String("amount", transferVal.String()),
 		slog.Uint64("nonce", nonce),
 	)
@@ -328,4 +333,10 @@ func (e *Emulator) GetContractAddress() common.Address {
 	return e.contract
 }
 
-const erc20Bytecode = "604380600b6000396000f36103e86000527370997970C51812dc3A010C7d01b50e0d17dc79C8337fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef60206000a300"
+// erc20Bytecode 现在是动态的：它会读取 calldata 中的 amount 和 to 地址，并正确触发 Transfer 事件
+// 逻辑：
+// 1. CALLDATALOAD(36) -> Amount, 存入 MSTORE(0)
+// 2. CALLDATALOAD(4) -> To Topic
+// 3. CALLER -> From Topic
+// 4. LOG3(0, 32, TransferTopic, From, To)
+const erc20Bytecode = "603180600b6000396000f3602435600052600435337fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef60206000a300"
