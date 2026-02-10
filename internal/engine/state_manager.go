@@ -59,6 +59,7 @@ type IndexerService interface {
 	Stop() error
 	IsRunning() bool
 	GetCurrentBlock() string
+	SetLowPowerMode(enabled bool)
 }
 
 // NewStateManager 创建状态管理器
@@ -264,11 +265,19 @@ func (sm *StateManager) stopActiveMode() {
 // startWatchingMode 启动低成本监听模式
 func (sm *StateManager) startWatchingMode(ctx context.Context) {
 	Logger.Info("starting_watching_mode",
-		slog.String("mode", "low_cost_wss_subscription"),
+		slog.String("mode", "low_cost_header_sync"),
 	)
 
-	// TODO: 实现WSS订阅逻辑
-	// 这里只保持最基本的连接，不进行大量数据获取
+	// 如果索引器未运行，先启动它
+	if !sm.indexer.IsRunning() {
+		if err := sm.indexer.Start(ctx); err != nil {
+			Logger.Error("failed_to_start_indexer_for_watching", slog.String("error", err.Error()))
+			return
+		}
+	}
+
+	// 开启低功耗模式（仅同步区块头，不抓取Logs）
+	sm.indexer.SetLowPowerMode(true)
 
 	Logger.Info("watching_mode_started",
 		slog.String("benefit", "minimal_rpc_quota_consumption"),
@@ -278,7 +287,8 @@ func (sm *StateManager) startWatchingMode(ctx context.Context) {
 // stopWatchingMode 停止监听模式
 func (sm *StateManager) stopWatchingMode() {
 	Logger.Info("stopping_watching_mode")
-	// TODO: 关闭WSS连接
+	// 恢复全量数据抓取模式
+	sm.indexer.SetLowPowerMode(false)
 }
 
 // RecordAccess 记录访问时间（API调用时调用）

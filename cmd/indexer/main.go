@@ -95,6 +95,14 @@ func (w *IndexerServiceWrapper) GetCurrentBlock() string {
 	return "unknown"
 }
 
+func (w *IndexerServiceWrapper) SetLowPowerMode(enabled bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fetcher != nil {
+		w.fetcher.SetHeaderOnlyMode(enabled)
+	}
+}
+
 func (w *IndexerServiceWrapper) SetSequencer(sequencer *engine.Sequencer) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -820,6 +828,9 @@ func main() {
 
 	// 4. 启动 Fetcher
 	fetcher.Start(ctx, &wg)
+
+	// 启动 Processor 重试工人
+	processor.StartRetryWorker(ctx, &wg)
 
 	// 5. 从 checkpoint 恢复起始区块
 	chainID := cfg.ChainID
