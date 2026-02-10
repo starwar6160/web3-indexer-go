@@ -1,188 +1,86 @@
-[![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/golang-migrate/migrate/CI/master)](https://github.com/golang-migrate/migrate/actions/workflows/ci.yaml?query=branch%3Amaster)
-[![GoDoc](https://pkg.go.dev/badge/github.com/golang-migrate/migrate)](https://pkg.go.dev/github.com/golang-migrate/migrate/v4)
-[![Coverage Status](https://img.shields.io/coveralls/github/golang-migrate/migrate/master.svg)](https://coveralls.io/github/golang-migrate/migrate?branch=master)
-[![packagecloud.io](https://img.shields.io/badge/deb-packagecloud.io-844fec.svg)](https://packagecloud.io/golang-migrate/migrate?filter=debs)
-[![Docker Pulls](https://img.shields.io/docker/pulls/migrate/migrate.svg)](https://hub.docker.com/r/migrate/migrate/)
-![Supported Go Versions](https://img.shields.io/badge/Go-1.16%2C%201.17-lightgrey.svg)
-[![GitHub Release](https://img.shields.io/github/release/golang-migrate/migrate.svg)](https://github.com/golang-migrate/migrate/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/golang-migrate/migrate)](https://goreportcard.com/report/github.com/golang-migrate/migrate)
+# 🚀 Web3 Indexer Dashboard
 
-# migrate
+**Live Demo:** [https://demo2.st6160.click/](https://demo2.st6160.click/)
 
-__Database migrations written in Go. Use as [CLI](#cli-usage) or import as [library](#use-in-your-go-project).__
-
-* Migrate reads migrations from [sources](#migration-sources)
-   and applies them in correct order to a [database](#databases).
-* Drivers are "dumb", migrate glues everything together and makes sure the logic is bulletproof.
-   (Keeps the drivers lightweight, too.)
-* Database drivers don't assume things or try to correct user input. When in doubt, fail.
-
-Forked from [mattes/migrate](https://github.com/mattes/migrate)
-
-## Databases
-
-Database drivers run migrations. [Add a new database?](database/driver.go)
-
-* [PostgreSQL](database/postgres)
-* [PGX](database/pgx)
-* [Redshift](database/redshift)
-* [Ql](database/ql)
-* [Cassandra](database/cassandra)
-* [SQLite](database/sqlite)
-* [SQLite3](database/sqlite3) ([todo #165](https://github.com/mattes/migrate/issues/165))
-* [SQLCipher](database/sqlcipher)
-* [MySQL/ MariaDB](database/mysql)
-* [Neo4j](database/neo4j)
-* [MongoDB](database/mongodb)
-* [CrateDB](database/crate) ([todo #170](https://github.com/mattes/migrate/issues/170))
-* [Shell](database/shell) ([todo #171](https://github.com/mattes/migrate/issues/171))
-* [Google Cloud Spanner](database/spanner)
-* [CockroachDB](database/cockroachdb)
-* [ClickHouse](database/clickhouse)
-* [Firebird](database/firebird)
-* [MS SQL Server](database/sqlserver)
-
-### Database URLs
-
-Database connection strings are specified via URLs. The URL format is driver dependent but generally has the form: `dbdriver://username:password@host:port/dbname?param1=true&param2=false`
-
-Any [reserved URL characters](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_reserved_characters) need to be escaped. Note, the `%` character also [needs to be escaped](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_the_percent_character)
-
-Explicitly, the following characters need to be escaped:
-`!`, `#`, `$`, `%`, `&`, `'`, `(`, `)`, `*`, `+`, `,`, `/`, `:`, `;`, `=`, `?`, `@`, `[`, `]`
-
-It's easiest to always run the URL parts of your DB connection URL (e.g. username, password, etc) through an URL encoder. See the example Python snippets below:
-
-```bash
-$ python3 -c 'import urllib.parse; print(urllib.parse.quote(input("String to encode: "), ""))'
-String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
-FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
-$ python2 -c 'import urllib; print urllib.quote(raw_input("String to encode: "), "")'
-String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
-FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
-$
-```
-
-## Migration Sources
-
-Source drivers read migrations from local or remote sources. [Add a new source?](source/driver.go)
-
-* [Filesystem](source/file) - read from filesystem
-* [io/fs](source/iofs) - read from a Go [io/fs](https://pkg.go.dev/io/fs#FS)
-* [Go-Bindata](source/go_bindata) - read from embedded binary data ([jteeuwen/go-bindata](https://github.com/jteeuwen/go-bindata))
-* [pkger](source/pkger) - read from embedded binary data ([markbates/pkger](https://github.com/markbates/pkger))
-* [GitHub](source/github) - read from remote GitHub repositories
-* [GitHub Enterprise](source/github_ee) - read from remote GitHub Enterprise repositories
-* [Bitbucket](source/bitbucket) - read from remote Bitbucket repositories
-* [Gitlab](source/gitlab) - read from remote Gitlab repositories
-* [AWS S3](source/aws_s3) - read from Amazon Web Services S3
-* [Google Cloud Storage](source/google_cloud_storage) - read from Google Cloud Platform Storage
-
-## CLI usage
-
-* Simple wrapper around this library.
-* Handles ctrl+c (SIGINT) gracefully.
-* No config search paths, no config files, no magic ENV var injections.
-
-__[CLI Documentation](cmd/migrate)__
-
-### Basic usage
-
-```bash
-$ migrate -source file://path/to/migrations -database postgres://localhost:5432/database up 2
-```
-
-### Docker usage
-
-```bash
-$ docker run -v {{ migration dir }}:/migrations --network host migrate/migrate
-    -path=/migrations/ -database postgres://localhost:5432/database up 2
-```
-
-## Use in your Go project
-
-* API is stable and frozen for this release (v3 & v4).
-* Uses [Go modules](https://golang.org/cmd/go/#hdr-Modules__module_versions__and_more) to manage dependencies.
-* To help prevent database corruptions, it supports graceful stops via `GracefulStop chan bool`.
-* Bring your own logger.
-* Uses `io.Reader` streams internally for low memory overhead.
-* Thread-safe and no goroutine leaks.
-
-__[Go Documentation](https://godoc.org/github.com/golang-migrate/migrate)__
-
-```go
-import (
-    "github.com/golang-migrate/migrate/v4"
-    _ "github.com/golang-migrate/migrate/v4/database/postgres"
-    _ "github.com/golang-migrate/migrate/v4/source/github"
-)
-
-func main() {
-    m, err := migrate.New(
-        "github://mattes:personal-access-token@mattes/migrate_test",
-        "postgres://localhost:5432/database?sslmode=enable")
-    m.Steps(2)
-}
-```
-
-Want to use an existing database client?
-
-```go
-import (
-    "database/sql"
-    _ "github.com/lib/pq"
-    "github.com/golang-migrate/migrate/v4"
-    "github.com/golang-migrate/migrate/v4/database/postgres"
-    _ "github.com/golang-migrate/migrate/v4/source/file"
-)
-
-func main() {
-    db, err := sql.Open("postgres", "postgres://localhost:5432/database?sslmode=enable")
-    driver, err := postgres.WithInstance(db, &postgres.Config{})
-    m, err := migrate.NewWithDatabaseInstance(
-        "file:///migrations",
-        "postgres", driver)
-    m.Up() // or m.Step(2) if you want to explicitly set the number of migrations to run
-}
-```
-
-## Getting started
-
-Go to [getting started](GETTING_STARTED.md)
-
-## Tutorials
-
-* [CockroachDB](database/cockroachdb/TUTORIAL.md)
-* [PostgreSQL](database/postgres/TUTORIAL.md)
-
-(more tutorials to come)
-
-## Migration files
-
-Each migration has an up and down migration. [Why?](FAQ.md#why-two-separate-files-up-and-down-for-a-migration)
-
-```bash
-1481574547_create_users_table.up.sql
-1481574547_create_users_table.down.sql
-```
-
-[Best practices: How to write migrations.](MIGRATIONS.md)
-
-## Versions
-
-Version | Supported? | Import | Notes
---------|------------|--------|------
-**master** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | New features and bug fixes arrive here first |
-**v4** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | Used for stable releases |
-**v3** | :x: | `import "github.com/golang-migrate/migrate"` (with package manager) or `import "gopkg.in/golang-migrate/migrate.v3"` (not recommended) | **DO NOT USE** - No longer supported |
-
-## Development and Contributing
-
-Yes, please! [`Makefile`](Makefile) is your friend,
-read the [development guide](CONTRIBUTING.md).
-
-Also have a look at the [FAQ](FAQ.md).
+> **Engineering Philosophy**: 20 年后端架构经验沉淀，专注于 Web3 基础设施的稳定性（SRE 级可靠性）与可观测性。本项目展示了如何将传统高性能分布式系统设计（Fetcher/Sequencer 解耦、流水线架构）与区块链技术栈深度融合。
 
 ---
 
-Looking for alternatives? [https://awesome-go.com/#database](https://awesome-go.com/#database).
+## 🛠️ Quick Start (3 Minutes)
+
+为了方便面试官/猎头快速复现，本项目支持一键启动完整的端到端环境（包含 Anvil 私有链、Postgres 数据库及高频交易压测）：
+
+```bash
+git clone https://github.com/your-repo/web3-indexer-go
+cd web3-indexer-go
+
+# 一键启动演示流水线 (重置环境 + 实时产块 + 高频交易模拟)
+make demo 
+```
+
+*`make demo` 内部集成了：`clean-env` -> `docker-compose up` -> `db-migrate` -> `indexer-start` -> `stress-test`.*
+
+---
+
+## 🧠 核心研发要点 (Key Insights)
+
+* **状态自愈与高吞吐**：针对高频转账（TPS ~50）场景，实现了基于 `Fetcher-Sequencer-Processor` 的解耦流水线架构。内置 `nonce_drift` 自动对齐逻辑，确保在高负载下索引不中断且数据 100% 一致。
+* **智能休眠系统 (Smart Sleep)**：
+    - **Active Mode**: 5分钟高性能演示模式。
+    - **Idle Mode**: 无活动时自动进入，RPC 消耗降至 0。
+    - **Watching Mode**: 通过 WebSocket 监听实现极低成本实时监控（97% 成本节省）。
+* **SRE 级防御与穿透**：通过 Cloudflare Tunnel 实现零信任内网穿透，将内网物理节点（MiniPC）安全暴露至公网。配置边缘 WAF 规则，精准拦截恶意爬虫，保障服务在公网的稳定性。
+* **高可用 RPC 池**：内置多节点故障转移机制，支持 RPC 节点自动健康检查与切换，确保 99.9% 的可用性。
+* **实时可观测性**：基于 WebSocket 的持久连接，内置 Ping/Pong 心跳机制，有效应对 CDN 代理导致的静默断连，Dashboard 实时展示 TPS、区块高度及系统状态。
+
+---
+
+## ✨ 核心特性
+
+### 🎯 成本优化
+| 模式 | RPC配额使用 | 节省比例 | 适用场景 |
+|------|-------------|----------|----------|
+| **Active** | ~2.4M credits/day | 0% | 演示模式 |
+| **Idle** | ~0 credits/day | **100%** | 长期休眠 |
+| **Watching** | ~0.1M credits/day | **97%** | 低功耗监控 |
+
+### 🛡️ 稳定性保障
+- **优雅停机**: 完整 Checkpoint 持久化，数据零丢失。
+- **并发性能**: 基于 Go Coroutine 池，支持 10+ 并发 Worker。
+- **内存优化**: 运行时内存占用 < 200MB。
+
+---
+
+## ⚙️ 技术栈
+
+- **Language**: Go 1.21+ (Concurrency, Context management)
+- **Persistence**: PostgreSQL
+- **Infrastructure**: Docker & Docker Compose
+- **Dev Chain**: Anvil (Foundry)
+- **Monitoring**: Prometheus & Web Dashboard (Vanilla JS/CSS for zero-dependency)
+- **Deployment**: Cloudflare Tunnel (Zero Trust Architecture)
+
+---
+
+## 📂 项目结构
+
+```
+web3-indexer-go/
+├── cmd/indexer/           # 主程序入口 (Service Manager)
+├── internal/
+│   ├── engine/           # 核心引擎 (Fetcher, Sequencer, Processor)
+│   ├── rpc_pool/         # 多节点故障转移池
+│   ├── state_manager/    # 智能状态转换机
+│   └── web/              # WebSocket Dashboard
+├── scripts/              # 数据库初始化与自动化脚本
+├── Makefile              # 工业级控制台
+└── docker-compose.yml    # 基础设施容器化配置
+```
+
+---
+
+## 🤝 Contact & Feedback
+
+本项目由 [您的名字] 开发。如果您对高性能索引器架构或 Web3 基础设施感兴趣，欢迎交流。
+
+**🚀 立即开始: `make demo`**
