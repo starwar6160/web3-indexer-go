@@ -38,10 +38,16 @@ func LoadConfig() Config {
 		txInterval = 5 * time.Second
 	}
 
+	// Anvil 默认账户 0 的私钥（仅用于本地演示，公开已知）
+	privKey := os.Getenv("EMULATOR_PRIVATE_KEY")
+	if privKey == "" && enabled {
+		privKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	}
+
 	return Config{
 		Enabled:       enabled,
 		RpcURL:        os.Getenv("EMULATOR_RPC_URL"),
-		PrivateKey:    os.Getenv("EMULATOR_PRIVATE_KEY"),
+		PrivateKey:    privKey,
 		BlockInterval: blockInterval,
 		TxInterval:    txInterval,
 		TxAmount:      os.Getenv("EMULATOR_TX_AMOUNT"),

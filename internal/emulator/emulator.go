@@ -94,7 +94,7 @@ type Emulator struct {
 	logger *slog.Logger
 }
 
-func NewEmulator(rpcURL string, privKeyHex string) (*Emulator, error) {
+func NewEmulator(rpcURL string, privKeyHex string, opts ...func(*Emulator)) (*Emulator, error) {
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to RPC: %w", err)
@@ -117,7 +117,7 @@ func NewEmulator(rpcURL string, privKeyHex string) (*Emulator, error) {
 		return nil, err
 	}
 
-	return &Emulator{
+	emu := &Emulator{
 		client:          client,
 		privateKey:      privKey,
 		fromAddr:        fromAddr,
@@ -129,7 +129,20 @@ func NewEmulator(rpcURL string, privKeyHex string) (*Emulator, error) {
 		maxGasPrice:     500, // 默认 500 Gwei
 		gasSafetyMargin: 20,  // 默认 20%
 		logger:          engine.Logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(emu)
+	}
+	return emu, nil
+}
+
+// WithTxInterval 设置交易发送间隔（函数式选项）
+func WithTxInterval(d time.Duration) func(*Emulator) {
+	return func(e *Emulator) {
+		if d > 0 {
+			e.txInterval = d
+		}
+	}
 }
 
 // ensureBalance 演示级余额补给逻辑

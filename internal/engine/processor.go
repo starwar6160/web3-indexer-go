@@ -360,7 +360,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 				}
 			}
 
-			// If no addresses configured, match all for debug
+			// In DemoMode or if no addresses configured, match all for debug
 			if len(p.watchedAddresses) == 0 {
 				isMatched = true
 			}
