@@ -11,7 +11,7 @@
 为了方便面试官/猎头快速复现，本项目支持一键启动完整的端到端环境（包含 Anvil 私有链、Postgres 数据库及高频交易压测）：
 
 ```bash
-git clone https://github.com/your-repo/web3-indexer-go
+git clone https://github.com/username/web3-indexer-go
 cd web3-indexer-go
 
 # 一键启动演示流水线 (重置环境 + 实时产块 + 高频交易模拟)
@@ -81,6 +81,6 @@ web3-indexer-go/
 
 ## 🤝 Contact & Feedback
 
-本项目由 [您的名字] 开发。如果您对高性能索引器架构或 Web3 基础设施感兴趣，欢迎交流。
+本项目由 Senior Web3 Developer 开发。如果您对高性能索引器架构或 Web3 基础设施感兴趣，欢迎交流。
 
 **🚀 立即开始: `make demo`**
