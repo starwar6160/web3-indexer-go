@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -107,8 +107,25 @@ func maskDatabaseURL(url string) string {
 }
 
 func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool *engine.RPCClientPool, chainID int64) (*big.Int, error) {
+	// 🚨 架构级加固：Genesis Hash 校验
+	rpcGenesis, err := rpcPool.BlockByNumber(ctx, big.NewInt(0))
+	if err == nil {
+		var dbGenesisHash string
+		err = db.GetContext(ctx, &dbGenesisHash, "SELECT hash FROM blocks WHERE number = 0")
+		if err == nil && dbGenesisHash != rpcGenesis.Hash().Hex() {
+			engine.Logger.Warn("🚨 DETECTED_ENVIRONMENT_RESET",
+				slog.String("old_genesis", dbGenesisHash),
+				slog.String("new_genesis", rpcGenesis.Hash().Hex()),
+				slog.String("action", "wiping_stale_data"),
+			)
+			_, _ = db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE")
+			_, _ = db.ExecContext(ctx, "DELETE FROM sync_checkpoints")
+			return big.NewInt(0), nil
+		}
+	}
+
 	var lastSyncedBlock string
-	err := db.GetContext(ctx, &lastSyncedBlock,
+	err = db.GetContext(ctx, &lastSyncedBlock,
 		"SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
 
 	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
@@ -131,12 +148,33 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool *engi
 		engine.Logger.Warn("🚨 CHECKPOINT_DRIFT_DETECTED",
 			slog.String("db_checkpoint", blockNum.String()),
 			slog.String("chain_tip", latestChainBlock.String()),
-			slog.String("action", "auto_resetting_to_chain_tip"),
+			slog.String("action", "auto_cleaning_future_data"),
 		)
+
+		// 物理删除“未来”的脏数据，确保 Lag 归零
+		_, _ = db.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", latestChainBlock.String())
+		_, _ = db.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", latestChainBlock.String())
+		_, _ = db.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1 WHERE chain_id = $2", latestChainBlock.String(), chainID)
+
 		return latestChainBlock, nil
 	}
 
 	startBlock := new(big.Int).Add(blockNum, big.NewInt(1))
+
+	// 💡 演示模式优化：如果滞后太远（比如 > 5000 块），直接跳到最新
+	if rpcErr == nil {
+		lag := new(big.Int).Sub(latestChainBlock, blockNum)
+				if lag.Cmp(big.NewInt(5000)) > 0 {
+					engine.Logger.Warn("⏩ LARGE_LAG_DETECTED_JUMPING_TO_LATEST", 
+						slog.String("lag", lag.String()),
+						slog.String("action", "sliding_to_tip_minus_1000"),
+					)
+					startBlock = new(big.Int).Sub(latestChainBlock, big.NewInt(1000))
+					if startBlock.Sign() < 0 { startBlock = big.NewInt(0) }
+				}
+		
+	}
+
 	engine.LogCheckpointResumed(blockNum.String(), startBlock.String())
 	return startBlock, nil
 }
@@ -187,20 +225,28 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	latestChainBlock, _ := rpcPool.GetLatestBlockNumber(r.Context())
 	var latestIndexedBlock string
 	_ = db.GetContext(r.Context(), &latestIndexedBlock, "SELECT COALESCE(MAX(number), '0') FROM blocks")
-	
-	lib, _ := strconv.ParseInt(latestIndexedBlock, 10, 64)
-	syncLag := int64(0)
-	if latestChainBlock != nil {
-		syncLag = latestChainBlock.Int64() - lib
-	}
 
 	var totalBlocks, totalTransfers int64
 	_ = db.GetContext(r.Context(), &totalBlocks, "SELECT COUNT(*) FROM blocks")
 	_ = db.GetContext(r.Context(), &totalTransfers, "SELECT COUNT(*) FROM transfers")
 
+	// 💡 修正：滞后不仅看高度差，更要看数据库中实际缺少的块数
+	syncLag := int64(0)
+	if latestChainBlock != nil {
+		syncLag = latestChainBlock.Int64() - totalBlocks
+		if syncLag < 0 {
+			syncLag = 0
+		}
+	}
+
+	latestBlockStr := "0"
+	if latestChainBlock != nil {
+		latestBlockStr = latestChainBlock.String()
+	}
+
 	status := map[string]interface{}{
 		"state":              "active",
-		"latest_block":       latestChainBlock.String(), // 💡 统一 Key 名为 latest_block
+		"latest_block":       latestBlockStr,
 		"latest_indexed":     latestIndexedBlock,
 		"sync_lag":           syncLag,
 		"total_blocks":       totalBlocks,
@@ -216,13 +262,98 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	json.NewEncoder(w).Encode(status)
 }
 
+// continuousTailFollow 持续追踪链顶，调度新区块给 Fetcher
+// 替代一次性 Schedule，解决 RPC 恢复后区块空洞问题
+func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool *engine.RPCClientPool, startBlock *big.Int) {
+	lastScheduled := new(big.Int).Sub(startBlock, big.NewInt(1)) // 上次已调度的最高块号
+	pollInterval := 2 * time.Second
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	engine.Logger.Info("🔄 continuous_tail_follow_started",
+		slog.String("start_block", startBlock.String()),
+	)
+
+	// 首次立即执行一轮
+	firstRun := true
+
+	for {
+		if !firstRun {
+			select {
+			case <-ctx.Done():
+				engine.Logger.Info("continuous_tail_follow_stopping")
+				return
+			case <-ticker.C:
+			}
+		}
+		firstRun = false
+
+		// 获取链上最新区块号
+		chainTip, err := rpcPool.GetLatestBlockNumber(ctx)
+		if err != nil {
+			engine.Logger.Warn("tail_follow_rpc_error",
+				slog.String("error", err.Error()),
+				slog.String("action", "retry_next_tick"),
+			)
+			continue
+		}
+
+		// 如果链顶比上次调度的更高，调度新区块
+		if chainTip.Cmp(lastScheduled) > 0 {
+			from := new(big.Int).Add(lastScheduled, big.NewInt(1))
+			to := new(big.Int).Set(chainTip)
+
+			gapSize := new(big.Int).Sub(to, from).Int64() + 1
+			engine.Logger.Info("📋 tail_follow_scheduling",
+				slog.String("from", from.String()),
+				slog.String("to", to.String()),
+				slog.Int64("blocks", gapSize),
+			)
+
+			if err := fetcher.Schedule(ctx, from, to); err != nil {
+				engine.Logger.Warn("tail_follow_schedule_error",
+					slog.String("error", err.Error()),
+				)
+				continue
+			}
+
+			lastScheduled.Set(to)
+		}
+	}
+}
+
 func main() {
+	resetDB := flag.Bool("reset", false, "Reset database and checkpoints before starting")
+	flag.Parse()
+
 	cfg = config.Load()
 	engine.InitLogger(cfg.LogLevel)
 
-	db, err := sqlx.Connect("pgx", cfg.DatabaseURL)
-	if err != nil { slog.Error("db_fail", "err", err); os.Exit(1) }
+	var db *sqlx.DB
+	var err error
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		db, err = sqlx.Connect("pgx", cfg.DatabaseURL)
+		if err == nil {
+			break
+		}
+		slog.Warn("db_connect_retry", "attempt", i+1, "err", err)
+		time.Sleep(3 * time.Second)
+	}
+
+	if err != nil {
+		slog.Error("db_fail_after_retries", "err", err)
+		os.Exit(1)
+	}
 	defer db.Close()
+
+	if *resetDB {
+		engine.Logger.Warn("⚠️  RESET_MODE_ENABLED", "msg", "Truncating all tables...")
+		_, _ = db.Exec("TRUNCATE TABLE blocks, transfers CASCADE")
+		_, _ = db.Exec("DELETE FROM sync_checkpoints")
+		_, _ = db.Exec("DELETE FROM sync_status")
+		engine.Logger.Info("✅  DATABASE_RESET_COMPLETE")
+	}
 
 	rpcPool, _ := engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
 	rpcPool.SetRateLimit(cfg.RPCRateLimit, cfg.RPCRateLimit*2)
@@ -230,7 +361,7 @@ func main() {
 
 	fetcher := engine.NewFetcher(rpcPool, cfg.FetchConcurrency)
 	processor := engine.NewProcessor(db, rpcPool, cfg.RetryQueueSize, cfg.ChainID)
-	processor.SetBatchCheckpoint(cfg.CheckpointBatch)
+	processor.SetBatchCheckpoint(1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -258,7 +389,7 @@ func main() {
 	mux.Handle("/static/", web.HandleStatic())
 	mux.HandleFunc("/", web.RenderDashboard)
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) { wsHub.HandleWS(w, r) })
-	
+
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) { handleGetStatus(w, r, db, rpcPool) })
 	mux.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) { handleGetBlocks(w, r, db) })
 	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) { handleGetTransfers(w, r, db) })
@@ -273,7 +404,7 @@ func main() {
 	// 启动抓取
 	startBlock, _ := getStartBlockFromCheckpoint(ctx, db, rpcPool, cfg.ChainID)
 	fetcher.Start(ctx, &wg)
-	
+
 	// 启动数据审计器 (Reconciler)
 	reconciler := engine.NewReconciler(db, rpcPool, engine.GetMetrics())
 	wg.Add(1)
@@ -283,17 +414,32 @@ func main() {
 		reconciler.StartPeriodicAudit(ctx, 10*time.Minute, 500)
 	}()
 
-	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, cfg.ChainID, fetcher.Results, nil, nil, engine.GetMetrics())
+	fatalErrCh := make(chan error, 1)
+	sequencer := engine.NewSequencerWithFetcher(processor, fetcher, startBlock, cfg.ChainID, fetcher.Results, fatalErrCh, nil, engine.GetMetrics())
 	wg.Add(1)
 	go func() { defer wg.Done(); sequencer.Run(ctx) }()
 
-	go fetcher.Schedule(ctx, startBlock, new(big.Int).Add(startBlock, big.NewInt(1000)))
+	// 持续追踪链顶的调度器（替代一次性 Schedule）
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		continuousTailFollow(ctx, fetcher, rpcPool, startBlock)
+	}()
+
+	// 监听 Sequencer 致命错误
+	go func() {
+		select {
+		case err := <-fatalErrCh:
+			engine.Logger.Error("FATAL_SEQUENCER_ERROR", slog.String("error", err.Error()))
+		case <-ctx.Done():
+		}
+	}()
 
 	// 优雅关闭
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
-	
+
 	cancel()
 	server.Shutdown(context.Background())
 	wg.Wait()

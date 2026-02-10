@@ -349,6 +349,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	)
 	syntheticIdx := uint(10000) // high base to avoid conflict with real log_index
 	for _, tx := range data.Block.Transactions() {
+		toAddr := "[Contract Creation]"
 		if tx.To() != nil {
 			txToLow := strings.ToLower(tx.To().Hex())
 			isMatched := false
@@ -365,7 +366,8 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			}
 
 			if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
-				Logger.Info("🎯 发现直接调用监控合约的交易（无真实日志，使用合成）",
+				toAddr = txToLow
+				Logger.Info("🎯 发现匹配交易",
 					slog.String("stage", "PROCESSOR"),
 					slog.String("tx_hash", tx.Hash().Hex()),
 					slog.String("to", txToLow),
@@ -374,16 +376,15 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 				// 构造一个合成的 Transfer 事件 (尝试从交易中提取真实地址)
 				input := tx.Data()
 				syntheticAmount := big.NewInt(1000) // 默认值
-				syntheticTo := txToLow
 				if len(input) >= 68 {
 					// 提取第 4-36 字节作为 To 地址 (ERC20 transfer 参数)
-					syntheticTo = common.BytesToAddress(input[16:36]).Hex()
+					toAddr = common.BytesToAddress(input[16:36]).Hex()
 					// 提取最后 32 字节作为金额
 					syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
 				}
 
 				// 尝试获取发送者 (使用正确的 EIP155 Signer)
-				fromAddr := "0xunknown"
+				fromAddr := "[Internal_Call]"
 				signer := types.LatestSignerForChainID(big.NewInt(p.chainID)) 
 				if sender, err := types.Sender(signer, tx); err == nil {
 					fromAddr = sender.Hex()
@@ -394,7 +395,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 					TxHash:       tx.Hash().Hex(),
 					LogIndex:     syntheticIdx,
 					From:         strings.ToLower(fromAddr),
-					To:           strings.ToLower(syntheticTo),
+					To:           strings.ToLower(toAddr),
 					Amount:       models.NewUint256FromBigInt(syntheticAmount),
 					TokenAddress: txToLow,
 				}
