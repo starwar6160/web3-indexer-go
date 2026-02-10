@@ -66,6 +66,8 @@ async function fetchStatus() {
         document.getElementById('latestBlock').textContent = data?.latest_block || '0';
         document.getElementById('totalBlocks').textContent = data?.total_blocks || '0';
         document.getElementById('totalTransfers').textContent = data?.total_transfers || '0';
+        document.getElementById('tps').textContent = data?.tps || '0';
+        document.getElementById('bps').textContent = data?.bps || '0';
         document.getElementById('syncLag').textContent = data?.sync_lag || '0';
         document.getElementById('selfHealing').textContent = data?.self_healing_count || '0';
         document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
