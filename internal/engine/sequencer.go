@@ -30,17 +30,20 @@ type Sequencer struct {
 	reorgCh       chan<- ReorgEvent    // reorg 事件通知channel
 	chainID       int64                // 链ID用于checkpoint
 	metrics       *Metrics             // Prometheus metrics
+
+	lastProgressAt time.Time // 上次处理成功的时刻
 }
 
 func NewSequencer(processor *Processor, startBlock *big.Int, chainID int64, resultCh <-chan BlockData, fatalErrCh chan<- error, metrics *Metrics) *Sequencer {
 	return &Sequencer{
-		expectedBlock: new(big.Int).Set(startBlock),
-		buffer:        make(map[string]BlockData),
-		processor:     processor,
-		resultCh:      resultCh,
-		fatalErrCh:    fatalErrCh,
-		chainID:       chainID,
-		metrics:       metrics,
+		expectedBlock:  new(big.Int).Set(startBlock),
+		buffer:         make(map[string]BlockData),
+		processor:      processor,
+		resultCh:       resultCh,
+		fatalErrCh:     fatalErrCh,
+		chainID:        chainID,
+		metrics:        metrics,
+		lastProgressAt: time.Now(),
 	}
 }
 
@@ -61,10 +64,44 @@ func NewSequencerWithFetcher(processor *Processor, fetcher *Fetcher, startBlock 
 func (s *Sequencer) Run(ctx context.Context) {
 	Logger.Info("🚀 Sequencer started. Expected block: " + s.expectedBlock.String())
 
+	stallTicker := time.NewTicker(30 * time.Second)
+	defer stallTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+
+		case <-stallTicker.C:
+			// 巡检：如果停留在同一个块超过 30s，说明可能遇到了哈希洞或逻辑死锁
+			s.mu.RLock()
+			expectedStr := s.expectedBlock.String()
+			_, hasExpected := s.buffer[expectedStr]
+			bufferLen := len(s.buffer)
+			idleTime := time.Since(s.lastProgressAt)
+			s.mu.RUnlock()
+
+			if idleTime > 30*time.Second {
+				if bufferLen > 0 && !hasExpected {
+					// 🚨 发现幽灵空洞：缓冲区有后面块但没当前块
+					Logger.Error("🚨 CRITICAL_GAP_DETECTED", 
+						slog.String("missing_block", expectedStr),
+						slog.Int("buffered_blocks", bufferLen),
+					)
+					
+					// 触发自愈：强制 Fetcher 重新调度这个缺失的单块
+					if s.fetcher != nil {
+						Logger.Info("🛡️ SELF_HEALING: Triggering emergency fetch", slog.String("block", expectedStr))
+						go s.fetcher.Schedule(ctx, s.expectedBlock, s.expectedBlock)
+					}
+				} else {
+					Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", 
+						slog.String("expected", expectedStr),
+						slog.Int("buffer_size", bufferLen),
+						slog.Duration("idle_time", idleTime),
+					)
+				}
+			}
 
 		case data, ok := <-s.resultCh:
 			if !ok {
@@ -256,6 +293,7 @@ func (s *Sequencer) processSequentialLocked(ctx context.Context, data BlockData)
 		return err
 	}
 	s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
+	s.lastProgressAt = time.Now() // 💡 成功推进，重置计时
 	return nil
 }
 
