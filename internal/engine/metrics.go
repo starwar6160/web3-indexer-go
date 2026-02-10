@@ -2,6 +2,7 @@ package engine
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -49,6 +50,10 @@ type Metrics struct {
 	CheckpointUpdates   prometheus.Counter
 	StartTime           prometheus.Gauge
 	CurrentSyncHeight   prometheus.Gauge
+
+	// 实时性能指标 (用于 Dashboard)
+	totalTxProcessed     atomic.Uint64
+	totalBlocksProcessed atomic.Uint64
 }
 
 var (
@@ -187,6 +192,7 @@ func NewMetrics() *Metrics {
 // RecordBlockProcessed records a successfully processed block
 func (m *Metrics) RecordBlockProcessed(duration time.Duration) {
 	m.BlocksProcessed.Inc()
+	m.totalBlocksProcessed.Add(1)
 	m.ProcessingTime.Observe(duration.Seconds())
 }
 
@@ -213,6 +219,7 @@ func (m *Metrics) RecordReorgHandled(blocksAffected int) {
 // RecordTransferProcessed records a processed transfer
 func (m *Metrics) RecordTransferProcessed() {
 	m.TransfersProcessed.Inc()
+	m.totalTxProcessed.Add(1)
 }
 
 // RecordTransferFailed records a failed transfer
@@ -296,4 +303,9 @@ func (m *Metrics) RecordStartTime() {
 // UpdateCurrentSyncHeight updates the current sync height gauge
 func (m *Metrics) UpdateCurrentSyncHeight(height int64) {
 	m.CurrentSyncHeight.Set(float64(height))
+}
+
+// GetSnapshot 获取用于计算 TPS 的快照
+func (m *Metrics) GetSnapshot() (uint64, uint64) {
+	return m.totalTxProcessed.Load(), m.totalBlocksProcessed.Load()
 }
