@@ -43,6 +43,10 @@
                     <span class="stat-value" id="bps" style="color: #9c27b0;">0</span>
                 </div>
                 <div class="stat">
+                    <span class="stat-label">E2E Latency</span>
+                    <span class="stat-value" id="latency" style="color: #e91e63; font-weight: bold;">0ms</span>
+                </div>
+                <div class="stat">
                     <span class="stat-label">Sync Lag (Missing)</span>
                     <span class="stat-value" id="syncLag" style="color: #667eea;">0</span>
                 </div>
@@ -57,7 +61,14 @@
                 <div class="refresh-time">Last updated: <span id="lastUpdate">-</span></div>
             </div>
 
-            <div class="card">
+            <div class="card" style="flex: 1; background: #1e1e1e; color: #d4d4d4; font-family: 'Courier New', monospace; max-height: 300px; overflow-y: auto; border: 1px solid #333;">
+                <h2 style="color: #fff; border-bottom: 1px solid #333; padding-bottom: 5px; font-size: 16px; margin-top: 0;">📜 Engine Logs</h2>
+                <div id="logEntries" style="font-size: 11px; line-height: 1.4;">
+                    <div style="color: #666;">> System standby...</div>
+                </div>
+            </div>
+
+            <div class="card" style="flex: 1;">
                 <h2>🔗 API Endpoints</h2>
                 <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Access detailed information via REST API</p>
                 <div style="display: flex; flex-direction: column; gap: 8px;">

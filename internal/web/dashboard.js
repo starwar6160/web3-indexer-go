@@ -1,5 +1,8 @@
 let ws;
 let isWSConnected = false;
+let reconnectInterval = 1000; // 初始重连 1s
+const MAX_RECONNECT_INTERVAL = 30000; // 最大重连 30s
+
 const stateEl = document.getElementById('state');
 const healthEl = document.getElementById('health');
 
@@ -12,15 +15,23 @@ function connectWS() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = protocol + '//' + window.location.host + '/ws';
     
-    updateSystemState('CONNECTING...', 'status-connecting');
+    if (!isWSConnected) {
+        updateSystemState('CONNECTING...', 'status-connecting');
+    }
+    
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
         isWSConnected = true;
+        reconnectInterval = 1000; // 成功后重置重连间隔
         updateSystemState('● LIVE', 'status-live', true);
-        healthEl.textContent = '✅ Healthy';
+        healthEl.textContent = '✅ Connected';
         healthEl.className = 'status-badge status-healthy';
         console.log('✅ WebSocket Connected');
+        
+        // 💡 架构升级：重连后自动补齐数据
+        fetchData();
+        addLog('System connected. Streaming live data...', 'info');
     };
 
     ws.onmessage = (event) => {
@@ -28,25 +39,58 @@ function connectWS() {
             const msg = JSON.parse(event.data);
             if (msg.type === 'block') {
                 updateBlocksTable(msg.data);
+                if (msg.data.latency_ms) {
+                    document.getElementById('latency').textContent = `${msg.data.latency_ms}ms`;
+                }
                 fetchStatus();
             } else if (msg.type === 'transfer') {
                 const tx = msg.data;
                 tx.amount = tx.value; 
                 updateTransfersTable(tx);
+                addLog(`Transfer detected: ${tx.tx_hash.substring(0,10)}...`, 'success');
+            } else if (msg.type === 'log') {
+                addLog(msg.data.message, msg.data.level);
             }
         } catch (e) { console.error('WS Error:', e); }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
         isWSConnected = false;
         updateSystemState('DISCONNECTED', 'status-down');
-        console.log('❌ WebSocket Disconnected. Retrying in 5s...');
-        setTimeout(connectWS, 5000);
+        healthEl.textContent = '❌ Disconnected';
+        healthEl.className = 'status-badge status-error';
+        
+        addLog(`WebSocket connection lost. Retrying...`, 'warn');
+        console.warn(`❌ WebSocket Closed. Reconnecting in ${reconnectInterval/1000}s...`, e.reason);
+        
+        setTimeout(() => {
+            reconnectInterval = Math.min(reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
+            connectWS();
+        }, reconnectInterval);
     };
 
     ws.onerror = (err) => {
         console.error('WebSocket Error:', err);
+        ws.close();
     };
+}
+
+function addLog(message, level = 'info') {
+    const logEntries = document.getElementById('logEntries');
+    const time = new Date().toLocaleTimeString();
+    let color = '#d4d4d4';
+    if (level === 'success') color = '#28a745';
+    if (level === 'warn') color = '#ff9800';
+    if (level === 'error') color = '#f44336';
+    if (level === 'info') color = '#2196f3';
+
+    const entry = `<div style="margin-bottom: 2px;"><span style="color: #666;">[${time}]</span> <span style="color: ${color};">${message}</span></div>`;
+    logEntries.insertAdjacentHTML('afterbegin', entry);
+    
+    // 保持 50 条日志
+    if (logEntries.children.length > 50) {
+        logEntries.removeChild(logEntries.lastChild);
+    }
 }
 
 async function fetchStatus() {
