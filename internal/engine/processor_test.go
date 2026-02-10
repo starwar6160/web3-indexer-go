@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/jmoiron/sqlx"
@@ -34,16 +35,35 @@ func (m *MockProcessorRPCClient) BlockByNumber(ctx context.Context, number *big.
 	return block, nil
 }
 
+func (m *MockProcessorRPCClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+	block, exists := m.blocks[number.String()]
+	if !exists {
+		return nil, sql.ErrNoRows
+	}
+	return block.Header(), nil
+}
+
+func (m *MockProcessorRPCClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
+	return []types.Log{}, nil
+}
+
+func (m *MockProcessorRPCClient) GetLatestBlockNumber(ctx context.Context) (*big.Int, error) {
+	return big.NewInt(100), nil
+}
+
+func (m *MockProcessorRPCClient) GetHealthyNodeCount() int { return 1 }
+func (m *MockProcessorRPCClient) GetTotalNodeCount() int   { return 1 }
+func (m *MockProcessorRPCClient) Close()                   {}
+
 func (m *MockProcessorRPCClient) AddBlock(block *types.Block) {
 	m.blocks[block.Number().String()] = block
 }
 
-func createProcessorTestBlock(number int64, hash string, parentHash string) *types.Block {
+func createTestBlock(number int64, hash string, parentHash string) *types.Block {
 	header := &types.Header{
-		Number:    big.NewInt(number),
-		Hash:      common.HexToHash(hash),
+		Number:     big.NewInt(number),
 		ParentHash: common.HexToHash(parentHash),
-		Time:      uint64(time.Now().Unix()),
+		Time:       uint64(time.Now().Unix()),
 	}
 	return types.NewBlockWithHeader(header)
 }
@@ -89,7 +109,7 @@ func TestProcessor_ProcessBlock_Success(t *testing.T) {
 	mock.ExpectCommit()
 
 	// Create test block
-	block := createProcessorTestBlock(100, "0x123", "0xabc")
+	block := createTestBlock(100, "0x123", "0xabc")
 	data := BlockData{Block: block, Logs: []types.Log{}}
 
 	ctx := context.Background()
@@ -249,8 +269,8 @@ func TestProcessor_ExtractTransfer(t *testing.T) {
 		Address: common.HexToAddress("0xabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"),
 		Topics: []common.Hash{
 			TransferEventHash, // Transfer event signature
-			fromAddr.Hash(),
-			toAddr.Hash(),
+			common.BytesToHash(fromAddr.Bytes()),
+			common.BytesToHash(toAddr.Bytes()),
 		},
 		Data: common.LeftPadBytes(amount.Bytes(), 32),
 		BlockNumber: 100,
@@ -302,9 +322,9 @@ func TestProcessor_FindCommonAncestor(t *testing.T) {
 	processor := NewProcessor(sqlxDB, mockRPC)
 
 	// Setup RPC blocks
-	block100 := createProcessorTestBlock(100, "0x100", "0x99")
-	block99 := createProcessorTestBlock(99, "0x99", "0x98")
-	block98 := createProcessorTestBlock(98, "0x98", "0x97")
+	block100 := createTestBlock(100, "0x100", "0x99")
+	block99 := createTestBlock(99, "0x99", "0x98")
+	block98 := createTestBlock(98, "0x98", "0x97")
 
 	mockRPC.AddBlock(block100)
 	mockRPC.AddBlock(block99)

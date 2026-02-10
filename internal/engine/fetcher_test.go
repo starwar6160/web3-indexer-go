@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/assert"
@@ -33,7 +34,7 @@ func (m *MockRPCPool) HeaderByNumber(ctx context.Context, number *big.Int) (*typ
 	return args.Get(0).(*types.Header), args.Error(1)
 }
 
-func (m *MockRPCPool) FilterLogs(ctx context.Context, query interface{}) ([]types.Log, error) {
+func (m *MockRPCPool) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
 	args := m.Called(ctx, query)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -44,6 +45,19 @@ func (m *MockRPCPool) FilterLogs(ctx context.Context, query interface{}) ([]type
 func (m *MockRPCPool) GetHealthyNodeCount() int {
 	args := m.Called()
 	return args.Int(0)
+}
+
+func (m *MockRPCPool) GetTotalNodeCount() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
+func (m *MockRPCPool) GetLatestBlockNumber(ctx context.Context) (*big.Int, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*big.Int), args.Error(1)
 }
 
 func (m *MockRPCPool) Close() {
@@ -173,7 +187,7 @@ func TestFetcher_Schedule(t *testing.T) {
 	end := big.NewInt(102)
 	
 	// Schedule blocks
-	fetcher.Schedule(start, end)
+	fetcher.Schedule(context.Background(), start, end)
 	
 	// Give some time for scheduling
 	time.Sleep(10 * time.Millisecond)
@@ -198,7 +212,7 @@ func TestFetcher_Schedule_Stop(t *testing.T) {
 	end := big.NewInt(200) // Large range
 	
 	// Start scheduling
-	fetcher.Schedule(start, end)
+	fetcher.Schedule(context.Background(), start, end)
 	
 	// Stop immediately
 	fetcher.Stop()
