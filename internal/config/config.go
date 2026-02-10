@@ -29,10 +29,19 @@ type Config struct {
 }
 
 func Load() *Config {
-	_ = godotenv.Load() // .env文件是可选的
+	_ = godotenv.Load()
 
-	// ... (之前的解析逻辑保持不变) ...
-	// 补充缺失的解析
+	// 解析RPC URL列表
+	rpcUrlsStr := getEnv("RPC_URLS", "https://eth.llamarpc.com")
+	rpcUrls := strings.Split(rpcUrlsStr, ",")
+	for i, url := range rpcUrls {
+		rpcUrls[i] = strings.TrimSpace(url)
+	}
+
+	rpcTimeoutSeconds := getEnvAsInt64("RPC_TIMEOUT_SECONDS", 10)
+	rpcRateLimit := int(getEnvAsInt64("RPC_RATE_LIMIT", 20))
+	fetchConcurrency := int(getEnvAsInt64("FETCH_CONCURRENCY", 10))
+	fetchBatchSize := int(getEnvAsInt64("FETCH_BATCH_SIZE", 200))
 	maxGasPrice := getEnvAsInt64("MAX_GAS_PRICE", 500)
 	gasSafetyMargin := int(getEnvAsInt64("GAS_SAFETY_MARGIN", 20))
 	checkpointBatch := int(getEnvAsInt64("CHECKPOINT_BATCH", 100))
@@ -43,7 +52,7 @@ func Load() *Config {
 		RPCURLs:          rpcUrls,
 		WSSURL:           getEnv("WSS_URL", ""),
 		ChainID:          getEnvAsInt64("CHAIN_ID", 1),
-		StartBlock:       getEnvAsInt64("START_BLOCK", 10000000), 
+		StartBlock:       getEnvAsInt64("START_BLOCK", 10000000),
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 		LogFormat:        getEnv("LOG_FORMAT", "json"),
 		RPCTimeout:       time.Duration(rpcTimeoutSeconds) * time.Second,
