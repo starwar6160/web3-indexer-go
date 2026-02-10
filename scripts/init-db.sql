@@ -5,7 +5,8 @@
 CREATE TABLE IF NOT EXISTS blocks (
     hash VARCHAR(66) PRIMARY KEY,
     number BIGINT UNIQUE NOT NULL,
-    timestamp TIMESTAMP NOT NULL,
+    parent_hash VARCHAR(66) NOT NULL,
+    timestamp BIGINT NOT NULL,
     gas_limit BIGINT NOT NULL,
     gas_used BIGINT NOT NULL,
     base_fee_per_gas BIGINT,
@@ -51,16 +52,15 @@ CREATE TABLE IF NOT EXISTS logs (
 -- 转账事件表 (ERC20 Transfer事件的解析结果)
 CREATE TABLE IF NOT EXISTS transfers (
     id SERIAL PRIMARY KEY,
-    transaction_hash VARCHAR(66) NOT NULL,
+    tx_hash CHAR(66) NOT NULL,
     block_number BIGINT NOT NULL,
     log_index INTEGER NOT NULL,
-    token_address VARCHAR(42) NOT NULL,
-    from_address VARCHAR(42) NOT NULL,
-    to_address VARCHAR(42) NOT NULL,
-    value NUMERIC(36, 0) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (transaction_hash) REFERENCES transactions(hash),
-    UNIQUE(transaction_hash, log_index)
+    token_address CHAR(42) NOT NULL,
+    from_address CHAR(42) NOT NULL,
+    to_address CHAR(42) NOT NULL,
+    amount NUMERIC(78, 0) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(block_number, log_index)
 );
 
 -- 同步检查点表

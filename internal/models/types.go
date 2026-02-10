@@ -197,10 +197,14 @@ func (b *BigInt) Scan(value interface{}) error {
 
 // 对应数据库的结构体
 type Block struct {
-	Number     BigInt `db:"number"` 
-	Hash       string `db:"hash"` 
-	ParentHash string `db:"parent_hash"` 
-	Timestamp  uint64 `db:"timestamp"` 
+	Number           BigInt  `db:"number"`
+	Hash             string  `db:"hash"`
+	ParentHash       string  `db:"parent_hash"`
+	Timestamp        uint64  `db:"timestamp"`
+	GasLimit         uint64  `db:"gas_limit"`
+	GasUsed          uint64  `db:"gas_used"`
+	BaseFeePerGas    *BigInt `db:"base_fee_per_gas"`
+	TransactionCount int     `db:"transaction_count"`
 }
 
 type Transfer struct {

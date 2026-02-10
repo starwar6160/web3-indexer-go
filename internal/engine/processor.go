@@ -200,19 +200,32 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 如果是第一个区块或父块不存在（可能是同步开始），继续处理
 
 	// 2. 写入 Block
+	var baseFee *models.BigInt
+	if block.BaseFee() != nil {
+		baseFee = &models.BigInt{Int: block.BaseFee()}
+	}
+
 	_, err = dbTx.NamedExecContext(ctx, `
-		INSERT INTO blocks (number, hash, parent_hash, timestamp)
-		VALUES (:number, :hash, :parent_hash, :timestamp)
+		INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, base_fee_per_gas, transaction_count)
+		VALUES (:number, :hash, :parent_hash, :timestamp, :gas_limit, :gas_used, :base_fee_per_gas, :transaction_count)
 		ON CONFLICT (number) DO UPDATE SET
 			hash = EXCLUDED.hash,
 			parent_hash = EXCLUDED.parent_hash,
 			timestamp = EXCLUDED.timestamp,
+			gas_limit = EXCLUDED.gas_limit,
+			gas_used = EXCLUDED.gas_used,
+			base_fee_per_gas = EXCLUDED.base_fee_per_gas,
+			transaction_count = EXCLUDED.transaction_count,
 			processed_at = NOW()
 	`, models.Block{
-		Number:     models.BigInt{Int: blockNum},
-		Hash:       block.Hash().Hex(),
-		ParentHash: block.ParentHash().Hex(),
-		Timestamp:  block.Time(),
+		Number:           models.BigInt{Int: blockNum},
+		Hash:             block.Hash().Hex(),
+		ParentHash:       block.ParentHash().Hex(),
+		Timestamp:        block.Time(),
+		GasLimit:         block.GasLimit(),
+		GasUsed:          block.GasUsed(),
+		BaseFeePerGas:    baseFee,
+		TransactionCount: len(block.Transactions()),
 	})
 	if err != nil {
 		LogTransactionFailed("insert_block", blockNum.String(), err)

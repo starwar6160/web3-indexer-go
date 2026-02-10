@@ -48,13 +48,22 @@ func (b *BulkInserter) InsertBlocksBatch(ctx context.Context, blocks []models.Bl
 		_, err := pgxConn.CopyFrom(
 			ctx,
 			pgx.Identifier{"blocks"},
-			[]string{"number", "hash", "parent_hash", "timestamp"},
+			[]string{"number", "hash", "parent_hash", "timestamp", "gas_limit", "gas_used", "base_fee_per_gas", "transaction_count"},
 			pgx.CopyFromSlice(len(blocks), func(i int) ([]interface{}, error) {
+				var baseFee *string
+				if blocks[i].BaseFeePerGas != nil {
+					s := blocks[i].BaseFeePerGas.String()
+					baseFee = &s
+				}
 				return []interface{}{
 					blocks[i].Number.String(),
 					blocks[i].Hash,
 					blocks[i].ParentHash,
 					int64(blocks[i].Timestamp),
+					int64(blocks[i].GasLimit),
+					int64(blocks[i].GasUsed),
+					baseFee,
+					blocks[i].TransactionCount,
 				}, nil
 			}),
 		)
@@ -117,20 +126,31 @@ func (b *BulkInserter) fallbackInsertBlocks(ctx context.Context, exec execer, bl
 	hashes := make([]string, len(blocks))
 	parentHashes := make([]string, len(blocks))
 	timestamps := make([]int64, len(blocks))
+	gasLimits := make([]int64, len(blocks))
+	gasUseds := make([]int64, len(blocks))
+	baseFees := make([]*string, len(blocks))
+	txCounts := make([]int, len(blocks))
 
 	for i, b := range blocks {
 		numbers[i] = b.Number.String()
 		hashes[i] = b.Hash
 		parentHashes[i] = b.ParentHash
 		timestamps[i] = int64(b.Timestamp)
+		gasLimits[i] = int64(b.GasLimit)
+		gasUseds[i] = int64(b.GasUsed)
+		if b.BaseFeePerGas != nil {
+			s := b.BaseFeePerGas.String()
+			baseFees[i] = &s
+		}
+		txCounts[i] = b.TransactionCount
 	}
 
 	query := `
-		INSERT INTO blocks (number, hash, parent_hash, timestamp)
-		SELECT * FROM UNNEST($1::numeric[], $2::text[], $3::text[], $4::bigint[])
+		INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, base_fee_per_gas, transaction_count)
+		SELECT * FROM UNNEST($1::numeric[], $2::text[], $3::text[], $4::bigint[], $5::bigint[], $6::bigint[], $7::numeric[], $8::int[])
 		ON CONFLICT (number) DO NOTHING
 	`
-	_, err := exec.ExecContext(ctx, query, numbers, hashes, parentHashes, timestamps)
+	_, err := exec.ExecContext(ctx, query, numbers, hashes, parentHashes, timestamps, gasLimits, gasUseds, baseFees, txCounts)
 	return err
 }
 
