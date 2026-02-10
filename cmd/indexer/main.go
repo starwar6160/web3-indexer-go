@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -329,6 +330,16 @@ func main() {
 	cfg = config.Load()
 	engine.InitLogger(cfg.LogLevel)
 
+	// 🚨 架构级安全锁：在演示模式下，严禁连接公网 RPC
+	if cfg.DemoMode {
+		for _, url := range cfg.RPCURLs {
+			if strings.Contains(url, "infura.io") || strings.Contains(url, "alchemy.com") || strings.Contains(url, "quiknode.pro") {
+				slog.Error("🚫 SAFETY_LOCK: Demo mode active, public RPC restricted!", "url", url)
+				os.Exit(1)
+			}
+		}
+	}
+
 	var db *sqlx.DB
 	var err error
 	maxRetries := 10
@@ -356,6 +367,7 @@ func main() {
 	}
 
 	rpcPool, _ := engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
+	// 💡 显式应用令牌桶限流保护 Key
 	rpcPool.SetRateLimit(cfg.RPCRateLimit, cfg.RPCRateLimit*2)
 	defer rpcPool.Close()
 
