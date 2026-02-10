@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -295,14 +296,25 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 					slog.String("to", txToLow),
 				)
 
-				// 构造一个合成的 Transfer 事件
+				// 构造一个合成的 Transfer 事件 (尝试从 Data 中提取金额以提高准确性)
+				input := tx.Data()
+				syntheticAmount := big.NewInt(1000) // 默认值
+				if len(input) >= 68 {
+					// 提取最后 32 字节作为金额 (ERC20 transfer 参数)
+					syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
+				} else {
+					// 如果数据不足，生成一个随机小额 (演示目的)
+					r, _ := rand.Int(rand.Reader, big.NewInt(50))
+					syntheticAmount.Add(big.NewInt(10), r)
+				}
+
 				syntheticTransfer := &models.Transfer{
 					BlockNumber:  models.BigInt{Int: blockNum},
 					TxHash:       tx.Hash().Hex(),
 					LogIndex:     syntheticIdx,
 					From:         strings.ToLower("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"), // Deployer
 					To:           strings.ToLower("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"), // User 1
-					Amount:       models.NewUint256FromBigInt(big.NewInt(1000)),
+					Amount:       models.NewUint256FromBigInt(syntheticAmount),
 					TokenAddress: txToLow,
 				}
 				syntheticIdx++
@@ -493,13 +505,20 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 						slog.String("to", txToLow),
 						slog.String("block", blockNum.String()),
 					)
+					// 尝试从 Data 中提取金额
+					input := tx.Data()
+					syntheticAmount := big.NewInt(1000)
+					if len(input) >= 68 {
+						syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
+					}
+
 					syntheticTransfer := models.Transfer{
 						BlockNumber:  models.BigInt{Int: blockNum},
 						TxHash:       tx.Hash().Hex(),
 						LogIndex:     uint(syntheticIdx),
 						From:         strings.ToLower("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
 						To:           strings.ToLower("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
-						Amount:       models.NewUint256FromBigInt(big.NewInt(1000)),
+						Amount:       models.NewUint256FromBigInt(syntheticAmount),
 						TokenAddress: txToLow,
 					}
 					validTransfers = append(validTransfers, syntheticTransfer)
