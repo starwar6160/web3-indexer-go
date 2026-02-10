@@ -209,6 +209,12 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		// 如果找到了上一个区块，检查 Hash 链
 		if lastBlock.Hash != block.ParentHash().Hex() {
 			LogReorgDetected(blockNum.String(), lastBlock.Hash, block.ParentHash().Hex())
+			if p.EventHook != nil {
+				p.EventHook("log", map[string]interface{}{
+					"message": fmt.Sprintf("🚨 REORG DETECTED at #%s! Rolling back...", blockNum.String()),
+					"level":   "error",
+				})
+			}
 			// 只返回错误，不在当前事务内删除（避免被 defer tx.Rollback() 回滚）
 			// 上层会统一处理回滚与重新调度
 			return ReorgError{At: new(big.Int).Set(blockNum)}
@@ -437,12 +443,23 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 	// 6. 实时事件推送 (在事务成功后)
 	if p.EventHook != nil {
+		// 计算端到端延迟 (毫秒)
+		latency := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
+		if latency < 0 { latency = 0 }
+
 		p.EventHook("block", map[string]interface{}{
-			"number":    block.NumberU64(),
-			"hash":      block.Hash().Hex(),
-			"timestamp": block.Time(),
-			"tx_count":  len(block.Transactions()),
+			"number":     block.NumberU64(),
+			"hash":       block.Hash().Hex(),
+			"timestamp":  block.Time(),
+			"tx_count":   len(block.Transactions()),
+			"latency_ms": latency,
 		})
+		
+		p.EventHook("log", map[string]interface{}{
+			"message": fmt.Sprintf("✅ Processed Block #%d (%d txs)", block.NumberU64(), len(block.Transactions())),
+			"level":   "info",
+		})
+
 		for _, t := range transfers {
 			p.EventHook("transfer", map[string]interface{}{
 				"tx_hash":       t.TxHash,
