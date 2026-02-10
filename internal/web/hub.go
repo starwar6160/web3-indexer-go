@@ -64,6 +64,11 @@ func (h *Hub) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			h.logger.Info("websocket_hub_stopping")
+			// 优雅关闭：关闭所有客户端连接
+			for client := range h.clients {
+				close(client.send)
+				delete(h.clients, client)
+			}
 			return
 		case client := <-h.register:
 			h.clients[client] = true

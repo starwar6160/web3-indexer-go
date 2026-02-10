@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 	"web3-indexer-go/internal/models"
 
@@ -42,14 +43,49 @@ type Processor struct {
 	metrics          *Metrics  // Prometheus metrics
 	watchedAddresses map[common.Address]bool
 	EventHook        func(eventType string, data interface{}) // 实时事件回调
+
+	// DLQ / Retry Queue 
+	retryQueue chan BlockData
+	maxRetries int
 }
 
 func NewProcessor(db *sqlx.DB, client RPCClient) *Processor {
-	return &Processor{
+	p := &Processor{
 		db:               db,
 		client:           client,
 		watchedAddresses: make(map[common.Address]bool),
+		retryQueue:       make(chan BlockData, 100),
+		maxRetries:       3,
 	}
+	return p
+}
+
+// StartRetryWorker 启动异步重试工人
+func (p *Processor) StartRetryWorker(ctx context.Context, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		Logger.Info("processor_retry_worker_started")
+		for {
+			select {
+			case <-ctx.Done():
+				Logger.Info("processor_retry_worker_stopping")
+				return
+			case data := <-p.retryQueue:
+				// 简单的指数退避重试逻辑可以在这里扩展
+				Logger.Warn("retrying_failed_block_from_queue", 
+					slog.String("block", data.Number.String()),
+				)
+				if err := p.ProcessBlockWithRetry(ctx, data, 1); err != nil {
+					Logger.Error("block_failed_all_retries_sent_to_dead_letter",
+						slog.String("block", data.Number.String()),
+						slog.String("error", err.Error()),
+					)
+					// 这里可以进一步将 data 写入持久化存储（如数据库中的 dead_letter_blocks 表）
+				}
+			}
+		}
+	}()
 }
 
 // SetWatchedAddresses sets the addresses to monitor
@@ -248,10 +284,16 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 							slog.String("error", err.Error()),
 							slog.String("tx_hash", transfer.TxHash),
 						)
+						if p.metrics != nil {
+							p.metrics.RecordTransferFailed()
+						}
 						return fmt.Errorf("failed to insert transfer at block %s: %w", blockNum.String(), err)
 					}
 					txWithRealLogs[transfer.TxHash] = true
 					transfers = append(transfers, *transfer)
+					if p.metrics != nil {
+						p.metrics.RecordTransferProcessed()
+					}
 					Logger.Info("✅ Transfer saved to DB",
 						slog.String("stage", "PROCESSOR"),
 						slog.String("block", blockNum.String()),
@@ -372,8 +414,12 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 记录处理耗时 and 当前同步高度
 	if p.metrics != nil {
 		p.metrics.RecordBlockProcessed(time.Since(start))
-		// 更新当前同步高度 gauge（用于监控）
-		p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
+		// 更新当前同步高度 gauge (增加溢出安全性检查)
+		if blockNum.IsInt64() {
+			p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
+		} else {
+			Logger.Warn("block_number_overflows_int64_for_metrics", slog.String("block", blockNum.String()))
+		}
 	}
 
 	return nil
@@ -391,6 +437,10 @@ func (p *Processor) updateCheckpointInTx(ctx context.Context, tx *sqlx.Tx, chain
 
 	if err != nil {
 		return fmt.Errorf("failed to update checkpoint: %w", err)
+	}
+
+	if p.metrics != nil {
+		p.metrics.RecordCheckpointUpdate()
 	}
 
 	return nil
