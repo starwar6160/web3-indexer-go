@@ -24,9 +24,9 @@ docker compose -f docker-compose.infra.yml up -d
 echo -e "Step 3: 执行数据库逻辑清理..."
 # 给数据库一点启动时间
 sleep 3
-./bin/indexer --reset &
+go run ./cmd/indexer --reset &
 PID=$!
-sleep 2
+sleep 5
 kill $PID
 
 echo -e "${GREEN}✅ 环境已重置！${NC}"
