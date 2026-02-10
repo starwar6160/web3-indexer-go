@@ -26,11 +26,12 @@ type RPCClientPool struct {
 
 // rpcNode 单个RPC节点封装
 type rpcNode struct {
-	url       string
-	client    *ethclient.Client
-	isHealthy bool
-	lastError time.Time
-	failCount int
+	url        string
+	client     *ethclient.Client
+	isHealthy  bool
+	lastError  time.Time
+	failCount  int
+	retryAfter time.Time // 下次允许尝试的时间
 }
 
 // NewRPCClientPool 创建RPC客户端池
@@ -112,7 +113,7 @@ func (p *RPCClientPool) Close() {
 	log.Printf("RPC Pool closed")
 }
 
-// getNextHealthyNode 获取下一个健康节点（轮询+健康检查）
+// getNextHealthyNode 获取下一个健康节点（轮询+指数退避）
 func (p *RPCClientPool) getNextHealthyNode() *rpcNode {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -132,20 +133,17 @@ func (p *RPCClientPool) getNextHealthyNode() *rpcNode {
 			return node
 		}
 
-		// 如果节点不健康但已经超过5分钟，尝试恢复
-		if time.Since(node.lastError) > 5*time.Minute {
-			node.isHealthy = true
-			node.failCount = 0
-			log.Printf("RPC node %s recovered from error state", node.url)
+		// 检查指数退避是否结束
+		if time.Now().After(node.retryAfter) {
+			// 尝试将其视为可用的
 			return node
 		}
 	}
 
-	// 所有节点都不健康，返回nil让调用方处理
 	return nil
 }
 
-// markNodeUnhealthy 标记节点为不健康状态
+// markNodeUnhealthy 标记节点为不健康状态，并应用指数退避
 func (p *RPCClientPool) markNodeUnhealthy(node *rpcNode) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -154,10 +152,17 @@ func (p *RPCClientPool) markNodeUnhealthy(node *rpcNode) {
 	node.lastError = time.Now()
 	node.failCount++
 
-	// 记录详细的节点错误日志
-	LogRPCRequestFailed("node_unhealthy", node.url, fmt.Errorf("fail_count: %d", node.failCount))
+	// 指数退避：1s, 2s, 4s, 8s, 16s, 32s, max 60s
+	backoffSec := 1 << (node.failCount - 1)
+	if backoffSec > 60 {
+		backoffSec = 60
+	}
+	node.retryAfter = node.lastError.Add(time.Duration(backoffSec) * time.Second)
 
-	log.Printf("RPC node %s marked unhealthy (fail count: %d)", node.url, node.failCount)
+	// 记录详细的节点错误日志
+	LogRPCRequestFailed("node_unhealthy", node.url, fmt.Errorf("fail_count: %d, retry_after: %v", node.failCount, node.retryAfter.Format("15:04:05")))
+
+	log.Printf("RPC node %s marked unhealthy (fail count: %d, retry after %ds)", node.url, node.failCount, backoffSec)
 }
 
 // BlockByNumber 获取区块（带故障转移和限速）
@@ -185,6 +190,15 @@ func (p *RPCClientPool) BlockByNumber(ctx context.Context, number *big.Int) (*ty
 			continue
 		}
 
+		// 成功请求，恢复健康状态
+		if !node.isHealthy {
+			p.mu.Lock()
+			node.isHealthy = true
+			node.failCount = 0
+			p.mu.Unlock()
+			log.Printf("RPC node %s recovered to healthy", node.url)
+		}
+
 		return block, nil
 	}
 
@@ -207,6 +221,15 @@ func (p *RPCClientPool) HeaderByNumber(ctx context.Context, number *big.Int) (*t
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
+		}
+
+		// 成功请求，恢复健康状态
+		if !node.isHealthy {
+			p.mu.Lock()
+			node.isHealthy = true
+			node.failCount = 0
+			p.mu.Unlock()
+			log.Printf("RPC node %s recovered to healthy", node.url)
 		}
 
 		return header, nil
@@ -240,6 +263,15 @@ func (p *RPCClientPool) FilterLogs(ctx context.Context, q ethereum.FilterQuery) 
 			continue
 		}
 
+		// 成功请求，恢复健康状态
+		if !node.isHealthy {
+			p.mu.Lock()
+			node.isHealthy = true
+			node.failCount = 0
+			p.mu.Unlock()
+			log.Printf("RPC node %s recovered to healthy", node.url)
+		}
+
 		return logs, nil
 	}
 
@@ -263,6 +295,15 @@ func (p *RPCClientPool) GetLatestBlockNumber(ctx context.Context) (*big.Int, err
 		if err != nil {
 			p.markNodeUnhealthy(node)
 			continue
+		}
+
+		// 成功请求，恢复健康状态
+		if !node.isHealthy {
+			p.mu.Lock()
+			node.isHealthy = true
+			node.failCount = 0
+			p.mu.Unlock()
+			log.Printf("RPC node %s recovered to healthy", node.url)
 		}
 
 		return header.Number, nil
