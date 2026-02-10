@@ -72,6 +72,7 @@ logs/
 Thumbs.db
 
 # --- Temporary & Build Files ---
+bin/
 tmp/
 temp/
 *.tmp
