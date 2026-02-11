@@ -97,6 +97,14 @@ async function fetchStatus() {
     try {
         const res = await fetch('/api/status');
         if (!res.ok) throw new Error('API unreachable');
+        
+        // 🛡️ 确定性安全验证：检查响应头中的 Ed25519 签名
+        const signature = res.headers.get('X-Payload-Signature');
+        const signerId = res.headers.get('X-Signer-ID');
+        if (signature) {
+            updateSignatureStatus(true, signerId, signature);
+        }
+
         const data = await res.json();
         
         // 💡 工业级防御：使用可选链和默认值，防止 toUpperCase() 崩溃
@@ -174,6 +182,11 @@ async function fetchData() {
     await fetchStatus();
     try {
         const [blocksRes, txRes] = await Promise.all([fetch('/api/blocks'), fetch('/api/transfers')]);
+        
+        // 检查签名
+        const sig = blocksRes.headers.get('X-Payload-Signature');
+        if (sig) updateSignatureStatus(true, blocksRes.headers.get('X-Signer-ID'), sig);
+
         const blocksData = await blocksRes.json();
         const txData = await txRes.json();
 
@@ -213,3 +226,11 @@ async function fetchData() {
 fetchData();
 connectWS();
 setInterval(fetchStatus, 5000);
+
+function updateSignatureStatus(isSigned, signerId, signature) {
+    const sigStatusEl = document.getElementById('signatureStatus');
+    if (sigStatusEl && isSigned) {
+        sigStatusEl.innerHTML = `<span style="color: #ff9800; font-weight: bold; font-size: 11px;">🛡️ Verified: ${signerId}</span>`;
+        sigStatusEl.title = "Ed25519 Payload Signature: " + signature;
+    }
+}

@@ -153,7 +153,11 @@ func main() {
 	mux.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) { handleGetBlocks(w, r, db) })
 	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) { handleGetTransfers(w, r, db) })
 
-	server := &http.Server{Addr: "0.0.0.0:8080", Handler: mux}
+	// 初始化 Ed25519 签名中间件
+	signer, _ := engine.NewSigningMiddleware(engine.GetORInitSeed(), "zw-web3-indexer-v1")
+	signedHandler := signer.Handler(mux)
+
+	server := &http.Server{Addr: "0.0.0.0:8080", Handler: signedHandler}
 	go server.ListenAndServe()
 
 	startBlock, err := sm.GetStartBlock(ctx)
