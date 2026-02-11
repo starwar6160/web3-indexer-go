@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security | Web3 Indexer Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <style>
+        .security-container { max-width: 800px; margin: 40px auto; padding: 20px; background: #1e1e1e; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .key-block { background: #000; color: #00ff00; padding: 15px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; overflow-x: auto; white-space: pre-wrap; font-size: 0.9em; border: 1px solid #333; }
+        h1, h2 { color: #007bff; }
+        .fingerprint { font-weight: bold; color: #ffcc00; letter-spacing: 1px; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; background: #28a745; color: white; font-size: 0.8em; margin-bottom: 10px; }
+        .nav-link { display: inline-block; margin-bottom: 20px; color: #aaa; text-decoration: none; }
+        .nav-link:hover { color: #fff; }
+    </style>
+</head>
+<body style="background-color: #121212; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;">
+    <div class="security-container">
+        <a href="/" class="nav-link">← Back to Dashboard</a>
+        <div class="status-badge">Deterministic Security Active</div>
+        <h1>Security & Authenticity</h1>
+        <p>This project implements <strong>Deterministic Security</strong>. Every release artifact, commit, and core document is cryptographically signed using EdDSA (Ed25519) to ensure integrity and origin authenticity.</p>
+
+        <h2>GPG Developer Identity</h2>
+        <p><strong>Developer:</strong> Zhou Wei &lt;zhouwei6160@gmail.com&gt;</p>
+        <p><strong>Key ID:</strong> <code>F96525FE58575DCF</code></p>
+        <p><strong>Fingerprint:</strong> <span class="fingerprint">FFA0 B998 E7AF 2A9A 9A2C 6177 F965 25FE 5857 5DCF</span></p>
+
+        <h2>Verification Instructions</h2>
+        <p>To verify the authenticity of the code or binary releases, import the public key and verify the signature:</p>
+        <div class="key-block"># Import the public key
+curl -s https://demo2.st6160.click/static/PUBLIC_KEY.asc | gpg --import
+
+# Verify the README
+gpg --verify README.md.asc README.md
+
+# Verify build artifacts (Checksums)
+gpg --verify checksums.txt.asc checksums.txt
+sha256sum -c checksums.txt</div>
+
+        <h2>Public Key (Ed25519)</h2>
+        <div class="key-block" id="pubkey">Loading public key...</div>
+    </div>
+
+    <script>
+        fetch('/static/PUBLIC_KEY.asc')
+            .then(response => response.text())
+            .then(text => {
+                document.getElementById('pubkey').textContent = text;
+            })
+            .catch(err => {
+                document.getElementById('pubkey').textContent = "Failed to load public key. Please check the repository.";
+            });
+    </script>
+</body>
+</html>

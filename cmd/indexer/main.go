@@ -147,6 +147,7 @@ func main() {
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/static/", web.HandleStatic())
 	mux.HandleFunc("/", web.RenderDashboard)
+	mux.HandleFunc("/security", web.RenderSecurity)
 	mux.HandleFunc("/ws", wsHub.HandleWS)
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) { handleGetStatus(w, r, db, rpcPool) })
 	mux.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) { handleGetBlocks(w, r, db) })
