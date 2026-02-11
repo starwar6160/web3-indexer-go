@@ -55,6 +55,16 @@ docker exec -it web3-indexer-anvil cast send --private-key 0xac0974bec39a17e36ba
 - 连接稳定性：WebSocket 持久连接 + Ping/Pong 心跳，缓解 CDN/代理导致的静默断连问题。可以通过主动断连/代理模拟来验证重连逻辑。
 - 并发与资源：基于 Go 的协程池，支持 10+ 并发 worker；运行时内存占用控制在较低范围（工程中目标 <200MB）。可通过容器监控（docker stats / Prometheus 指标）验证。
 
+#### 🛡️ Data Integrity & Security (EdDSA Signing)
+
+To ensure end-to-end data integrity and prevent man-in-the-middle (MITM) attacks or data tampering at the edge (e.g., WAF or Proxy levels), this project implements a **cryptographic provenance layer**:
+
+* **Response Signing:** Every API response is dynamically signed using **Ed25519 (EdDSA)**. Unlike ECDSA, EdDSA provides deterministic signing, eliminating risks associated with poor high-entropy random number generators.
+* **Identity Binding:** The signing key is derived from a GnuPG-protected identity, linking the software's execution output directly to the developer's verified cryptographic identity.
+* **Verification:** Clients can verify the authenticity of the data by checking the `X-Payload-Signature` header against the public key fingerprint provided in the documentation.
+* **Edge Defense:** Integrated with Cloudflare WAF to filter automated bot traffic (User-Agent filtering) and rate-limit high-frequency RPC probing, ensuring high availability of the indexing pipeline.
+
+
 可观测性与 SRE 实践
 - Prometheus 指标 + Dashboard（Vanilla JS）展示 TPS、区块高度、队列长度、RPC 健康等。
 - 日志与指标用于定位瓶颈：Fetcher/Sequencer/Processor 的延迟、重试计数与失败率均可在指标中分解查看。

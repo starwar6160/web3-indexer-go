@@ -89,3 +89,4 @@ docker-compose.override.yml
 *.old
 #*.md
 venv/
+bin/
