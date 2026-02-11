@@ -26,15 +26,19 @@ help:
 
 	@echo "  make air          - [本地开发] 启动热重载 (需本地 Go 环境)"
 
-	@echo "  make clean        - 清理本地构建产物"
+		@echo "  make clean        - 清理本地构建产物"
 
-	@echo "  make sign-readme  - 使用 EdDSA GPG 密钥签署 README.md"
+		@echo "  make sign-readme  - 使用 EdDSA GPG 密钥签署 README.md"
 
-	@echo "  make verify-identity - 验证存储库的加密身份"
+		@echo "  make verify-identity - 验证存储库的加密身份"
 
+		@echo "  make deploy-service - [生产] 编译并更新 systemd 服务运行新版本"
 
+	
 
-build:
+	build:
+
+	
 
 	./scripts/publish.sh
 
@@ -108,3 +112,11 @@ verify-identity:
 	gpg --verify README.md.asc README.md
 	@echo "\n验证公钥导出文件..."
 	gpg --import PUBLIC_KEY.asc
+
+deploy-service: build
+	@echo "🚀 正在部署新版本到 systemd..."
+	sudo cp bin/web3-indexer.service /etc/systemd/system/
+	sudo systemctl daemon-reload
+	sudo systemctl restart web3-indexer
+	@echo "✅ 服务已重启，正在检查状态..."
+	sudo systemctl status web3-indexer --no-pager
