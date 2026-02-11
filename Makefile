@@ -2,7 +2,7 @@
 # Web3 Indexer 工业级控制台 (Commander)
 # ==============================================================================
 
-.PHONY: help build run air test clean demo start stop logs infra-up infra-down status stress-test docker-build
+.PHONY: help build run air test clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity
 
 
 
@@ -27,6 +27,10 @@ help:
 	@echo "  make air          - [本地开发] 启动热重载 (需本地 Go 环境)"
 
 	@echo "  make clean        - 清理本地构建产物"
+
+	@echo "  make sign-readme  - 使用 EdDSA GPG 密钥签署 README.md"
+
+	@echo "  make verify-identity - 验证存储库的加密身份"
 
 
 
@@ -95,3 +99,12 @@ stop:
 logs:
 
 	docker compose logs -f indexer
+
+sign-readme:
+	gpg --detach-sign --armor --local-user F96525FE58575DCF README.md
+
+verify-identity:
+	@echo "验证 README 签名..."
+	gpg --verify README.md.asc README.md
+	@echo "\n验证公钥导出文件..."
+	gpg --import PUBLIC_KEY.asc

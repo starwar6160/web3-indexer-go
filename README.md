@@ -5,6 +5,11 @@ Live demo: https://demo2.st6160.click/
 概述
 - 一个全栈容器化的 Web3 索引器示例工程，侧重可观测性与稳定性。实现了 Fetcher / Sequencer / Processor 解耦的流水线设计、RPC 池的自动故障转移、以及面向高频交易场景的 nonce 对齐与状态持久化。工程以可复现的方式提供端到端环境，便于技术人员验证功能与性能指标。
 
+🔐 **加密身份验证 (EdDSA)**
+- **开发者:** 周伟 (Zhou Wei) <zhouwei6160@gmail.com>
+- **GPG 指纹:** \`FFA0 B998 E7AF 2A9A 9A2C 6177 F965 25FE 5857 5DCF\`
+- **验证:** 本仓库使用 Ed25519 密钥进行签名。运行 \`make verify-identity\` 验证代码完整性。
+
 快速启动（最少依赖）
 - 前提：目标机器安装了 Docker 与 Docker Compose。
 - 克隆并启动示例环境：

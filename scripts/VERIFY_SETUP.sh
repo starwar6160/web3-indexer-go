@@ -126,6 +126,16 @@ echo "    }"
 echo "  }"
 echo ""
 
+# 步骤 I: 验证加密身份 (EdDSA)
+echo -e "${BLUE}步骤 I: 验证加密身份 (EdDSA)${NC}"
+echo "命令:"
+echo "  gpg --verify README.md.asc README.md"
+echo ""
+echo "预期响应:"
+echo "  gpg: Good signature from \"Zhou Wei <zhouwei6160@gmail.com>\""
+echo "  gpg: Primary key fingerprint: FFA0 B998 E7AF 2A9A 9A2C  6177 F965 25FE 5857 5DCF"
+echo ""
+
 # 完整工作流
 echo -e "${YELLOW}=== 完整工作流 ===${NC}"
 echo ""
