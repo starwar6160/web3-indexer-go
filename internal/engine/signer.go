@@ -45,19 +45,17 @@ type responseWrapper struct {
 }
 
 func (rw *responseWrapper) Write(b []byte) (int, error) {
-	rw.body.Write(b)
-	return rw.ResponseWriter.Write(b)
+	return rw.body.Write(b)
 }
 
 func (rw *responseWrapper) WriteHeader(statusCode int) {
 	rw.statusCode = statusCode
-	rw.ResponseWriter.WriteHeader(statusCode)
 }
 
 func (sm *SigningMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 跳过非 API 或静态资源请求（可选）
-		if r.URL.Path == "/ws" || r.URL.Path == "/metrics" {
+		// 跳过 WebSocket 和 Metrics
+		if r.URL.Path == "/ws" || r.URL.Path == "/metrics" || r.URL.Path == "/security" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -72,13 +70,22 @@ func (sm *SigningMiddleware) Handler(next http.Handler) http.Handler {
 
 		// 只有在成功响应时才进行加签
 		if rw.statusCode >= 200 && rw.statusCode < 300 {
-			signature := ed25519.Sign(sm.PrivateKey, rw.body.Bytes())
+			data := rw.body.Bytes()
+			signature := ed25519.Sign(sm.PrivateKey, data)
 			sigBase64 := base64.StdEncoding.EncodeToString(signature)
 
-			// 注入安全响应头
+			// 【关键修复】：必须在发送任何内容之前设置 Header
 			w.Header().Set("X-Payload-Signature", sigBase64)
 			w.Header().Set("X-Signer-ID", sm.KeyID)
 			w.Header().Set("X-Content-Integrity", "Ed25519")
+			
+			// 手动触发写入状态码和之前捕获的数据
+			w.WriteHeader(rw.statusCode)
+			w.Write(data)
+		} else {
+			// 失败请求原样写回
+			w.WriteHeader(rw.statusCode)
+			w.Write(rw.body.Bytes())
 		}
 	})
 }
