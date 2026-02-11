@@ -39,12 +39,12 @@ WorkingDirectory=$PROJECT_ROOT
 ExecStartPre=/usr/bin/docker compose -f $PROJECT_ROOT/docker-compose.infra.yml up -d
 
 # 关键环境变量
-Environment=DATABASE_URL=postgres://postgres:postgres@localhost:15432/web3_indexer?sslmode=disable
-Environment=RPC_URLS=http://localhost:8545
+Environment=DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/web3_indexer?sslmode=disable
+Environment=RPC_URLS=http://127.0.0.1:8545
 Environment=CHAIN_ID=31337
 Environment=START_BLOCK=0
 Environment=EMULATOR_ENABLED=true
-Environment=EMULATOR_RPC_URL=http://localhost:8545
+Environment=EMULATOR_RPC_URL=http://127.0.0.1:8545
 Environment=EMULATOR_PRIVATE_KEY=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 Environment=EMULATOR_TX_INTERVAL=333ms
 Environment=LOG_LEVEL=info
@@ -62,7 +62,15 @@ EOF
 
 echo -e "${GREEN}✅ 服务文件已生成: bin/$SERVICE_FILE${NC}"
 
-# 3. 提供部署指令
+# 3. 确定性安全签名 (Artifact Signing)
+echo -e "${YELLOW}Step 3: 正在为发布产物生成加密签名...${NC}"
+cd bin
+sha256sum indexer $SERVICE_FILE > checksums.txt
+gpg --yes --detach-sign --armor --local-user F96525FE58575DCF checksums.txt
+cd ..
+echo -e "${GREEN}✅ 签名完成: bin/checksums.txt.asc${NC}"
+
+# 4. 提供部署指令
 echo -e "\n${BLUE}=== 部署指南 ===${NC}"
 echo -e "1. 部署服务: ${YELLOW}sudo cp bin/$SERVICE_FILE /etc/systemd/system/${NC}"
 echo -e "2. 加载配置: ${YELLOW}sudo systemctl daemon-reload${NC}"
