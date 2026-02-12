@@ -82,6 +82,7 @@ Designed for public-facing jump servers:
 +#### 🚀 部署幂等性与 SRE 实践
 +针对容器化环境下的命名冲突与环境漂移风险，本项目在 `systemd` 集成中实现了以下增强：
 +- **部署幂等性治理 (Deployment Idempotency)**：通过 `ExecStartPre` 钩子引入自动预清理机制，利用 `docker compose --remove-orphans` 策略物理剔除旧版残留容器，确保演示环境的一致性。
++- **异构环境治理 (Heterogeneous Environment Governance)**：针对主流发行版（Docker V2 Plugin）与特定 ARM 架构环境（Standalone Compose V1）的差异，实现了 Compose 命令自动发现机制，解决了 `status 125` 启动死锁问题。
 +- **状态隔离与冷启动自愈**：严格区分 `infra` (数据库/模拟器) 与 `app` (索引引擎) 的生命周期管理，确保系统在发生非正常关机或环境迁移后，能通过预启动钩子实现 100% 的冷启动自愈。
 +
  

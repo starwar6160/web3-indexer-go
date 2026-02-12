@@ -25,6 +25,14 @@ echo -e "${YELLOW}Step 2: 生成 systemd 单元文件...${NC}"
 PROJECT_ROOT=$(pwd)
 SERVICE_FILE="web3-indexer.service"
 
+# 探测 Compose 命令 (SRE 异构环境治理: V1 vs V2)
+if docker compose version > /dev/null 2>&1; then
+    COMPOSE_CMD="$(which docker) compose"
+else
+    COMPOSE_CMD="$(which docker-compose)"
+fi
+echo -e "${BLUE}探测到 Compose 命令: ${NC}$COMPOSE_CMD"
+
 cat > bin/$SERVICE_FILE <<EOF
 [Unit]
 Description=Web3 Indexer Go Service
@@ -38,8 +46,8 @@ WorkingDirectory=$PROJECT_ROOT
 # 针对 ARM 环境下可能存在的仿真需求
 Environment=DOCKER_DEFAULT_PLATFORM=linux/amd64
 # 启动前确保 Docker 基础设施已启动并清理孤儿容器 (SRE 幂等性增强)
-ExecStartPre=-$(which docker) compose -f $PROJECT_ROOT/docker-compose.infra.yml down -v --remove-orphans
-ExecStartPre=$(which docker) compose -f $PROJECT_ROOT/docker-compose.infra.yml up -d --remove-orphans
+ExecStartPre=-$COMPOSE_CMD -f \$PROJECT_ROOT/docker-compose.infra.yml down -v --remove-orphans
+ExecStartPre=$COMPOSE_CMD -f \$PROJECT_ROOT/docker-compose.infra.yml up -d --remove-orphans
 
 # 关键环境变量
 Environment=DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_indexer?sslmode=disable
