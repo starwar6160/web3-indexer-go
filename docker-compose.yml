@@ -9,13 +9,13 @@ services:
     environment:
       POSTGRES_DB: web3_indexer
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     ports:
-      - "15432:5432"
+      - "127.0.0.1:15432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d web3_indexer"]
       interval: 5s
@@ -33,7 +33,7 @@ services:
     entrypoint: ["anvil"]
     command: ["--host", "0.0.0.0", "--port", "8545", "--chain-id", "31337", "--accounts", "10", "--balance", "10000", "--block-time", "1"]
     ports:
-      - "8545:8545"
+      - "127.0.0.1:8545:8545"
     networks:
       - web3-network
 
@@ -44,7 +44,7 @@ services:
       dockerfile: Dockerfile
     container_name: web3-indexer-app
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/web3_indexer?sslmode=disable
+      - DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@db:5432/web3_indexer?sslmode=disable
       - RPC_URLS=http://anvil:8545
       - CHAIN_ID=31337
       - START_BLOCK=0
@@ -52,7 +52,7 @@ services:
       - LOG_LEVEL=info
       - DEMO_MODE=true
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       db:
         condition: service_healthy

@@ -1,5 +1,5 @@
 #!/bin/bash
-export DATABASE_URL="postgres://postgres:postgres@localhost:15432/web3_indexer?sslmode=disable"
+export DATABASE_URL="postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_indexer?sslmode=disable"
 export RPC_URLS="http://localhost:8545"
 export CHAIN_ID="31337"
 export START_BLOCK="0"
