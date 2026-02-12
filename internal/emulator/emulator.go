@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"web3-indexer-go/internal/engine"
@@ -46,18 +47,31 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 
-	currentChainNonce, err := nm.client.PendingNonceAt(ctx, nm.address)
-	if err == nil && currentChainNonce > nm.pendingNonce {
-		nm.logger.Warn("nonce_drift_detected_fixing",
-			slog.Uint64("local", nm.pendingNonce),
-			slog.Uint64("chain", currentChainNonce),
-		)
-		nm.pendingNonce = currentChainNonce
+	// 偶尔与链上同步，防止漂移 (每 50 笔交易强制校验一次)
+	if nm.pendingNonce%50 == 0 {
+		currentChainNonce, err := nm.client.PendingNonceAt(ctx, nm.address)
+		if err == nil && currentChainNonce > nm.pendingNonce {
+			nm.logger.Warn("🔍 NONCE_DRIFT_DETECTED_AUTO_FIXING",
+				slog.Uint64("local", nm.pendingNonce),
+				slog.Uint64("chain", currentChainNonce),
+			)
+			nm.pendingNonce = currentChainNonce
+		}
 	}
 
 	nonce := nm.pendingNonce
 	nm.pendingNonce++
 	return nonce, nil
+}
+
+// RollbackNonce 在发送彻底失败时回滚 Nonce (实验性)
+func (nm *NonceManager) RollbackNonce(failedNonce uint64) {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	if failedNonce < nm.pendingNonce {
+		nm.pendingNonce = failedNonce
+		nm.logger.Info("🔄 NONCE_ROLLBACK", slog.Uint64("target", failedNonce))
+	}
 }
 
 func (nm *NonceManager) ResyncNonce(ctx context.Context) error {
@@ -68,8 +82,16 @@ func (nm *NonceManager) ResyncNonce(ctx context.Context) error {
 		return err
 	}
 	nm.pendingNonce = nonce
-	nm.logger.Info("nonce_resynced", slog.Uint64("new_nonce", nonce))
+	nm.logger.Info("✅ NONCE_RESYNCED", slog.Uint64("new_nonce", nonce))
 	return nil
+}
+
+// EmulatorMetrics 记录仿真器运行状态
+type EmulatorMetrics struct {
+	Sent       atomic.Uint64
+	Confirmed  atomic.Uint64
+	Failed     atomic.Uint64
+	SelfHealed atomic.Uint64
 }
 
 // Emulator 是内置的流量生成引擎
@@ -80,9 +102,11 @@ type Emulator struct {
 	contract   common.Address
 	chainID    *big.Int
 	nm         *NonceManager
+	Metrics    EmulatorMetrics
 
 	// 回调
 	OnSelfHealing func(reason string)
+	OnMetrics     func(m EmulatorMetrics)
 
 	// 配置参数
 	blockInterval   time.Duration
@@ -304,24 +328,32 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	tx := types.NewTransaction(nonce, e.contract, big.NewInt(0), estimatedGas, gasPrice, data)
 	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(e.chainID), e.privateKey)
 	if err != nil {
+		e.Metrics.Failed.Add(1)
 		return
 	}
 
 	if err := e.client.SendTransaction(ctx, signedTx); err != nil {
-		e.logger.Error("send_failed", slog.String("error", err.Error()))
+		e.Metrics.Failed.Add(1)
+		e.logger.Error("send_failed", slog.String("error", err.Error()), slog.Uint64("nonce", nonce))
 		// ---------------- 自修复逻辑 ----------------
-		// 如果发现 nonce 错误（通常是由于环境重置或漂移），立即强制重同步
 		if strings.Contains(err.Error(), "nonce too low") || strings.Contains(err.Error(), "already known") {
-			e.logger.Warn("🚨 NONCE_OUT_OF_SYNC_DETECTED", slog.String("action", "immediate_resync"))
+			e.logger.Warn("🚨 NONCE_OUT_OF_SYNC", slog.Uint64("failed_nonce", nonce))
+			e.Metrics.SelfHealed.Add(1)
 			if e.OnSelfHealing != nil {
 				e.OnSelfHealing("nonce_mismatch")
 			}
 			e.nm.ResyncNonce(ctx)
 		} else {
-			e.nm.ResyncNonce(ctx) // 其他错误也尝试重同步以保持稳健
+			// 对于其他网络错误，尝试回滚 nonce 以便下次重试该号
+			e.nm.RollbackNonce(nonce)
 		}
 		// -------------------------------------------
 		return
+	}
+
+	e.Metrics.Sent.Add(1)
+	if e.OnMetrics != nil {
+		e.OnMetrics(e.Metrics)
 	}
 
 	e.logger.Info("📤 [Emulator] Sent REAL Transfer",
@@ -334,6 +366,7 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	go func() {
 		receipt, err := e.waitForReceipt(ctx, signedTx.Hash())
 		if err == nil {
+			e.Metrics.Confirmed.Add(1)
 			e.logger.Info("✅ [Emulator] Confirmed", slog.String("hash", signedTx.Hash().Hex()[:10]), slog.Uint64("block", receipt.BlockNumber.Uint64()))
 		}
 	}()
