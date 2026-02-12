@@ -91,6 +91,15 @@ func main() {
 	}
 	defer db.Close()
 
+	// 确保访问者统计表存在 (SRE 审计强化)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS visitor_stats (
+		id SERIAL PRIMARY KEY,
+		ip_address INET NOT NULL,
+		user_agent TEXT,
+		metadata JSONB NOT NULL,
+		created_at TIMESTAMPTZ DEFAULT NOW()
+	); CREATE INDEX IF NOT EXISTS idx_visitor_metadata ON visitor_stats USING GIN (metadata);`)
+
 	if *resetDB {
 		_, _ = db.Exec("TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
 	}
@@ -157,7 +166,10 @@ func main() {
 	signer, _ := engine.NewSigningMiddleware(engine.GetORInitSeed(), "zw-web3-indexer-v1")
 	signedHandler := signer.Handler(mux)
 
-	server := &http.Server{Addr: "0.0.0.0:8080", Handler: signedHandler}
+	// 应用访问者审计中间件 (SRE 增强)
+	auditedHandler := VisitorStatsMiddleware(db, signedHandler)
+
+	server := &http.Server{Addr: "0.0.0.0:8080", Handler: auditedHandler}
 	go server.ListenAndServe()
 
 	startBlock, err := sm.GetStartBlock(ctx)

@@ -81,7 +81,17 @@ CREATE TABLE IF NOT EXISTS sync_status (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 访问者日志表 (SRE 审计)
+CREATE TABLE IF NOT EXISTS visitor_stats (
+    id SERIAL PRIMARY KEY,
+    ip_address INET NOT NULL,
+    user_agent TEXT,
+    metadata JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 创建索引以提高查询性能
+CREATE INDEX IF NOT EXISTS idx_visitor_metadata ON visitor_stats USING GIN (metadata);
 CREATE INDEX IF NOT EXISTS idx_blocks_number ON blocks(number);
 CREATE INDEX IF NOT EXISTS idx_blocks_timestamp ON blocks(timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_block_number ON transactions(block_number);

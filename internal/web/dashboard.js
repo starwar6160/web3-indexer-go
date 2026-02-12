@@ -121,6 +121,8 @@ async function fetchStatus() {
         document.getElementById('tps').textContent = data?.tps || '0';
         document.getElementById('bps').textContent = data?.bps || '0';
         document.getElementById('syncLag').textContent = data?.sync_lag || '0';
+        document.getElementById('totalVisitors').textContent = data?.total_visitors || '0';
+        document.getElementById('adminIP').textContent = data?.admin_ip || 'None';
         document.getElementById('selfHealing').textContent = data?.self_healing_count || '0';
         document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
     } catch (e) { 

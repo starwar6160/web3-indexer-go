@@ -51,6 +51,10 @@
                     <span class="stat-value" id="syncLag" style="color: #667eea;">0</span>
                 </div>
                 <div class="stat">
+                    <span class="stat-label">Unique Visitors</span>
+                    <span class="stat-value" id="totalVisitors" style="color: #00bcd4; font-weight: bold;">0</span>
+                </div>
+                <div class="stat">
                     <span class="stat-label">Self-Healing</span>
                     <span class="stat-value" id="selfHealing" style="color: #28a745;">0</span>
                 </div>
@@ -69,6 +73,20 @@
                 <div id="logEntries" style="font-size: 11px; line-height: 1.4;">
                     <div style="color: #666;">> System standby...</div>
                 </div>
+            </div>
+
+            <div class="card" style="flex: 1; border: 1px solid #00bcd4;">
+                <h2 style="color: #00bcd4;">📡 Visitor Audit</h2>
+                <p style="color: #ccc; font-size: 13px; margin-bottom: 10px;">Dynamic Anomaly Detection Active</p>
+                <div class="stat">
+                    <span class="stat-label" style="font-size: 11px;">Admin/Stress IP (Auto-Filtered)</span>
+                    <span class="stat-value" id="adminIP" style="font-size: 12px; color: #f44336;">None</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label" style="font-size: 11px;">Heuristic Status</span>
+                    <span class="stat-value" style="font-size: 11px; color: #28a745;">LEARNING...</span>
+                </div>
+                <p style="font-size: 10px; color: #666; margin-top: 10px;">Identifies IPs with >90% traffic dominance as non-human/dev and excludes them from persistent stats.</p>
             </div>
 
             <div class="card" style="flex: 1; border: 1px solid #ff9800;">
