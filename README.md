@@ -64,6 +64,21 @@ To ensure end-to-end data integrity and prevent man-in-the-middle (MITM) attacks
 * **Verification:** Clients can verify the authenticity of the data by checking the `X-Payload-Signature` header against the public key fingerprint provided in the documentation.
 * **Edge Defense:** Integrated with Cloudflare WAF to filter automated bot traffic (User-Agent filtering) and rate-limit high-frequency RPC probing, ensuring high availability of the indexing pipeline.
 
+### 🧠 Engineering Insights
+
+#### 🔄 Integrated Traffic Emulator & Self-Healing
+To provide a true **"zero-config"** demo experience, this project features a built-in transaction emulator:
+- **Nonce Prediction Engine**: Manages high-frequency (up to 50 TPS) transactions with a local prediction queue and automatic on-chain re-syncing every 50 txs.
+- **Atomic Recovery**: If a transaction fails due to network issues, the system performs a **Nonce Rollback**, ensuring data continuity without gaps.
+- **Anvil Privilege Integration**: Uses `anvil_setBalance` for automatic wallet top-ups, ensuring the demo can run indefinitely without manual intervention.
+- **Live Self-Healing**: Automatically detects and fixes `nonce too low` errors (e.g., after an environment reset), broadcasting the recovery event to the real-time Dashboard.
+
+#### 🛡️ Security-First Architecture
+Designed for public-facing jump servers:
+- **Gateway Pattern**: Only the Nginx Gateway is exposed to the public internet (port 80).
+- **Physical Isolation**: Database (PostgreSQL) and RPC nodes (Anvil) are bound to `127.0.0.1`, invisible to external scanners.
+- **Protocol Obfuscation**: Backup channels use **WireGuard** (UDP silent-drop) and **Fail2Ban** (24h ban on 3 failed attempts) to neutralize low-cost automated attacks.
+
 
 可观测性与 SRE 实践
 - Prometheus 指标 + Dashboard（Vanilla JS）展示 TPS、区块高度、队列长度、RPC 健康等。
