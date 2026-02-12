@@ -78,10 +78,14 @@ Designed for public-facing jump servers:
 - **Gateway Pattern**: Only the Nginx Gateway is exposed to the public internet (port 80).
 - **Physical Isolation**: Database (PostgreSQL) and RPC nodes (Anvil) are bound to `127.0.0.1`, invisible to external scanners.
 - **Protocol Obfuscation**: Backup channels use **WireGuard** (UDP silent-drop) and **Fail2Ban** (24h ban on 3 failed attempts) to neutralize low-cost automated attacks.
-
-
-可观测性与 SRE 实践
-- Prometheus 指标 + Dashboard（Vanilla JS）展示 TPS、区块高度、队列长度、RPC 健康等。
+ 
++#### 🚀 部署幂等性与 SRE 实践
++针对容器化环境下的命名冲突与环境漂移风险，本项目在 `systemd` 集成中实现了以下增强：
++- **部署幂等性治理 (Deployment Idempotency)**：通过 `ExecStartPre` 钩子引入自动预清理机制，利用 `docker compose --remove-orphans` 策略物理剔除旧版残留容器，确保演示环境的一致性。
++- **状态隔离与冷启动自愈**：严格区分 `infra` (数据库/模拟器) 与 `app` (索引引擎) 的生命周期管理，确保系统在发生非正常关机或环境迁移后，能通过预启动钩子实现 100% 的冷启动自愈。
++
+ 
+ 可观测性与 SRE 实践- Prometheus 指标 + Dashboard（Vanilla JS）展示 TPS、区块高度、队列长度、RPC 健康等。
 - 日志与指标用于定位瓶颈：Fetcher/Sequencer/Processor 的延迟、重试计数与失败率均可在指标中分解查看。
 - 可安全暴露内网节点（示例使用 Cloudflare Tunnel 配置），生产部署应注意访问控制与 WAF 规则配置。
 
