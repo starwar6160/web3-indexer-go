@@ -11,12 +11,12 @@ WorkingDirectory=/home/ubuntu/zwCode/web3-indexer-go
 ExecStartPre=/usr/bin/docker compose -f /home/ubuntu/zwCode/web3-indexer-go/docker-compose.infra.yml up -d
 
 # 关键环境变量
-Environment=DATABASE_URL=postgres://postgres:postgres@localhost:15432/web3_indexer?sslmode=disable
-Environment=RPC_URLS=http://localhost:8545
+Environment=DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_indexer?sslmode=disable
+Environment=RPC_URLS=http://127.0.0.1:8545
 Environment=CHAIN_ID=31337
 Environment=START_BLOCK=0
 Environment=EMULATOR_ENABLED=true
-Environment=EMULATOR_RPC_URL=http://localhost:8545
+Environment=EMULATOR_RPC_URL=http://127.0.0.1:8545
 Environment=EMULATOR_PRIVATE_KEY=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 Environment=EMULATOR_TX_INTERVAL=333ms
 Environment=LOG_LEVEL=info

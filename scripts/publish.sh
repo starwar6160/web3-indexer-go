@@ -39,7 +39,7 @@ WorkingDirectory=$PROJECT_ROOT
 ExecStartPre=/usr/bin/docker compose -f $PROJECT_ROOT/docker-compose.infra.yml up -d
 
 # 关键环境变量
-Environment=DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/web3_indexer?sslmode=disable
+Environment=DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_indexer?sslmode=disable
 Environment=RPC_URLS=http://127.0.0.1:8545
 Environment=CHAIN_ID=31337
 Environment=START_BLOCK=0
@@ -63,12 +63,19 @@ EOF
 echo -e "${GREEN}✅ 服务文件已生成: bin/$SERVICE_FILE${NC}"
 
 # 3. 确定性安全签名 (Artifact Signing)
-echo -e "${YELLOW}Step 3: 正在为发布产物生成加密签名...${NC}"
+echo -e "${YELLOW}Step 3: 正在验证发布产物安全性...${NC}"
+GPG_KEY="F96525FE58575DCF"
 cd bin
 sha256sum indexer $SERVICE_FILE > checksums.txt
-gpg --yes --detach-sign --armor --local-user F96525FE58575DCF checksums.txt
+
+if gpg --list-secret-keys "$GPG_KEY" > /dev/null 2>&1; then
+    echo -e "🔐 ${GREEN}检测到私钥，正在生成加密签名...${NC}"
+    gpg --yes --detach-sign --armor --local-user "$GPG_KEY" checksums.txt
+    echo -e "${GREEN}✅ 签名完成: bin/checksums.txt.asc${NC}"
+else
+    echo -e "⚠️  ${YELLOW}未检测到密钥 [$GPG_KEY]，跳过签名步骤 (开发模式)。${NC}"
+fi
 cd ..
-echo -e "${GREEN}✅ 签名完成: bin/checksums.txt.asc${NC}"
 
 # 4. 提供部署指令
 echo -e "\n${BLUE}=== 部署指南 ===${NC}"
