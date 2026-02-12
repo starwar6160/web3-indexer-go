@@ -43,8 +43,6 @@ Requires=docker.service
 Type=simple
 User=$(whoami)
 WorkingDirectory=$PROJECT_ROOT
-# 针对 ARM 环境下可能存在的仿真需求
-Environment=DOCKER_DEFAULT_PLATFORM=linux/amd64
 # 启动前确保 Docker 基础设施已启动并清理孤儿容器 (SRE 幂等性增强)
 ExecStartPre=-$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml down -v --remove-orphans
 ExecStartPre=$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml up -d --remove-orphans
