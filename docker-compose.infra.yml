@@ -7,9 +7,9 @@ services:
     environment:
       POSTGRES_DB: web3_indexer
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
     ports:
-      - "15432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - indexer_db_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
@@ -26,16 +26,33 @@ services:
     image: ghcr.io/foundry-rs/foundry:latest
     container_name: web3-indexer-anvil
     restart: always
-    network_mode: host
+    ports:
+      - "127.0.0.1:8545:8545"
     entrypoint: ["anvil"]
     command: ["--host", "0.0.0.0", "--block-time", "1", "--chain-id", "31337", "--accounts", "10"]
     volumes:
       - indexer_anvil_data:/root/.foundry/anvil
     environment:
       - FOUNDRY_DISABLE_NIGHTLY_WARNING=true
+    networks:
+      - indexer-network
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Nginx 安全网关
+  gateway:
+    image: nginx:alpine
+    container_name: web3-indexer-gateway
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - indexer-network
 
 volumes:
   indexer_db_data:
