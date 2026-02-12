@@ -82,6 +82,7 @@ release/
 
 # --- Local Development ---
 docker-compose.override.yml
+wg_keys/
 
 # --- Backup Files ---
 *.bak
