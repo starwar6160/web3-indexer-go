@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Web3 Indexer Dashboard</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/dashboard.css">
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -68,8 +70,11 @@
                 <div class="refresh-time">Last updated: <span id="lastUpdate">-</span></div>
             </div>
 
-            <div class="card" style="flex: 1; background: #1e1e1e; color: #d4d4d4; font-family: 'Courier New', monospace; max-height: 300px; overflow-y: auto; border: 1px solid #333;">
-                <h2 style="color: #fff; border-bottom: 1px solid #333; padding-bottom: 5px; font-size: 16px; margin-top: 0;">📜 Engine Logs</h2>
+            <div class="card"
+                style="flex: 1; background: #1e1e1e; color: #d4d4d4; font-family: 'Courier New', monospace; max-height: 300px; overflow-y: auto; border: 1px solid #333;">
+                <h2
+                    style="color: #fff; border-bottom: 1px solid #333; padding-bottom: 5px; font-size: 16px; margin-top: 0;">
+                    📜 Engine Logs</h2>
                 <div id="logEntries" style="font-size: 11px; line-height: 1.4;">
                     <div style="color: #666;">> System standby...</div>
                 </div>
@@ -86,49 +91,56 @@
                     <span class="stat-label" style="font-size: 11px;">Heuristic Status</span>
                     <span class="stat-value" style="font-size: 11px; color: #28a745;">LEARNING...</span>
                 </div>
-                <p style="font-size: 10px; color: #666; margin-top: 10px;">Identifies IPs with >90% traffic dominance as non-human/dev and excludes them from persistent stats.</p>
+                <p style="font-size: 10px; color: #666; margin-top: 10px;">Identifies IPs with >90% traffic dominance as
+                    non-human/dev and excludes them from persistent stats.</p>
             </div>
 
             <div class="card" style="flex: 1; border: 1px solid #ff9800;">
                 <h2 style="color: #ff9800;">🛡️ Deterministic Security</h2>
                 <p style="color: #ccc; font-size: 13px; margin-bottom: 15px;">Verified by EdDSA (Ed25519) Signatures</p>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                    <a href="/security" style="background: #ff9800; color: #000; text-align: center; padding: 10px; border-radius: 4px; text-decoration: none; font-weight: bold; transition: 0.3s;">
+                    <a href="/security"
+                        style="background: #ff9800; color: #000; text-align: center; padding: 10px; border-radius: 4px; text-decoration: none; font-weight: bold; transition: 0.3s;">
                         Enter Security Verification Site
                     </a>
                 </div>
-                <p style="font-size: 11px; color: #666; margin-top: 10px; text-align: center;">Fingerprint: FFA0 B998 E7AF...5DCF</p>
+                <p style="font-size: 11px; color: #666; margin-top: 10px; text-align: center;">Fingerprint: FFA0 B998
+                    E7AF...5DCF</p>
             </div>
 
             <div class="card" style="flex: 1;">
                 <h2>🔗 API Endpoints</h2>
-                <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Access detailed information via REST API</p>
+                <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Access detailed information via REST API
+                </p>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                    <a href="/healthz" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Health Check (/healthz)</a>
-                    <a href="/metrics" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Prometheus Metrics (/metrics)</a>
-                    <a href="/api/status" style="color: #667eea; text-decoration: none; font-size: 13px;">→ System Status (/api/status)</a>
-                    <a href="/api/blocks" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Latest Blocks (/api/blocks)</a>
-                    <a href="/api/transfers" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Latest Transfers (/api/transfers)</a>
+                    <a href="/healthz" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Health Check
+                        (/healthz)</a>
+                    <a href="/metrics" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Prometheus
+                        Metrics (/metrics)</a>
+                    <a href="/api/status" style="color: #667eea; text-decoration: none; font-size: 13px;">→ System
+                        Status (/api/status)</a>
+                    <a href="/api/blocks" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Latest
+                        Blocks (/api/blocks)</a>
+                    <a href="/api/transfers" style="color: #667eea; text-decoration: none; font-size: 13px;">→ Latest
+                        Transfers (/api/transfers)</a>
                 </div>
                 <button class="action-btn" onclick="location.href='/api/admin/start-demo'">🎮 Start Demo Mode</button>
             </div>
         </div>
 
-        <!-- Grafana Dashboard Integration (Temporarily Hidden for Debugging)
+        <!-- Grafana Dashboard Integration -->
         <div class="card">
             <h2>📈 Real-time Grafana Dashboard</h2>
-            <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Live monitoring of indexer performance metrics</p>
-            <div style="border: 1px solid #222; border-radius: 12px; overflow: hidden; background: #000; height: 600px;">
+            <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Live monitoring of indexer performance metrics
+            </p>
+            <div
+                style="border: 1px solid #222; border-radius: 12px; overflow: hidden; background: #000; height: 600px;">
                 <iframe
-                    src="https://grafana-demo2.st6160.click/d/web3-indexer-dashboard/web3-indexer-dashboard?orgId=1&refresh=5s&kiosk"
-                    width="100%"
-                    height="100%"
-                    frameborder="0"
-                    style="background: #121212">
+                    src="https://grafana.demo2.st6160.click/d/web3-indexer-dashboard/web3-indexer-dashboard?orgId=1&refresh=5s&kiosk"
+                    width="100%" height="100%" frameborder="0" style="background: #121212">
                 </iframe>
             </div>
         </div>
-        -->
 
         <div class="card">
             <h2>📦 Latest Blocks</h2>
@@ -142,7 +154,9 @@
                     </tr>
                 </thead>
                 <tbody id="blocksTable">
-                    <tr><td colspan="4" class="loading">Waiting for sync...</td></tr>
+                    <tr>
+                        <td colspan="4" class="loading">Waiting for sync...</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -160,11 +174,14 @@
                     </tr>
                 </thead>
                 <tbody id="transfersTable">
-                    <tr><td colspan="5" class="loading">No transactions found...</td></tr>
+                    <tr>
+                        <td colspan="5" class="loading">No transactions found...</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
     </div>
     <script src="/static/dashboard.js"></script>
 </body>
+
 </html>
