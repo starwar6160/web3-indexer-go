@@ -33,11 +33,20 @@ else
 fi
 echo -e "${BLUE}探测到 Compose 命令: ${NC}$COMPOSE_CMD"
 
+# 检查 if CLEAR_DB environment variable is set to determine if we should clear the database
+CLEAR_DB_FLAG=""
+if [ "${CLEAR_DB}" = "true" ]; then
+    echo -e "${YELLOW}⚠️  Database clear flag detected, will reset database${NC}"
+    CLEAR_DB_FLAG="-v"
+else
+    echo -e "${GREEN}✅ Database preservation mode enabled (data will be preserved)${NC}"
+fi
+
 # 检查是否设置了生产环境变量，如果没有则使用演示配置
 if [ -z "$DATABASE_URL" ] || [ -z "$RPC_URLS" ]; then
     echo -e "${YELLOW}⚠️  未检测到生产环境变量，使用演示配置${NC}"
     echo -e "${YELLOW}💡  建议在部署前设置以下环境变量：DATABASE_URL, RPC_URLS${NC}"
-    
+
     # 使用演示配置
     cat > bin/$SERVICE_FILE <<EOF
 [Unit]
@@ -50,7 +59,7 @@ Type=simple
 User=$(whoami)
 WorkingDirectory=$PROJECT_ROOT
 # 启动前确保 Docker 基础设施已启动并清理孤儿容器 (SRE 幂等性增强)
-ExecStartPre=-$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml down -v --remove-orphans
+ExecStartPre=-$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml down $CLEAR_DB_FLAG --remove-orphans
 ExecStartPre=$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml up -d --remove-orphans
 
 # 关键环境变量 (演示配置)
@@ -88,7 +97,7 @@ Type=simple
 User=$(whoami)
 WorkingDirectory=$PROJECT_ROOT
 # 启动前确保 Docker 基础设施已启动并清理孤儿容器 (SRE 幂等性增强)
-ExecStartPre=-$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml down -v --remove-orphans
+ExecStartPre=-$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml down $CLEAR_DB_FLAG --remove-orphans
 ExecStartPre=$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml up -d --remove-orphans
 
 # 关键环境变量 (生产配置)
