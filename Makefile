@@ -2,12 +2,13 @@
 # Web3 Indexer 工业级控制台 (Commander)
 # ==============================================================================
 
-.PHONY: help build run air test clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service
+.PHONY: help build run air test clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service setup-demo
 
 # 默认目标
 help:
 	@echo "可用指令:"
 	@echo "  make demo         - [推荐] 一键启动 Docker 全栈演示环境 (含压测)"
+	@echo "  make setup-demo   - 设置演示环境 (使用集中配置)"
 	@echo "  make start        - 启动服务 (alias for demo)"
 	@echo "  make stop         - 停止并清理 Docker 环境"
 	@echo "  make status       - 检查容器运行状态"
@@ -41,9 +42,12 @@ infra-down:
 	docker compose down -v
 
 demo:
-	./start_demo.sh
+	./setup/setup-demo.sh
 
 start: demo
+
+setup-demo:
+	./setup/setup-demo.sh
 
 stop:
 	docker compose down -v
@@ -64,6 +68,8 @@ verify-identity:
 
 deploy-service: build
 	@echo "🚀 正在部署新版本到 systemd..."
+	# 使用集中配置更新服务
+	./scripts/publish.sh
 	sudo cp bin/web3-indexer.service /etc/systemd/system/
 	sudo systemctl daemon-reload
 	sudo systemctl restart web3-indexer
