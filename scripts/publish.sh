@@ -33,7 +33,13 @@ else
 fi
 echo -e "${BLUE}探测到 Compose 命令: ${NC}$COMPOSE_CMD"
 
-cat > bin/$SERVICE_FILE <<EOF
+# 检查是否设置了生产环境变量，如果没有则使用演示配置
+if [ -z "$DATABASE_URL" ] || [ -z "$RPC_URLS" ]; then
+    echo -e "${YELLOW}⚠️  未检测到生产环境变量，使用演示配置${NC}"
+    echo -e "${YELLOW}💡  建议在部署前设置以下环境变量：DATABASE_URL, RPC_URLS${NC}"
+    
+    # 使用演示配置
+    cat > bin/$SERVICE_FILE <<EOF
 [Unit]
 Description=Web3 Indexer Go Service
 After=network.target docker.service
@@ -47,7 +53,7 @@ WorkingDirectory=$PROJECT_ROOT
 ExecStartPre=-$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml down -v --remove-orphans
 ExecStartPre=$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml up -d --remove-orphans
 
-# 关键环境变量
+# 关键环境变量 (演示配置)
 Environment=DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_indexer?sslmode=disable
 Environment=RPC_URLS=http://127.0.0.1:8545
 Environment=CHAIN_ID=31337
@@ -58,6 +64,7 @@ Environment=EMULATOR_PRIVATE_KEY=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5ef
 Environment=EMULATOR_TX_INTERVAL=333ms
 Environment=LOG_LEVEL=info
 Environment=CONTINUOUS_MODE=true
+Environment=DEMO_MODE=true
 
 ExecStart=$PROJECT_ROOT/bin/indexer
 Restart=always
@@ -68,6 +75,42 @@ StandardError=append:$PROJECT_ROOT/bin/indexer.err.log
 [Install]
 WantedBy=multi-user.target
 EOF
+else
+    # 使用生产配置
+    cat > bin/$SERVICE_FILE <<EOF
+[Unit]
+Description=Web3 Indexer Go Service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=$(whoami)
+WorkingDirectory=$PROJECT_ROOT
+# 启动前确保 Docker 基础设施已启动并清理孤儿容器 (SRE 幂等性增强)
+ExecStartPre=-$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml down -v --remove-orphans
+ExecStartPre=$COMPOSE_CMD -f $PROJECT_ROOT/docker-compose.infra.yml up -d --remove-orphans
+
+# 关键环境变量 (生产配置)
+Environment=DATABASE_URL=$DATABASE_URL
+Environment=RPC_URLS=$RPC_URLS
+Environment=CHAIN_ID=${CHAIN_ID:-1}
+Environment=START_BLOCK=${START_BLOCK:-18000000}
+Environment=EMULATOR_ENABLED=false
+Environment=LOG_LEVEL=${LOG_LEVEL:-info}
+Environment=CONTINUOUS_MODE=false
+Environment=DEMO_MODE=false
+
+ExecStart=$PROJECT_ROOT/bin/indexer
+Restart=always
+RestartSec=5
+StandardOutput=append:$PROJECT_ROOT/bin/indexer.log
+StandardError=append:$PROJECT_ROOT/bin/indexer.err.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
 
 echo -e "${GREEN}✅ 服务文件已生成: bin/$SERVICE_FILE${NC}"
 
@@ -92,3 +135,11 @@ echo -e "1. 部署服务: ${YELLOW}sudo cp bin/$SERVICE_FILE /etc/systemd/system
 echo -e "2. 加载配置: ${YELLOW}sudo systemctl daemon-reload${NC}"
 echo -e "3. 启动并启用: ${YELLOW}sudo systemctl enable --now web3-indexer${NC}"
 echo -e "4. 查看日志: ${YELLOW}tail -f bin/indexer.log${NC}"
+echo -e "\n${BLUE}=== 环境变量配置 ===${NC}"
+if [ -z "$DATABASE_URL" ] || [ -z "$RPC_URLS" ]; then
+    echo -e "${YELLOW}💡 当前使用演示配置。如需生产部署，请设置环境变量：${NC}"
+    echo -e "${YELLOW}   export DATABASE_URL='postgres://user:pass@host:port/db'${NC}"
+    echo -e "${YELLOW}   export RPC_URLS='https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY'${NC}"
+else
+    echo -e "${GREEN}✅ 已检测到生产环境变量${NC}"
+fi
