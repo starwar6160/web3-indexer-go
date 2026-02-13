@@ -3,14 +3,13 @@ apiVersion: 1
 datasources:
   - name: PostgreSQL
     type: postgres
-    uid: PCC52D03280B7034C
     access: proxy
     url: postgres:5432
     database: web3_indexer
-    isDefault: true
     user: postgres
     secureJsonData:
       password: W3b3_Idx_Secur3_2026_Sec
     jsonData:
       sslmode: disable
       postgresVersion: 1500
+    isDefault: true
