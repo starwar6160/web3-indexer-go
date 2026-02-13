@@ -36,6 +36,12 @@ services:
       - FOUNDRY_DISABLE_NIGHTLY_WARNING=true
     networks:
       - indexer-network
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://localhost:8545"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
