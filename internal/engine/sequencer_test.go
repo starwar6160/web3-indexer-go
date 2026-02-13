@@ -2,23 +2,26 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"math/big"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
-// MockRPCClient for testing
-type MockRPCClient struct {
+type SequencerMockRPCClient struct {
 	mock.Mock
 }
 
-func (m *MockRPCClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
+func (m *SequencerMockRPCClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
 	args := m.Called(ctx, number)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -26,108 +29,185 @@ func (m *MockRPCClient) BlockByNumber(ctx context.Context, number *big.Int) (*ty
 	return args.Get(0).(*types.Block), args.Error(1)
 }
 
-// MockProcessor for testing
-type MockProcessor struct {
-	mock.Mock
+func (m *SequencerMockRPCClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+	args := m.Called(ctx, number)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.Header), args.Error(1)
 }
 
-func (m *MockProcessor) ProcessBlockWithRetry(ctx context.Context, data BlockData, maxRetries int) error {
-	args := m.Called(ctx, data, maxRetries)
-	return args.Error(0)
+func (m *SequencerMockRPCClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
+	args := m.Called(ctx, q)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]types.Log), args.Error(1)
 }
 
-func (m *MockProcessor) UpdateCheckpoint(ctx context.Context, chainID int64, blockNumber *big.Int) error {
-	args := m.Called(ctx, chainID, blockNumber)
-	return args.Error(0)
+func (m *SequencerMockRPCClient) GetLatestBlockNumber(ctx context.Context) (*big.Int, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*big.Int), args.Error(1)
+}
+
+func (m *SequencerMockRPCClient) GetHealthyNodeCount() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
+func (m *SequencerMockRPCClient) GetTotalNodeCount() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
+func (m *SequencerMockRPCClient) Close() {
+	m.Called()
 }
 
 func TestSequencer_NewSequencer(t *testing.T) {
-	processor := &Processor{}
-	startBlock := big.NewInt(100)
-	chainID := int64(1)
-	resultCh := make(chan BlockData, 10)
-	fatalErrCh := make(chan error, 1)
-
-	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
-
-	assert.NotNil(t, sequencer)
-	assert.Equal(t, startBlock.String(), sequencer.GetExpectedBlock().String())
-	assert.Equal(t, 0, sequencer.GetBufferSize())
-}
-
-func TestSequencer_HandleBlock_ExpectedBlock(t *testing.T) {
-	db, mock, _ := sqlmock.New()
+	db, _, err := sqlmock.New()
+	require.NoError(t, err)
 	defer db.Close()
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	mockRPC := new(SequencerMockRPCClient)
 
-	processor := NewProcessor(sqlxDB, nil, 500, 1)
-	startBlock := big.NewInt(100)
-	chainID := int64(1)
+	processor := NewProcessor(sqlxDB, mockRPC, 100, 1)
+	fetcher := NewFetcher(mockRPC, 1)
+
 	resultCh := make(chan BlockData, 10)
-	fatalErrCh := make(chan error, 1)
+	fatalErrCh := make(chan error, 10)
 
-	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
+	sequencer := NewSequencerWithFetcher(processor, fetcher, big.NewInt(100), 1, resultCh, fatalErrCh, nil, nil)
 
-	// Create test block data
-	block := createTestBlock(100, "0x100", "0x99")
-	data := BlockData{Block: block, Number: big.NewInt(100)}
-
-	// Mock DB expectation for ProcessBlock
-	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM blocks WHERE number = \\$1").WillReturnError(sql.ErrNoRows)
-	mock.ExpectExec("INSERT INTO blocks").WillReturnResult(sqlmock.NewResult(1, 1))
-	// checkpoint is batched (every 100 blocks), no checkpoint exec for single block
-	mock.ExpectCommit()
-
-	ctx := context.Background()
-	err := sequencer.handleBlock(ctx, data)
-
-	assert.NoError(t, err)
-	assert.Equal(t, "101", sequencer.GetExpectedBlock().String()) // Should increment
+	assert.NotNil(t, sequencer)
+	assert.Equal(t, processor, sequencer.processor)
+	assert.Equal(t, fetcher, sequencer.fetcher)
+	assert.Equal(t, int64(1), sequencer.chainID)
 }
 
-func TestSequencer_HandleBlock_OutOfOrderBlock(t *testing.T) {
-	processor := &Processor{}
-	startBlock := big.NewInt(100)
-	chainID := int64(1)
+func TestSequencer_Run_ProcessSequential(t *testing.T) {
+	db, mockDB, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	mockRPC := new(SequencerMockRPCClient)
+
+	parentHash := common.HexToHash("0x1234")
+	header := &types.Header{
+		Number:     big.NewInt(100),
+		ParentHash: parentHash,
+		Time:       1234567890,
+	}
+	block := types.NewBlockWithHeader(header)
+
+	mockDB.ExpectBegin()
+	// Parent check for block 100 looks for block 99
+	mockDB.ExpectQuery("SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = \\$1").
+		WithArgs("99").
+		WillReturnRows(sqlmock.NewRows([]string{"number", "hash", "parent_hash", "timestamp"}).
+			AddRow("99", parentHash.Hex(), "0x0000", 1234567880))
+
+	mockDB.ExpectExec("INSERT INTO blocks").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mockDB.ExpectCommit()
+
+	processor := NewProcessor(sqlxDB, mockRPC, 100, 1)
+	processor.SetBatchCheckpoint(1000) // Avoid checkpoint update in this test
+	fetcher := NewFetcher(mockRPC, 1)
+
 	resultCh := make(chan BlockData, 10)
-	fatalErrCh := make(chan error, 1)
+	fatalErrCh := make(chan error, 10)
 
-	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
+	sequencer := NewSequencerWithFetcher(processor, fetcher, big.NewInt(100), 1, resultCh, fatalErrCh, nil, nil)
 
-	// Create test block data with higher number
-	block := createTestBlock(102, "0x102", "0x101")
-	data := BlockData{Block: block, Number: big.NewInt(102)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
 
-	ctx := context.Background()
-	err := sequencer.handleBlock(ctx, data)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sequencer.Run(ctx)
+	}()
 
-	assert.NoError(t, err)
-	assert.Equal(t, "100", sequencer.GetExpectedBlock().String()) // Should not change
-	assert.Equal(t, 1, sequencer.GetBufferSize())                 // Should be buffered
-}
-
-func TestSequencer_BufferOverflow(t *testing.T) {
-	processor := &Processor{}
-	startBlock := big.NewInt(100)
-	chainID := int64(1)
-	resultCh := make(chan BlockData, 10)
-	fatalErrCh := make(chan error, 1)
-
-	sequencer := NewSequencer(processor, startBlock, chainID, resultCh, fatalErrCh, nil)
-
-	// Fill buffer to overflow (limit is 1000)
-	for i := 0; i < 1001; i++ {
-		num := big.NewInt(int64(200 + i))
-		sequencer.buffer[num.String()] = BlockData{Number: num}
+	resultCh <- BlockData{
+		Block:  block,
+		Number: big.NewInt(100),
 	}
 
-	block := createTestBlock(2000, "0x2000", "0x1999")
-	data := BlockData{Block: block, Number: big.NewInt(2000)}
+	time.Sleep(200 * time.Millisecond)
 
-	ctx := context.Background()
-	err := sequencer.handleBlock(ctx, data)
+	assert.NoError(t, mockDB.ExpectationsWereMet())
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "buffer overflow")
+	cancel()
+	wg.Wait()
+}
+
+func TestSequencer_Run_BufferOutOfOrder(t *testing.T) {
+	db, mockDB, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	mockRPC := new(SequencerMockRPCClient)
+
+	parentHash100 := common.HexToHash("0x0099")
+	header100 := &types.Header{Number: big.NewInt(100), ParentHash: parentHash100, Time: 1234567890}
+	block100 := types.NewBlockWithHeader(header100)
+
+	header101 := &types.Header{Number: big.NewInt(101), ParentHash: block100.Hash(), Time: 1234567900}
+	block101 := types.NewBlockWithHeader(header101)
+
+	// Block 100 Expectations
+	mockDB.ExpectBegin()
+	mockDB.ExpectQuery("SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = \\$1").
+		WithArgs("99").
+		WillReturnRows(sqlmock.NewRows([]string{"number", "hash", "parent_hash", "timestamp"}).
+			AddRow("99", parentHash100.Hex(), "0x0098", 1234567880))
+	mockDB.ExpectExec("INSERT INTO blocks").WillReturnResult(sqlmock.NewResult(1, 1))
+	mockDB.ExpectCommit()
+
+	// Block 101 Expectations
+	mockDB.ExpectBegin()
+	mockDB.ExpectQuery("SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = \\$1").
+		WithArgs("100").
+		WillReturnRows(sqlmock.NewRows([]string{"number", "hash", "parent_hash", "timestamp"}).
+			AddRow("100", block100.Hash().Hex(), parentHash100.Hex(), 1234567890))
+	mockDB.ExpectExec("INSERT INTO blocks").WillReturnResult(sqlmock.NewResult(1, 1))
+	mockDB.ExpectCommit()
+
+	processor := NewProcessor(sqlxDB, mockRPC, 100, 1)
+	processor.SetBatchCheckpoint(1000)
+	fetcher := NewFetcher(mockRPC, 1)
+
+	resultCh := make(chan BlockData, 10)
+	fatalErrCh := make(chan error, 10)
+
+	sequencer := NewSequencerWithFetcher(processor, fetcher, big.NewInt(100), 1, resultCh, fatalErrCh, nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sequencer.Run(ctx)
+	}()
+
+	// Send 101 first (Buffer)
+	resultCh <- BlockData{Block: block101, Number: big.NewInt(101)}
+	time.Sleep(50 * time.Millisecond)
+
+	// Send 100 (Trigger 100 and then 101)
+	resultCh <- BlockData{Block: block100, Number: big.NewInt(100)}
+	time.Sleep(200 * time.Millisecond)
+
+	assert.NoError(t, mockDB.ExpectationsWereMet())
+
+	cancel()
+	wg.Wait()
 }

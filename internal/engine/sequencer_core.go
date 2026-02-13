@@ -150,11 +150,6 @@ func (s *Sequencer) Run(ctx context.Context) {
 					batch = append(batch, nextData)
 				case <-timeout:
 					break collect_loop
-				default:
-					if len(batch) > 0 {
-						// 如果已经有数据了，且目前没新数据，稍微等一下或者直接出场
-						// 这里我们选择直接出场，由 timeout 保证最低等待
-					}
 				}
 			}
 

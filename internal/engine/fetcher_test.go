@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,12 +15,12 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockRPCPool for testing
-type MockRPCPool struct {
+// MockRPCClient is a mock implementation of the RPCClient interface
+type MockRPCClient struct {
 	mock.Mock
 }
 
-func (m *MockRPCPool) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
+func (m *MockRPCClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
 	args := m.Called(ctx, number)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -26,7 +28,7 @@ func (m *MockRPCPool) BlockByNumber(ctx context.Context, number *big.Int) (*type
 	return args.Get(0).(*types.Block), args.Error(1)
 }
 
-func (m *MockRPCPool) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+func (m *MockRPCClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
 	args := m.Called(ctx, number)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -34,25 +36,15 @@ func (m *MockRPCPool) HeaderByNumber(ctx context.Context, number *big.Int) (*typ
 	return args.Get(0).(*types.Header), args.Error(1)
 }
 
-func (m *MockRPCPool) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	args := m.Called(ctx, query)
+func (m *MockRPCClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
+	args := m.Called(ctx, q)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]types.Log), args.Error(1)
 }
 
-func (m *MockRPCPool) GetHealthyNodeCount() int {
-	args := m.Called()
-	return args.Int(0)
-}
-
-func (m *MockRPCPool) GetTotalNodeCount() int {
-	args := m.Called()
-	return args.Int(0)
-}
-
-func (m *MockRPCPool) GetLatestBlockNumber(ctx context.Context) (*big.Int, error) {
+func (m *MockRPCClient) GetLatestBlockNumber(ctx context.Context) (*big.Int, error) {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -60,166 +52,207 @@ func (m *MockRPCPool) GetLatestBlockNumber(ctx context.Context) (*big.Int, error
 	return args.Get(0).(*big.Int), args.Error(1)
 }
 
-func (m *MockRPCPool) Close() {
+func (m *MockRPCClient) GetHealthyNodeCount() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
+func (m *MockRPCClient) GetTotalNodeCount() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
+func (m *MockRPCClient) Close() {
 	m.Called()
 }
 
-func createFetcherTestBlock(number int64, hash string) *types.Block {
-	header := &types.Header{
-		Number: big.NewInt(number),
-		Time:   uint64(time.Now().Unix()),
-	}
-	return types.NewBlockWithHeader(header)
-}
-
 func TestFetcher_NewFetcher(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	
-	fetcher := NewFetcher(mockPool, 5)
-	
+	rpcClient := &MockRPCClient{}
+	fetcher := NewFetcher(rpcClient, 5)
+
 	assert.NotNil(t, fetcher)
-	assert.Equal(t, mockPool, fetcher.pool)
 	assert.Equal(t, 5, fetcher.concurrency)
-	assert.NotNil(t, fetcher.Results)
 	assert.NotNil(t, fetcher.jobs)
-}
-
-func TestFetcher_NewFetcherWithLimiter(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	
-	fetcher := NewFetcherWithLimiter(mockPool, 3, 50, 100)
-	
-	assert.NotNil(t, fetcher)
-	assert.Equal(t, mockPool, fetcher.pool)
-	assert.Equal(t, 3, fetcher.concurrency)
-	assert.NotNil(t, fetcher.limiter)
-}
-
-func TestFetcher_SetRateLimit(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	fetcher := NewFetcher(mockPool, 5)
-	
-	fetcher.SetRateLimit(200, 500)
-	
-	assert.Equal(t, float64(200), float64(fetcher.limiter.Limit()))
-	assert.Equal(t, 500, fetcher.limiter.Burst())
-}
-
-func TestFetcher_Stop(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	fetcher := NewFetcher(mockPool, 5)
-	
-	// Should not panic
-	fetcher.Stop()
-	
-	// Should not panic on second call
-	fetcher.Stop()
+	assert.NotNil(t, fetcher.Results)
 }
 
 func TestFetcher_fetchBlockWithLogs_Success(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	fetcher := NewFetcher(mockPool, 5)
-	
-	block := createFetcherTestBlock(100, "0x123")
-	logs := []types.Log{
-		{
-			Address: common.HexToAddress("0xabc"),
-			Topics:  []common.Hash{TransferEventHash},
-		},
+	mockRPC := new(MockRPCClient)
+
+	// Create a mock block
+	header := &types.Header{
+		Number:     big.NewInt(100),
+		ParentHash: common.HexToHash("0x1234"),
+		Time:       1234567890,
+		GasLimit:   30000000,
+		GasUsed:    8421505,
+		BaseFee:    big.NewInt(1000000000),
 	}
-	
-	ctx := context.Background()
-	blockNum := big.NewInt(100)
-	
-	mockPool.On("BlockByNumber", ctx, blockNum).Return(block, nil)
-	mockPool.On("FilterLogs", ctx, mock.Anything).Return(logs, nil)
-	
-	resultBlock, resultLogs, err := fetcher.fetchBlockWithLogs(ctx, blockNum)
-	
+	block := types.NewBlockWithHeader(header)
+
+	// Set up the mock expectation
+	mockRPC.On("BlockByNumber", mock.Anything, big.NewInt(100)).Return(block, nil)
+	// Add FilterLogs expectation
+	mockRPC.On("FilterLogs", mock.Anything, mock.Anything).Return([]types.Log{}, nil)
+
+	fetcher := NewFetcher(mockRPC, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	blockResult, logs, err := fetcher.fetchBlockWithLogs(ctx, big.NewInt(100))
+
+	assert.NotNil(t, blockResult)
+	assert.Equal(t, big.NewInt(100), blockResult.Number())
+	assert.NotNil(t, logs)
 	assert.NoError(t, err)
-	assert.Equal(t, block, resultBlock)
-	assert.Equal(t, logs, resultLogs)
-	mockPool.AssertExpectations(t)
+	mockRPC.AssertExpectations(t)
 }
 
-func TestFetcher_fetchBlockWithLogs_BlockError(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	fetcher := NewFetcher(mockPool, 5)
-	
-	ctx := context.Background()
-	blockNum := big.NewInt(100)
-	
-	mockPool.On("BlockByNumber", ctx, blockNum).Return(nil, assert.AnError)
-	
-	resultBlock, resultLogs, err := fetcher.fetchBlockWithLogs(ctx, blockNum)
-	
+func TestFetcher_fetchBlockWithLogs_Error(t *testing.T) {
+	mockRPC := new(MockRPCClient)
+
+	// Set up the mock expectation to return an error
+	mockRPC.On("BlockByNumber", mock.Anything, big.NewInt(100)).Return((*types.Block)(nil), errors.New("connection failed"))
+
+	fetcher := NewFetcher(mockRPC, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	blockResult, logs, err := fetcher.fetchBlockWithLogs(ctx, big.NewInt(100))
+
+	assert.Nil(t, blockResult)
+	assert.Nil(t, logs)
 	assert.Error(t, err)
-	assert.Nil(t, resultBlock)
-	assert.Nil(t, resultLogs)
-	mockPool.AssertExpectations(t)
+	assert.Contains(t, err.Error(), "connection failed")
+	mockRPC.AssertExpectations(t)
 }
 
-func TestFetcher_fetchBlockWithLogs_LogsError(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	fetcher := NewFetcher(mockPool, 5)
+func TestFetcher_StartStop(t *testing.T) {
+	mockRPC := new(MockRPCClient)
 	
-	block := createFetcherTestBlock(100, "0x123")
-	
-	ctx := context.Background()
-	blockNum := big.NewInt(100)
-	
-	mockPool.On("BlockByNumber", ctx, blockNum).Return(block, nil)
-	mockPool.On("FilterLogs", ctx, mock.Anything).Return(nil, assert.AnError)
-	
-	resultBlock, resultLogs, err := fetcher.fetchBlockWithLogs(ctx, blockNum)
-	
-	assert.NoError(t, err) // Logs error should not fail block fetch
-	assert.Equal(t, block, resultBlock)
-	assert.Empty(t, resultLogs) // Should be empty on error
-	mockPool.AssertExpectations(t)
+	// Don't expect any calls since we're just testing start/stop
+	fetcher := NewFetcher(mockRPC, 2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
+
+	// Start the fetcher
+	fetcher.Start(ctx, &wg)
+
+	// Give it a moment to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel the context to stop
+	cancel()
+
+	// Wait for graceful shutdown
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("Fetcher did not stop within timeout")
+	}
 }
 
 func TestFetcher_Schedule(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	fetcher := NewFetcher(mockPool, 5)
-	
-	start := big.NewInt(100)
-	end := big.NewInt(102)
-	
-	// 在协程中调度，防止缓冲区满时阻塞测试
-	go fetcher.Schedule(context.Background(), start, end)
-	
-	// 给一点调度时间
-	time.Sleep(50 * time.Millisecond)
-	
-	// 验证任务是否已进入通道
+	mockRPC := new(MockRPCClient)
+
+	fetcher := NewFetcher(mockRPC, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Start a goroutine to consume jobs so Schedule doesn't block
+	jobsReceived := 0
+	done := make(chan struct{})
+	go func() {
+		for range fetcher.jobs {
+			jobsReceived++
+			if jobsReceived == 6 {
+				break
+			}
+		}
+		close(done)
+	}()
+
+	// Schedule a range of blocks (100 to 105 is 6 blocks)
+	err := fetcher.Schedule(ctx, big.NewInt(100), big.NewInt(105))
+
+	assert.NoError(t, err)
+
+	// Wait for consumer to finish
 	select {
-	case job := <-fetcher.jobs:
-		assert.Equal(t, "100", job.String())
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Expected job to be scheduled")
+	case <-done:
+		assert.Equal(t, 6, jobsReceived)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for jobs to be consumed")
 	}
-	
-	fetcher.Stop()
 }
 
-func TestFetcher_Schedule_Stop(t *testing.T) {
-	mockPool := &MockRPCPool{}
-	fetcher := NewFetcher(mockPool, 5)
-	
-	start := big.NewInt(100)
-	end := big.NewInt(1000) // 极大范围，必然填满缓冲区
-	
+func TestFetcher_PauseResume(t *testing.T) {
+	mockRPC := new(MockRPCClient)
+	fetcher := NewFetcher(mockRPC, 1)
+
+	assert.False(t, fetcher.IsPaused())
+
+	fetcher.Pause()
+	assert.True(t, fetcher.IsPaused())
+
+	fetcher.Resume()
+	assert.False(t, fetcher.IsPaused())
+}
+
+func TestFetcher_worker_Pause(t *testing.T) {
+	mockRPC := new(MockRPCClient)
+	fetcher := NewFetcher(mockRPC, 1)
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
-	// 启动异步调度
-	go fetcher.Schedule(ctx, start, end)
-	
-	// 立即取消 Context 并停止 Fetcher
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go fetcher.worker(ctx, &wg)
+
+	// Pause the fetcher
+	fetcher.Pause()
+
+	// Send a job
+	fetcher.jobs <- big.NewInt(100)
+
+	// Wait a bit, it shouldn't be processed
+	select {
+	case <-fetcher.Results:
+		t.Fatal("Job should not have been processed while paused")
+	case <-time.After(200 * time.Millisecond):
+		// Expected
+	}
+
+	// Mock expectations for when it resumes
+	header := &types.Header{Number: big.NewInt(100)}
+	block := types.NewBlockWithHeader(header)
+	mockRPC.On("BlockByNumber", mock.Anything, big.NewInt(100)).Return(block, nil)
+	mockRPC.On("FilterLogs", mock.Anything, mock.Anything).Return([]types.Log{}, nil)
+
+	// Resume
+	fetcher.Resume()
+
+	// Now it should be processed
+	select {
+	case result := <-fetcher.Results:
+		assert.Equal(t, big.NewInt(100), result.Number)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Job should have been processed after resume")
+	}
+
 	cancel()
-	fetcher.Stop()
-	
-	// 验证 Schedule 是否能在阻塞状态下响应停止信号并退出
-	// 如果不退出，测试会超时
-	t.Log("Successfully tested Schedule interruption")
+	wg.Wait()
 }

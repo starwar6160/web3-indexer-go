@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"math/big"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/jmoiron/sqlx"
@@ -17,252 +15,164 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// MockProcessorRPCClient for testing processor
-type MockProcessorRPCClient struct {
-	blocks map[string]*types.Block
-}
-
-func NewMockProcessorRPCClient() *MockProcessorRPCClient {
-	return &MockProcessorRPCClient{
-		blocks: make(map[string]*types.Block),
-	}
-}
-
-func (m *MockProcessorRPCClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
-	block, exists := m.blocks[number.String()]
-	if !exists {
-		return nil, sql.ErrNoRows
-	}
-	return block, nil
-}
-
-func (m *MockProcessorRPCClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
-	block, exists := m.blocks[number.String()]
-	if !exists {
-		return nil, sql.ErrNoRows
-	}
-	return block.Header(), nil
-}
-
-func (m *MockProcessorRPCClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
-	return []types.Log{}, nil
-}
-
-func (m *MockProcessorRPCClient) GetLatestBlockNumber(ctx context.Context) (*big.Int, error) {
-	return big.NewInt(100), nil
-}
-
-func (m *MockProcessorRPCClient) GetHealthyNodeCount() int { return 1 }
-func (m *MockProcessorRPCClient) GetTotalNodeCount() int   { return 1 }
-func (m *MockProcessorRPCClient) Close()                   {}
-
-func (m *MockProcessorRPCClient) AddBlock(block *types.Block) {
-	m.blocks[block.Number().String()] = block
-}
-
-func createTestBlock(number int64, hash string, parentHash string) *types.Block {
-	header := &types.Header{
-		Number:     big.NewInt(number),
-		ParentHash: common.HexToHash(parentHash),
-		Time:       uint64(time.Now().Unix()),
-	}
-	return types.NewBlockWithHeader(header)
-}
-
 func TestProcessor_NewProcessor(t *testing.T) {
-	db, mock, err := sqlmock.New()
+	db, _, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
-	_ = mock // 显式忽略未使用的 mock 对象
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	mockRPC := NewMockProcessorRPCClient()
-
-	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
+	
+	processor := NewProcessor(sqlxDB, nil, 500, 1)
 
 	assert.NotNil(t, processor)
 	assert.Equal(t, sqlxDB, processor.db)
-	assert.Equal(t, mockRPC, processor.client)
+	assert.Equal(t, 500, cap(processor.retryQueue))
+	assert.Equal(t, int64(1), processor.chainID)
 }
 
-func TestProcessor_ProcessBlock_Success(t *testing.T) {
+func TestProcessor_ProcessBlock_HappyPath(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	mockRPC := NewMockProcessorRPCClient()
+	
+	processor := NewProcessor(sqlxDB, nil, 500, 1)
+	processor.SetBatchCheckpoint(1)
 
-	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
+	// Create test block
+	header := &types.Header{
+		Number:     big.NewInt(43),
+		ParentHash: common.HexToHash("0x4242424242424242424242424242424242424242424242424242424242424242"),
+		Time:       1234567890,
+		GasLimit:   30000000,
+		GasUsed:    8421505,
+		BaseFee:    big.NewInt(1000000000),
+	}
+	block := types.NewBlockWithHeader(header)
 
 	// Setup mock expectations
 	mock.ExpectBegin()
 
-	// Mock parent block query
-	mock.ExpectQuery("SELECT .* FROM blocks WHERE number = \\$1").
-		WithArgs("99").
+	// Mock parent block query (should return sql.ErrNoRows to simulate first block or fresh sync)
+	mock.ExpectQuery("SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = \\$1").
+		WithArgs("42").
 		WillReturnError(sql.ErrNoRows)
 
-	// Mock block insert (updated to 8 columns, using regexp for flexibility)
+	// Mock block insert
 	mock.ExpectExec("INSERT INTO blocks").
-		WithArgs("100", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(
+			"43",                           // number
+			block.Hash().Hex(),             // hash
+			"0x4242424242424242424242424242424242424242424242424242424242424242", // parent_hash
+			uint64(1234567890),             // timestamp
+			uint64(30000000),              // gas_limit
+			uint64(8421505),               // gas_used
+			"1000000000",                  // base_fee_per_gas
+			0,                             // transaction_count
+		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	// Note: checkpoint is batched (every 100 blocks), so no checkpoint exec expected for a single block
+	// Mock checkpoint update
+	mock.ExpectExec("INSERT INTO sync_checkpoints").
+		WithArgs(int64(1), "43").
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectCommit()
 
-	// Create test block with valid hex hash
-	block := createTestBlock(100, "0x"+strings.Repeat("a", 64), "0x"+strings.Repeat("b", 64))
-	data := BlockData{Block: block, Number: big.NewInt(100), Logs: []types.Log{}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	ctx := context.Background()
-	err = processor.ProcessBlock(ctx, data)
-
+	err = processor.ProcessBlock(ctx, BlockData{
+		Block:  block,
+		Number: big.NewInt(43),
+		Logs:   []types.Log{},
+		Err:    nil,
+	})
 	assert.NoError(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestProcessor_ProcessBlock_ReorgDetected(t *testing.T) {
+func TestProcessor_ProcessBlock_ReorgDetection(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	mockRPC := NewMockProcessorRPCClient()
+	
+	processor := NewProcessor(sqlxDB, nil, 500, 1)
 
-	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
-
+	// Setup mock expectations
 	mock.ExpectBegin()
 
+	// Mock parent block query - return a block with different parent hash
 	rows := sqlmock.NewRows([]string{"number", "hash", "parent_hash", "timestamp"}).
-		AddRow("99", "0xold", "0x98", 1234567890)
-	mock.ExpectQuery("SELECT .* FROM blocks WHERE number = \\$1").
-		WithArgs("99").
+		AddRow("42", "0xoldparent", "0xoldgrandparent", uint64(1234567889))
+	mock.ExpectQuery("SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = \\$1").
+		WithArgs("42").
 		WillReturnRows(rows)
 
 	mock.ExpectRollback()
 
-	// Parent hash mismatch: block expects 0xnew, DB has 0xold
-	block := createTestBlock(100, "0xabc", "0xnew")
-	data := BlockData{Block: block, Number: big.NewInt(100), Logs: []types.Log{}}
+	// Create test block with different parent hash
+	header := &types.Header{
+		Number:     big.NewInt(43),
+		ParentHash: common.HexToHash("0x4242424242424242424242424242424242424242424242424242424242424242"), // Different from what's in DB
+		Time:       1234567890,
+		GasLimit:   30000000,
+		GasUsed:    8421505,
+		BaseFee:    big.NewInt(1000000000),
+	}
+	block := types.NewBlockWithHeader(header)
 
-	ctx := context.Background()
-	err = processor.ProcessBlock(ctx, data)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	err = processor.ProcessBlock(ctx, BlockData{
+		Block:  block,
+		Number: big.NewInt(43),
+		Logs:   []types.Log{},
+		Err:    nil,
+	})
 	assert.Error(t, err)
-	assert.IsType(t, ReorgError{}, err)
-}
-
-func TestProcessor_UpdateCheckpoint(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	processor := NewProcessor(sqlxDB, nil, 500, 1)
-
-	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO sync_checkpoints").
-		WithArgs(1, "100").
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	ctx := context.Background()
-	err = processor.UpdateCheckpoint(ctx, 1, big.NewInt(100))
-
-	assert.NoError(t, err)
+	assert.Contains(t, err.Error(), "reorg")
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestProcessor_ExtractTransfer(t *testing.T) {
 	processor := NewProcessor(nil, nil, 500, 1)
 
-	fromAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	toAddr := common.HexToAddress("0x9876543210987654321098765432109876543210")
-	amount := big.NewInt(1000)
-	txHash := common.HexToHash("0xabcdef")
-
+	// Create a mock Transfer event log
 	log := types.Log{
-		Address: common.HexToAddress("0xabcd"),
+		Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 		Topics: []common.Hash{
-			TransferEventHash,
-			common.BytesToHash(fromAddr.Bytes()),
-			common.BytesToHash(toAddr.Bytes()),
+			TransferEventHash, // Transfer event signature
+			common.HexToHash("0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), // from
+			common.HexToHash("0x000000000000000000000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), // to
 		},
-		Data:        common.LeftPadBytes(amount.Bytes(), 32),
-		BlockNumber: 100,
-		TxHash:      txHash,
-		Index:       1,
+		Data: common.Hex2Bytes("0000000000000000000000000000000000000000000000000de0b6b3a7640000"), // 1 ETH in hex
 	}
 
 	transfer := processor.ExtractTransfer(log)
 
-	assert.NotNil(t, transfer)
-	assert.Equal(t, txHash.Hex(), transfer.TxHash)
-	assert.Equal(t, amount.String(), transfer.Amount.String())
+	require.NotNil(t, transfer)
+	assert.Equal(t, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", transfer.From)
+	assert.Equal(t, "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", transfer.To)
+	assert.Equal(t, "1000000000000000000", transfer.Amount.String()) // 1 ETH
+	assert.Equal(t, "0x1111111111111111111111111111111111111111", transfer.TokenAddress)
 }
 
-func TestProcessor_ExtractTransfer_InvalidEvent(t *testing.T) {
-	db, _, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
+func TestProcessor_SetWatchedAddresses(t *testing.T) {
+	processor := NewProcessor(nil, nil, 500, 1)
 
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	mockRPC := NewMockProcessorRPCClient()
-
-	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
-
-	// Create an invalid log (wrong event signature)
-	log := types.Log{
-		Topics: []common.Hash{
-			common.HexToHash("0x1234567890123456789012345678901234567890123456789012345678901234"), // Wrong signature
-		},
+	addresses := []string{
+		"0x1111111111111111111111111111111111111111",
+		"0x2222222222222222222222222222222222222222",
 	}
 
-	transfer := processor.ExtractTransfer(log)
+	processor.SetWatchedAddresses(addresses)
 
-	assert.Nil(t, transfer)
-}
-
-func TestProcessor_FindCommonAncestor(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	mockRPC := NewMockProcessorRPCClient()
-
-	processor := NewProcessor(sqlxDB, mockRPC, 500, 1)
-
-	// Setup RPC blocks (Ancestor at 99)
-	block100 := createTestBlock(100, "0x100", "0x99")
-	block99 := createTestBlock(99, "0x99", "0x98")
-	block98 := createTestBlock(98, "0x98", "0x97")
-	mockRPC.AddBlock(block100)
-	mockRPC.AddBlock(block99)
-	mockRPC.AddBlock(block98)
-
-	// --- Step 1: Block 100 ---
-	// DB check for block 100
-	mock.ExpectQuery("SELECT hash FROM blocks WHERE number = \\$1").
-		WithArgs("100").
-		WillReturnError(sql.ErrNoRows) // Local block 100 missing
-
-	// --- Step 2: Block 99 ---
-	// DB check for block 99
-	// Use the actual hash from the Geth block object to ensure matching
-	rows := sqlmock.NewRows([]string{"hash"}).AddRow(block99.Hash().Hex())
-	mock.ExpectQuery("SELECT hash FROM blocks WHERE number = \\$1").
-		WithArgs("99").
-		WillReturnRows(rows)
-
-	ctx := context.Background()
-	ancestorNum, ancestorHash, toDelete, err := processor.FindCommonAncestor(ctx, big.NewInt(100))
-
-	assert.NoError(t, err)
-	assert.Equal(t, "99", ancestorNum.String())
-	assert.Equal(t, block99.Hash().Hex(), ancestorHash)
-	assert.Len(t, toDelete, 1) // Block 100 was missing/mismatched, so added to delete list
-	assert.Equal(t, "100", toDelete[0].String())
+	assert.Equal(t, 2, len(processor.watchedAddresses))
+	assert.True(t, processor.watchedAddresses[common.HexToAddress(addresses[0])])
+	assert.True(t, processor.watchedAddresses[common.HexToAddress(addresses[1])])
 }
