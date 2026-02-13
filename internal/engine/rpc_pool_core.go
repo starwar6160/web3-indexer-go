@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"golang.org/x/time/rate"
 )
@@ -21,10 +24,19 @@ type RPCClientPool struct {
 	rateLimiter *rate.Limiter // 令牌桶限速器
 }
 
+// LowLevelRPCClient defines the subset of ethclient.Client methods used by rpcNode
+type LowLevelRPCClient interface {
+	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
+	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
+	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
+	BlockNumber(ctx context.Context) (uint64, error)
+	Close()
+}
+
 // rpcNode 单个RPC节点封装
 type rpcNode struct {
 	url        string
-	client     *ethclient.Client
+	client     LowLevelRPCClient
 	isHealthy  bool
 	lastError  time.Time
 	failCount  int
