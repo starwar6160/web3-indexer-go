@@ -93,7 +93,7 @@ func TestFetcher_fetchBlockWithLogs_Success(t *testing.T) {
 	// Set up the mock expectation
 	mockRPC.On("BlockByNumber", mock.Anything, big.NewInt(100)).Return(block, nil)
 	// Add FilterLogs expectation
-	mockRPC.On("FilterLogs", mock.Anything, mock.Anything).Return([]types.Log{}, nil)
+	mockRPC.On("FilterLogs", mock.Anything, mock.AnythingOfType("ethereum.FilterQuery")).Return([]types.Log{}, nil)
 
 	fetcher := NewFetcher(mockRPC, 1)
 
