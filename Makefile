@@ -22,6 +22,20 @@ help:
 	@echo "  make deploy-service-reset - [生产] 编译并更新 systemd 服务运行新版本 (清除数据)"
 
 build:
+	@echo "🔍 Running vet and build checks..."
+	@go vet ./...
+	@if [ $$? -ne 0 ]; then \
+		echo "❌ Vet check failed"; \
+		exit 1; \
+	fi
+	@echo "✅ Vet check passed"
+	@go build -v ./cmd/...
+	@if [ $$? -ne 0 ]; then \
+		echo "❌ Build failed"; \
+		exit 1; \
+	fi
+	@echo "✅ Build successful"
+	@echo "📦 Creating release build..."
 	./scripts/publish.sh
 
 docker-build:
