@@ -5,12 +5,7 @@ Live demo: https://demo2.st6160.click/
 概述
 - 一个全栈容器化的 Web3 索引器示例工程，侧重可观测性与稳定性。实现了 Fetcher / Sequencer / Processor 解耦的流水线设计、RPC 池的自动故障转移、以及面向高频交易场景的 nonce 对齐与状态持久化。工程以可复现的方式提供端到端环境，便于技术人员验证功能与性能指标。
 
-🔐 **加密身份验证 (EdDSA)**
-- **开发者:** 周伟 (Zhou Wei) <zhouwei6160@gmail.com>
-- **GPG 指纹:** \`FFA0 B998 E7AF 2A9A 9A2C 6177 F965 25FE 5857 5DCF\`
-- **验证:** 本仓库使用 Ed25519 密钥进行签名。运行 \`make verify-identity\` 验证代码完整性。
-
-快速启动（最少依赖）
+### 快速启动（最少依赖）
 - 前提：目标机器安装了 Docker 与 Docker Compose。
 - 克隆并启动示例环境：
   ```
@@ -24,6 +19,57 @@ Live demo: https://demo2.st6160.click/
 本项目采用集中化配置管理，所有演示和生产配置都集中在 config/ 目录中，便于维护和部署：
 - 演示模式：使用安全的默认配置，一键启动
 - 生产部署：通过环境变量灵活配置敏感信息
+
+### 技术特性与设计决策
+
+#### 🔐 **加密身份验证 (EdDSA)**
+- **开发者:** 周伟 (Zhou Wei) <zhouwei6160@gmail.com>
+- **GPG 指纹:** \`FFA0 B998 E7AF 2A9A 9A2C  6177 F965 25FE 5857 5DCF\`
+- **验证:** 本仓库使用 Ed25519 密钥进行签名。运行 \`make verify-identity\` 验证代码完整性。
+
+#### 🛡️ Data Integrity & Security (EdDSA Signing)
+
+To ensure end-to-end data integrity and prevent man-in-the-middle (MITM) attacks or data tampering at the edge (e.g., WAF or Proxy levels), this project implements a **cryptographic provenance layer**:
+
+* **Response Signing:** Every API response is dynamically signed using **Ed25519 (EdDSA)**. Unlike ECDSA, EdDSA provides deterministic signing, eliminating risks associated with poor high-entropy random number generators.
+* **Identity Binding:** The signing key is derived from a GnuPG-protected identity, linking the software's execution output directly to the developer's verified cryptographic identity.
+* **Verification:** Clients can verify the authenticity of the data by checking the `X-Payload-Signature` header against the public key fingerprint provided in the documentation.
+* **Edge Defense:** Integrated with Cloudflare WAF to filter automated bot traffic (User-Agent filtering) and rate-limit high-frequency RPC probing, ensuring high availability of the indexing pipeline.
+
+#### 🔄 REST API Design & Response Structure
+The API endpoints follow RESTful principles with consistent response structures:
+- Standard HTTP status codes (200, 400, 404, 500)
+- JSON responses with consistent field naming
+- Error responses include both error codes and human-readable messages
+- Response payloads are signed with Ed25519 for authenticity verification
+
+#### 🧠 Engineering Insights
+
+##### 🔄 Integrated Traffic Emulator & Self-Healing
+To provide a true **"zero-config"** demo experience, this project features a built-in transaction emulator:
+- **Nonce Prediction Engine**: Manages high-frequency (up to 50 TPS) transactions with a local prediction queue and automatic on-chain re-syncing every 50 txs.
+- **Atomic Recovery**: If a transaction fails due to network issues, the system performs a **Nonce Rollback**, ensuring data continuity without gaps.
+- **Anvil Privilege Integration**: Uses `anvil_setBalance` for automatic wallet top-ups, ensuring the demo can run indefinitely without manual intervention.
+- **Live Self-Healing**: Automatically detects and fixes `nonce too low` errors (e.g., after an environment reset), broadcasting the recovery event to the real-time Dashboard.
+
+##### 🛡️ Security-First Architecture
+Designed for public-facing jump servers:
+- **Gateway Pattern**: Only the Nginx Gateway is exposed to the public internet (port 80).
+- **Physical Isolation**: Database (PostgreSQL) and RPC nodes (Anvil) are bound to `127.0.0.1`, invisible to external scanners.
+- **Protocol Obfuscation**: Backup channels use **WireGuard** (UDP silent-drop) and **Fail2Ban** (24h ban on 3 failed attempts) to neutralize low-cost automated attacks.
+
++#### 🚀 部署幂等性与 SRE 实践
++针对容器化环境下的命名冲突与环境漂移风险，本项目在 `systemd` 集成中实现了以下增强：
++- **部署幂等性治理 (Deployment Idempotency)**：通过 `ExecStartPre` 钩子引入自动预清理机制，利用 `docker compose --remove-orphans` 策略物理剔除旧版残留容器，确保演示环境的一致性。
++- **异构环境治理 (Heterogeneous Environment Governance)**：针对主流发行版（Docker V2 Plugin）与特定 ARM 架构环境（Standalone Compose V1）的差异，实现了 Compose 命令自动发现机制，解决了 `status 125` 启动死锁问题。
++- **架构自适应优化 (Adaptive Architecture Optimization)**：针对 2026 年现代多架构镜像生态，实现了原生 ARM64 自动适配，移除了冗余的 amd64 仿真强制配置，确保了 Native-grade 的执行效率。
++- **配置确定性 (Configuration Determinity)**：在 `systemd` 托管环境中，摒弃了不可预测的 Shell 环境变量依赖，采用**静态路径注入（Static Path Injection）**技术确保服务单元的零依赖启动。
++- **状态隔离与冷启动自愈**：严格区分 `infra` (数据库/模拟器) 与 `app` (索引引擎) 的生命周期管理，确保系统在发生非正常关机或环境迁移后，能通过预启动钩子实现 100% 的冷启动自愈。
++
+
+ 可观测性与 SRE 实践- Prometheus 指标 + Dashboard（Vanilla JS）展示 TPS、区块高度、队列长度、RPC 健康等。
+- 日志与指标用于定位瓶颈：Fetcher/Sequencer/Processor 的延迟、重试计数与失败率均可在指标中分解查看。
+- 可安全暴露内网节点（示例使用 Cloudflare Tunnel 配置），生产部署应注意访问控制与 WAF 规则配置。
 
 如何验证（建议步骤）
 1. 检查容器状态
@@ -60,43 +106,6 @@ docker exec -it web3-indexer-anvil cast send --private-key 0xac0974bec39a17e36ba
 - 连接稳定性：WebSocket 持久连接 + Ping/Pong 心跳，缓解 CDN/代理导致的静默断连问题。可以通过主动断连/代理模拟来验证重连逻辑。
 - 并发与资源：基于 Go 的协程池，支持 10+ 并发 worker；运行时内存占用控制在较低范围（工程中目标 <200MB）。可通过容器监控（docker stats / Prometheus 指标）验证。
 
-#### 🛡️ Data Integrity & Security (EdDSA Signing)
-
-To ensure end-to-end data integrity and prevent man-in-the-middle (MITM) attacks or data tampering at the edge (e.g., WAF or Proxy levels), this project implements a **cryptographic provenance layer**:
-
-* **Response Signing:** Every API response is dynamically signed using **Ed25519 (EdDSA)**. Unlike ECDSA, EdDSA provides deterministic signing, eliminating risks associated with poor high-entropy random number generators.
-* **Identity Binding:** The signing key is derived from a GnuPG-protected identity, linking the software's execution output directly to the developer's verified cryptographic identity.
-* **Verification:** Clients can verify the authenticity of the data by checking the `X-Payload-Signature` header against the public key fingerprint provided in the documentation.
-* **Edge Defense:** Integrated with Cloudflare WAF to filter automated bot traffic (User-Agent filtering) and rate-limit high-frequency RPC probing, ensuring high availability of the indexing pipeline.
-
-### 🧠 Engineering Insights
-
-#### 🔄 Integrated Traffic Emulator & Self-Healing
-To provide a true **"zero-config"** demo experience, this project features a built-in transaction emulator:
-- **Nonce Prediction Engine**: Manages high-frequency (up to 50 TPS) transactions with a local prediction queue and automatic on-chain re-syncing every 50 txs.
-- **Atomic Recovery**: If a transaction fails due to network issues, the system performs a **Nonce Rollback**, ensuring data continuity without gaps.
-- **Anvil Privilege Integration**: Uses `anvil_setBalance` for automatic wallet top-ups, ensuring the demo can run indefinitely without manual intervention.
-- **Live Self-Healing**: Automatically detects and fixes `nonce too low` errors (e.g., after an environment reset), broadcasting the recovery event to the real-time Dashboard.
-
-#### 🛡️ Security-First Architecture
-Designed for public-facing jump servers:
-- **Gateway Pattern**: Only the Nginx Gateway is exposed to the public internet (port 80).
-- **Physical Isolation**: Database (PostgreSQL) and RPC nodes (Anvil) are bound to `127.0.0.1`, invisible to external scanners.
-- **Protocol Obfuscation**: Backup channels use **WireGuard** (UDP silent-drop) and **Fail2Ban** (24h ban on 3 failed attempts) to neutralize low-cost automated attacks.
- 
-+#### 🚀 部署幂等性与 SRE 实践
-+针对容器化环境下的命名冲突与环境漂移风险，本项目在 `systemd` 集成中实现了以下增强：
-+- **部署幂等性治理 (Deployment Idempotency)**：通过 `ExecStartPre` 钩子引入自动预清理机制，利用 `docker compose --remove-orphans` 策略物理剔除旧版残留容器，确保演示环境的一致性。
-+- **异构环境治理 (Heterogeneous Environment Governance)**：针对主流发行版（Docker V2 Plugin）与特定 ARM 架构环境（Standalone Compose V1）的差异，实现了 Compose 命令自动发现机制，解决了 `status 125` 启动死锁问题。
-+- **架构自适应优化 (Adaptive Architecture Optimization)**：针对 2026 年现代多架构镜像生态，实现了原生 ARM64 自动适配，移除了冗余的 amd64 仿真强制配置，确保了 Native-grade 的执行效率。
-+- **配置确定性 (Configuration Determinism)**：在 `systemd` 托管环境中，摒弃了不可预测的 Shell 环境变量依赖，采用**静态路径注入（Static Path Injection）**技术确保服务单元的零依赖启动。
-+- **状态隔离与冷启动自愈**：严格区分 `infra` (数据库/模拟器) 与 `app` (索引引擎) 的生命周期管理，确保系统在发生非正常关机或环境迁移后，能通过预启动钩子实现 100% 的冷启动自愈。
-+
- 
- 可观测性与 SRE 实践- Prometheus 指标 + Dashboard（Vanilla JS）展示 TPS、区块高度、队列长度、RPC 健康等。
-- 日志与指标用于定位瓶颈：Fetcher/Sequencer/Processor 的延迟、重试计数与失败率均可在指标中分解查看。
-- 可安全暴露内网节点（示例使用 Cloudflare Tunnel 配置），生产部署应注意访问控制与 WAF 规则配置。
-
 技术栈
 - Go 1.21+（并发与 Context 管理）
 - PostgreSQL（持久化与 Checkpoint）
@@ -114,6 +123,8 @@ web3-indexer-go/
 │   ├── state_manager/     # 状态机与 Checkpoint 持久化
 │   └── web/               # WebSocket / Dashboard 后端
 ├── scripts/               # 数据库初始化与自动化脚本
+├── config/                # 集中化配置文件
+├── setup/                 # 部署脚本
 ├── Makefile               # 启动、压测与辅助命令
 └── docker-compose.yml     # 基础设施容器化配置
 
