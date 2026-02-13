@@ -69,8 +69,8 @@ Environment=DEMO_MODE=true
 ExecStart=$PROJECT_ROOT/bin/indexer
 Restart=always
 RestartSec=5
-StandardOutput=append:$PROJECT_ROOT/bin/indexer.log
-StandardError=append:$PROJECT_ROOT/bin/indexer.err.log
+StandardOutput=append:$PROJECT_ROOT/logs/indexer.log
+StandardError=append:$PROJECT_ROOT/logs/indexer.err.log
 
 [Install]
 WantedBy=multi-user.target
@@ -104,8 +104,8 @@ Environment=DEMO_MODE=false
 ExecStart=$PROJECT_ROOT/bin/indexer
 Restart=always
 RestartSec=5
-StandardOutput=append:$PROJECT_ROOT/bin/indexer.log
-StandardError=append:$PROJECT_ROOT/bin/indexer.err.log
+StandardOutput=append:$PROJECT_ROOT/logs/indexer.log
+StandardError=append:$PROJECT_ROOT/logs/indexer.err.log
 
 [Install]
 WantedBy=multi-user.target
@@ -134,7 +134,7 @@ echo -e "\n${BLUE}=== 部署指南 ===${NC}"
 echo -e "1. 部署服务: ${YELLOW}sudo cp bin/$SERVICE_FILE /etc/systemd/system/${NC}"
 echo -e "2. 加载配置: ${YELLOW}sudo systemctl daemon-reload${NC}"
 echo -e "3. 启动并启用: ${YELLOW}sudo systemctl enable --now web3-indexer${NC}"
-echo -e "4. 查看日志: ${YELLOW}tail -f bin/indexer.log${NC}"
+echo -e "4. 查看日志: ${YELLOW}tail -f logs/indexer.log${NC}"
 echo -e "\n${BLUE}=== 环境变量配置 ===${NC}"
 if [ -z "$DATABASE_URL" ] || [ -z "$RPC_URLS" ]; then
     echo -e "${YELLOW}💡 当前使用演示配置。如需生产部署，请设置环境变量：${NC}"

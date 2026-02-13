@@ -46,12 +46,12 @@ echo ""
 
 echo "🔍 最近的关键事件（最后20条）"
 echo "────────────────────────────────────────"
-tail -200 /tmp/indexer.log 2>/dev/null | grep -v "^$" | tail -20 || echo "无日志"
+tail -200 ./logs/indexer.log 2>/dev/null | grep -v "^$" | tail -20 || echo "无日志"
 echo ""
 
 echo "⚠️  错误和警告（如有）"
 echo "────────────────────────────────────────"
-ERRORS=$(tail -500 /tmp/indexer.log 2>/dev/null | grep -iE "error|warn|panic" | tail -5)
+ERRORS=$(tail -500 ./logs/indexer.log 2>/dev/null | grep -iE "error|warn|panic" | tail -5)
 if [ -n "$ERRORS" ]; then
     echo "$ERRORS"
 else

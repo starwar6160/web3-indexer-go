@@ -4,7 +4,7 @@ import re
 from collections import Counter
 
 # 监控设置
-LOG_FILE = "bin/indexer.log"
+LOG_FILE = "logs/indexer.log"
 NGINX_LOG = "bin/gateway.log" # 假设您已将容器日志重定向
 
 print("🕵️ Web3 Indexer 流量监控启动...")

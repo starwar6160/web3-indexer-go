@@ -113,12 +113,12 @@ echo ""
 
 echo "【七、最近的关键日志（最后30条）】"
 echo "───────────────────────────────────────────────────────────"
-tail -300 /tmp/indexer.log 2>/dev/null | grep -v "^$" | tail -30 || echo "无日志"
+tail -300 ./logs/indexer.log 2>/dev/null | grep -v "^$" | tail -30 || echo "无日志"
 echo ""
 
 echo "【八、错误和警告（如有）】"
 echo "───────────────────────────────────────────────────────────"
-ERRORS=$(tail -500 /tmp/indexer.log 2>/dev/null | grep -iE "error|warn|panic" | tail -10)
+ERRORS=$(tail -500 ./logs/indexer.log 2>/dev/null | grep -iE "error|warn|panic" | tail -10)
 if [ -n "$ERRORS" ]; then
     echo "$ERRORS"
 else
@@ -129,7 +129,7 @@ echo ""
 echo "【九、性能指标】"
 echo "───────────────────────────────────────────────────────────"
 # 计算最近的处理速度
-tail -100 /tmp/indexer.log 2>/dev/null | grep "block_processed" | tail -10 | while IFS= read -r line; do
+tail -100 ./logs/indexer.log 2>/dev/null | grep "block_processed" | tail -10 | while IFS= read -r line; do
     echo "$line"
 done
 echo ""

@@ -40,7 +40,7 @@ fi
 
 echo -e "
 ${BLUE}=== 运维指令集 ===${NC}"
-echo -e "查看日志: ${YELLOW}tail -f bin/indexer.log${NC}"
+echo -e "查看日志: ${YELLOW}tail -f logs/indexer.log${NC}"
 echo -e "重置环境: ${YELLOW}./scripts/clean-env.sh${NC}"
 echo -e "停止服务: ${YELLOW}sudo systemctl stop web3-indexer${NC}"
 echo -e "实时开发: ${YELLOW}air${NC}"
