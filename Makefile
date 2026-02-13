@@ -2,7 +2,7 @@
 # Web3 Indexer 工业级控制台 (Commander)
 # ==============================================================================
 
-.PHONY: help build run air test clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service setup-demo
+.PHONY: help build run air test clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service deploy-service-reset setup-demo
 
 # 默认目标
 help:
@@ -18,7 +18,8 @@ help:
 	@echo "  make clean        - 清理本地构建产物"
 	@echo "  make sign-readme  - 使用 EdDSA GPG 密钥签署 README.md"
 	@echo "  make verify-identity - 验证存储库的加密身份"
-	@echo "  make deploy-service - [生产] 编译并更新 systemd 服务运行新版本"
+	@echo "  make deploy-service - [生产] 编译并更新 systemd 服务运行新版本 (保留数据)"
+	@echo "  make deploy-service-reset - [生产] 编译并更新 systemd 服务运行新版本 (清除数据)"
 
 build:
 	./scripts/publish.sh
@@ -67,9 +68,20 @@ verify-identity:
 	gpg --import PUBLIC_KEY.asc
 
 deploy-service: build
-	@echo "🚀 正在部署新版本到 systemd..."
-	# 使用集中配置更新服务
-	./scripts/publish.sh
+	@echo "🚀 正在部署新版本到 systemd (保留现有数据)..."
+	# 使用集中配置更新服务 (默认保留数据库数据)
+	CLEAR_DB=false ./scripts/publish.sh
+	sudo cp bin/web3-indexer.service /etc/systemd/system/
+	sudo systemctl daemon-reload
+	sudo systemctl restart web3-indexer
+	@echo "✅ 服务已重启，正在检查状态..."
+	sudo systemctl status web3-indexer --no-pager
+
+# Deploy service with database reset (optional)
+deploy-service-reset: build
+	@echo "🚀 正在部署新版本到 systemd (清除现有数据)..."
+	# 使用集中配置更新服务 (清除数据库数据)
+	CLEAR_DB=true ./scripts/publish.sh
 	sudo cp bin/web3-indexer.service /etc/systemd/system/
 	sudo systemctl daemon-reload
 	sudo systemctl restart web3-indexer
