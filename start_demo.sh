@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Web3 Indexer 全自动演示流水线 (Docker 全栈版)
+# Web3 Indexer 全自动演示流水线 (Docker 全栈版) - 使用集中配置
 # ==============================================================================
 
 GREEN='\033[0;32m'
@@ -56,7 +56,7 @@ echo -e "\n${GREEN}API 已就绪!${NC}"
 # 4. 开启自动高频压测 (本地运行，因为 VM 已安装 Python)
 echo -e "${YELLOW}Step 4: 开启自动高频压测 (TPS: ~50)...${NC}"
 # 确保安装了必要的 python 库 (如果有 requirements.txt)
-# pip install -r scripts/requirements.txt > /dev/null 2>&1 
+# pip install -r scripts/requirements.txt > /dev/null 2>&1
 python3 scripts/stress-test.py > /dev/null 2>&1 &
 STRESS_PID=$!
 
