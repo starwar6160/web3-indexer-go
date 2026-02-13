@@ -46,20 +46,6 @@ services:
       postgres:
         condition: service_healthy
 
-  # Nginx 安全网关
-  gateway:
-    image: nginx:alpine
-    container_name: web3-indexer-gateway
-    restart: always
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - indexer-network
-
   # Grafana 可观测性面板
   grafana:
     image: grafana/grafana-oss
