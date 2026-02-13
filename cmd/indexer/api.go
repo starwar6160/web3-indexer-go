@@ -173,6 +173,12 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		}
 	}
 
+	adminIP := globalAnalyzer.GetAdminIP()
+	if adminIP != "" && adminIP != "127.0.0.1" {
+		// 隐私防御：抹除真实 IP，替换为固定占位符
+		adminIP = "Protected-Internal-Node"
+	}
+
 	status := map[string]interface{}{
 		"state":              "active",
 		"latest_block":       latestBlockStr,
@@ -185,7 +191,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		"bps":                currentBPS.Load(),
 		"is_healthy":         rpcPool.GetHealthyNodeCount() > 0,
 		"self_healing_count": selfHealingEvents.Load(),
-		"admin_ip":           globalAnalyzer.GetAdminIP(),
+		"admin_ip":           adminIP,
 		"rpc_nodes": map[string]int{
 			"healthy": rpcPool.GetHealthyNodeCount(),
 			"total":   rpcPool.GetTotalNodeCount(),
