@@ -4,7 +4,7 @@ datasources:
   - name: PostgreSQL
     type: postgres
     access: proxy
-    url: web3-indexer-db:5432
+    url: postgres:5432
     database: web3_indexer
     user: postgres
     secureJsonData:
