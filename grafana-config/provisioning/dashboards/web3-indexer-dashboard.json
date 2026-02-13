@@ -1,0 +1,178 @@
+{
+  "title": "Web3 Indexer Dashboard",
+  "uid": "web3-indexer-dashboard",
+  "tags": ["web3", "indexer", "blockchain"],
+  "style": "dark",
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Sync Progress",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  now() AS \"time\",\n  COALESCE(MAX(number), 0) AS \"current_block\"\nFROM blocks",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      }
+    },
+    {
+      "id": 2,
+      "title": "Transactions Per Second (TPS)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  $__timeGroupAlias(processed_at,'1m'),\n  count(*) AS \"transactions\"\nFROM blocks\nWHERE $__timeFilter(processed_at)\nGROUP BY 1\nORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Sync Lag (Blocks Behind)",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  0 AS \"lag\"\n",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 100}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Total Blocks Processed",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  COUNT(*) AS \"blocks\"\nFROM blocks",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Total Transfers Indexed",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 8},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  COUNT(*) AS \"transfers\"\nFROM transfers",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Latest Blocks",
+      "type": "table",
+      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  number AS \"Block Number\",\n  SUBSTRING(hash, 1, 16) || '...' AS \"Hash\",\n  timestamp AS \"Timestamp\",\n  processed_at AS \"Processed At\"\nFROM blocks\nORDER BY number DESC\nLIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 7,
+      "title": "Recent Transfer Activity",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  $__timeGroupAlias(t.created_at,1m),\n  count(*) AS \"transfers\"\nFROM transfers t\nJOIN blocks b ON t.block_number = b.number\nWHERE $__timeFilter(t.created_at)\nGROUP BY 1\nORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    }
+  ],
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "refresh": "5s",
+  "schemaVersion": 17,
+  "version": 0,
+  "links": [],
+  "gnetId": null,
+  "folderId": 0,
+  "overwrite": true
+}

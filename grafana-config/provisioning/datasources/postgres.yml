@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: web3-indexer-db:5432
+    database: web3_indexer
+    user: postgres
+    secureJsonData:
+      password: W3b3_Idx_Secur3_2026_Sec
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
