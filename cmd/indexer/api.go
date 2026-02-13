@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -38,7 +39,8 @@ func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 	var blocks []Block
 	err := db.SelectContext(r.Context(), &blocks, "SELECT number, hash, parent_hash, timestamp, processed_at FROM blocks ORDER BY number DESC LIMIT 10")
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		slog.Error("failed_to_get_blocks", "err", err)
+		http.Error(w, "Failed to retrieve blocks", 500)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -49,7 +51,8 @@ func handleGetTransfers(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 	var transfers []Transfer
 	err := db.SelectContext(r.Context(), &transfers, "SELECT id, block_number, tx_hash, log_index, from_address, to_address, amount, token_address FROM transfers ORDER BY block_number DESC LIMIT 10")
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		slog.Error("failed_to_get_transfers", "err", err)
+		http.Error(w, "Failed to retrieve transfers", 500)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -109,9 +112,19 @@ func VisitorStatsMiddleware(db *sqlx.DB, next http.Handler) http.Handler {
 		if ip == "" {
 			ip = r.RemoteAddr
 		}
-		if idx := strings.LastIndex(ip, ":"); idx != -1 {
-			ip = ip[:idx]
+
+		// 更加鲁棒的 IP 解析，处理 IPv4/IPv6 以及端口号
+		if host, _, err := net.SplitHostPort(ip); err == nil {
+			ip = host
+		} else {
+			// 如果没有端口号（例如来自 X-Forwarded-For），SplitHostPort 会报错，直接使用原值
+			ip = strings.TrimSpace(ip)
+			// 如果是多个 IP（X-Forwarded-For: client, proxy1, proxy2），取第一个
+			if idx := strings.Index(ip, ","); idx != -1 {
+				ip = strings.TrimSpace(ip[:idx])
+			}
 		}
+
 		ua := r.UserAgent()
 
 		// 1. 更新分析器数据
@@ -143,25 +156,56 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 	}
 	metaJSON, _ := json.Marshal(metadata)
 
-	_, err := db.Exec("INSERT INTO visitor_stats (ip_address, user_agent, metadata) VALUES ($1, $2, $3)",
-		ip, ua, metaJSON)
-	if err != nil {
-		// slog 已经在 main 中初始化
-		slog.Error("failed_to_log_visitor", "err", err, "ip", ip)
+	// Retry mechanism for database operations
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		_, err := db.Exec("INSERT INTO visitor_stats (ip_address, user_agent, metadata) VALUES ($1, $2, $3)",
+			ip, ua, metaJSON)
+		if err == nil {
+			// Success, exit the retry loop
+			return
+		}
+		
+		// Log the error but don't spam if it's a connection issue
+		if attempt < maxRetries-1 {
+			slog.Warn("failed_to_log_visitor_retrying", "err", err, "ip", ip, "attempt", attempt+1)
+			time.Sleep(time.Millisecond * 100 * time.Duration(attempt+1)) // Exponential backoff
+		} else {
+			// Final attempt failed, log the error
+			slog.Error("failed_to_log_visitor_permanent", "err", err, "ip", ip, "attempts", maxRetries)
+		}
 	}
 }
 
 func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool *engine.RPCClientPool) {
 	latestChainBlock, _ := rpcPool.GetLatestBlockNumber(r.Context())
+	
 	var latestIndexedBlock string
-	_ = db.GetContext(r.Context(), &latestIndexedBlock, "SELECT COALESCE(MAX(number), '0') FROM blocks")
+	err := db.GetContext(r.Context(), &latestIndexedBlock, "SELECT COALESCE(MAX(number), '0') FROM blocks")
+	if err != nil {
+		slog.Error("failed_to_get_latest_indexed_block", "err", err)
+		latestIndexedBlock = "0"
+	}
 
 	var totalBlocks, totalTransfers int64
-	_ = db.GetContext(r.Context(), &totalBlocks, "SELECT COUNT(*) FROM blocks")
-	_ = db.GetContext(r.Context(), &totalTransfers, "SELECT COUNT(*) FROM transfers")
+	err = db.GetContext(r.Context(), &totalBlocks, "SELECT COUNT(*) FROM blocks")
+	if err != nil {
+		slog.Error("failed_to_get_total_blocks", "err", err)
+		totalBlocks = 0
+	}
+	
+	err = db.GetContext(r.Context(), &totalTransfers, "SELECT COUNT(*) FROM transfers")
+	if err != nil {
+		slog.Error("failed_to_get_total_transfers", "err", err)
+		totalTransfers = 0
+	}
 
 	var totalVisitors int64
-	_ = db.GetContext(r.Context(), &totalVisitors, "SELECT COUNT(DISTINCT ip_address) FROM visitor_stats")
+	err = db.GetContext(r.Context(), &totalVisitors, "SELECT COUNT(DISTINCT ip_address) FROM visitor_stats")
+	if err != nil {
+		slog.Error("failed_to_get_total_visitors", "err", err)
+		totalVisitors = 0
+	}
 
 	latestBlockStr := "0"
 	var syncLag int64
