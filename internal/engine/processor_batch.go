@@ -174,5 +174,16 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		}
 	}
 
+	// Update metrics for the last processed block in the batch
+	if p.metrics != nil && len(blocks) > 0 {
+		lastBlock := blocks[len(blocks)-1].Block
+		if lastBlock != nil {
+			blockNum := lastBlock.Number()
+			if blockNum.IsInt64() {
+				p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
+			}
+		}
+	}
+
 	return nil
 }
