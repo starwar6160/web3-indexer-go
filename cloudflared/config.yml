@@ -1,0 +1,9 @@
+tunnel: c1b94896-e188-4d52-a233-7986375c3790
+credentials-file: /home/ubuntu/.cloudflared/c1b94896-e188-4d52-a233-7986375c3790.json
+
+ingress:
+  - hostname: demo2.st6160.click
+    service: http://localhost:8080
+  - hostname: grafana-demo2.st6160.click
+    service: http://localhost:4000
+  - service: http_status:404
