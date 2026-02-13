@@ -1,4 +1,4 @@
-tunnel: c1b94896-e188-4d52-a233-7986375c3790
+tunnel: web3-indexer-tunnel
 credentials-file: /home/ubuntu/.cloudflared/c1b94896-e188-4d52-a233-7986375c3790.json
 
 ingress:
