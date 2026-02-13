@@ -16,7 +16,7 @@ echo -e "${BLUE}=== Web3 Indexer 开发环境启动流程 ===${NC}"
 # 1. 首先编译确定正确性 (Fail-fast 原则)
 echo -e "${YELLOW}Step 1: 正在进行代码预编译检查...${NC}"
 mkdir -p bin
-go build -o bin/indexer cmd/indexer/main.go
+go build -o bin/indexer ./cmd/indexer
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ 编译失败！请先修复代码错误后再运行脚本。${NC}"
     exit 1
@@ -76,7 +76,7 @@ docker exec web3-indexer-db psql -U postgres -d web3_indexer -c "
 echo -e "${GREEN}Schema 验证完成${NC}"
 
 # 5. 最终启动
-export DATABASE_URL="postgres://postgres:postgres@localhost:15432/web3_indexer?sslmode=disable"
+export DATABASE_URL="postgres://indexer_user:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_indexer?sslmode=disable"
 export RPC_URLS="http://localhost:8545"
 export CHAIN_ID="31337"
 export START_BLOCK="0"

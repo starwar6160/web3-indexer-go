@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'web3-indexer'
+    static_configs:
+      - targets: ['172.23.0.1:8080'] # 宿主机 IP，应用在该端口暴露 /metrics
+    metrics_path: /metrics
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

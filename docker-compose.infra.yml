@@ -48,7 +48,7 @@ services:
 
   # Grafana 可观测性面板
   grafana:
-    image: grafana/grafana-oss
+    image: grafana/grafana-oss:11.5.0
     container_name: web3-indexer-grafana
     restart: always
     ports:
@@ -63,6 +63,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Prometheus 指标收集
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: web3-indexer-prometheus
+    restart: always
+    ports:
+      - "127.0.0.1:9091:9090"
+    volumes:
+      - ./prometheus-config/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - indexer-network
+    depends_on:
+      - postgres
 
 volumes:
   indexer_db_data:

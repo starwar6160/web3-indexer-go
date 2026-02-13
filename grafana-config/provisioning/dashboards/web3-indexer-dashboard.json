@@ -7,50 +7,33 @@
   "panels": [
     {
       "id": 1,
-      "title": "Sync Progress",
+      "title": "Sync Progress (DB)",
       "type": "gauge",
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
       "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
       "targets": [
         {
-          "rawSql": "SELECT\n  now() AS \"time\",\n  COALESCE((SELECT last_synced_block FROM sync_status ORDER BY updated_at DESC LIMIT 1), 0) AS \"current_block\"\n",
+          "format": "table",
+          "rawSql": "SELECT now() AS \"time\", COALESCE((SELECT last_synced_block FROM sync_status ORDER BY updated_at DESC LIMIT 1), 0) AS \"current_block\"",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "showThresholdLabels": false,
         "showThresholdMarkers": true
-      }
-    },
-    {
-      "id": 2,
-      "title": "Transactions Per Second (TPS)",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
-      "targets": [
-        {
-          "rawSql": "SELECT\n  $__timeGroupAlias(processed_at,'1m'),\n  count(*) AS \"transactions\"\nFROM blocks\nWHERE $__timeFilter(processed_at)\nGROUP BY 1\nORDER BY 1",
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "tooltip": {
-          "mode": "single"
-        }
       }
     },
     {
       "id": 3,
       "title": "Sync Lag (Blocks Behind)",
       "type": "stat",
-      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
       "targets": [
         {
-          "rawSql": "SELECT\n  COALESCE((SELECT sync_lag FROM sync_status ORDER BY updated_at DESC LIMIT 1), 0) AS \"lag\"\n",
+          "format": "table",
+          "rawSql": "SELECT COALESCE((SELECT sync_lag FROM sync_status ORDER BY updated_at DESC LIMIT 1), 0) AS \"lag\"",
           "refId": "A"
         }
       ],
@@ -59,18 +42,12 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "thresholds": {
             "steps": [
               {"color": "green", "value": null},
@@ -81,98 +58,96 @@
       }
     },
     {
-      "id": 4,
-      "title": "Total Blocks Processed",
+      "id": 11,
+      "title": "Current Sync Height (Prom)",
+      "type": "gauge",
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        { "expr": "indexer_current_sync_height", "refId": "A" }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "DB Active Connections",
       "type": "stat",
-      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        { "expr": "indexer_db_connections_active", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Transactions Per Second (TPS)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
-          "rawSql": "SELECT\n  COUNT(*) AS \"blocks\"\nFROM blocks",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(processed_at,'1m'), count(*) AS \"transactions\" FROM blocks WHERE $__timeFilter(processed_at) GROUP BY 1 ORDER BY 1",
           "refId": "A"
         }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Fetcher Job Rate (1m)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        { "expr": "rate(indexer_fetcher_jobs_completed_total[1m])", "refId": "A", "legendFormat": "Jobs/sec" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Goroutines Count",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+      "targets": [
+        { "expr": "go_goroutines", "refId": "A" }
+      ]
     },
     {
       "id": 5,
-      "title": "Total Transfers Indexed",
-      "type": "stat",
-      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 8},
+      "title": "Memory Usage (MB)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
       "targets": [
-        {
-          "rawSql": "SELECT\n  COUNT(*) AS \"transfers\"\nFROM transfers",
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      }
+        { "expr": "go_memstats_alloc_bytes / 1024 / 1024", "refId": "A", "legendFormat": "Allocated" }
+      ]
     },
     {
-      "id": 6,
+      "id": 14,
+      "title": "Block Fetch Duration (ms)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+      "targets": [
+        { "expr": "rate(indexer_fetch_duration_seconds_sum[1m]) / rate(indexer_fetch_duration_seconds_count[1m]) * 1000", "refId": "A", "legendFormat": "Avg Latency" }
+      ]
+    },
+    {
+      "id": 10,
       "title": "Latest Blocks",
       "type": "table",
-      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 8},
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 24},
       "targets": [
         {
-          "rawSql": "SELECT\n  number AS \"Block Number\",\n  SUBSTRING(hash, 1, 16) || '...' AS \"Hash\",\n  timestamp AS \"Timestamp\",\n  processed_at AS \"Processed At\"\nFROM blocks\nORDER BY number DESC\nLIMIT 10",
+          "format": "table",
+          "rawSql": "SELECT number AS \"Block Number\", SUBSTRING(hash, 1, 16) || '...' AS \"Hash\", timestamp AS \"Timestamp\", processed_at AS \"Processed At\" FROM blocks ORDER BY number DESC LIMIT 10",
           "refId": "A"
         }
-      ],
-      "options": {
-        "showHeader": true
-      }
-    },
-    {
-      "id": 7,
-      "title": "Recent Transfer Activity",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
-      "targets": [
-        {
-          "rawSql": "SELECT\n  $__timeGroupAlias(t.created_at,1m),\n  count(*) AS \"transfers\"\nFROM transfers t\nJOIN blocks b ON t.block_number = b.number\nWHERE $__timeFilter(t.created_at)\nGROUP BY 1\nORDER BY 1",
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "tooltip": {
-          "mode": "single"
-        }
-      }
+      ]
     }
   ],
-  "timepicker": {},
-  "templating": {
-    "list": []
-  },
-  "annotations": {
-    "list": []
-  },
   "refresh": "5s",
   "schemaVersion": 17,
   "version": 0,
-  "links": [],
-  "gnetId": null,
-  "folderId": 0,
   "overwrite": true
 }
