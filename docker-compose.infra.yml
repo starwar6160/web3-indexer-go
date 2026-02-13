@@ -60,6 +60,24 @@ services:
     networks:
       - indexer-network
 
+  # Grafana 可观测性面板
+  grafana:
+    image: grafana/grafana-oss
+    container_name: web3-indexer-grafana
+    restart: always
+    ports:
+      - "127.0.0.1:4000:3000"
+    volumes:
+      - ./grafana-config/grafana.ini:/etc/grafana/grafana.ini
+      - ./grafana-config/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=W3b3_Idx_Secur3_2026_Sec
+    networks:
+      - indexer-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   indexer_db_data:
   indexer_anvil_data:
