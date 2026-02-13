@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"math/big"
+	"time"
 
 	"web3-indexer-go/internal/engine"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -40,5 +42,27 @@ func (sm *ServiceManager) GetStartBlock(ctx context.Context) (*big.Int, error) {
 
 // StartTailFollow 启动持续追踪
 func (sm *ServiceManager) StartTailFollow(ctx context.Context, startBlock *big.Int) {
+	// 启动后台指标上报
+	go sm.startMetricsReporter(ctx)
 	continuousTailFollow(ctx, sm.fetcher, sm.rpcPool, startBlock)
+}
+
+// startMetricsReporter 定期上报系统指标到 Prometheus
+func (sm *ServiceManager) startMetricsReporter(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	metrics := engine.GetMetrics()
+	metrics.RecordStartTime()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// 上报数据库连接池状态
+			stats := sm.db.Stats()
+			metrics.UpdateDBConnections(stats.OpenConnections)
+		}
+	}
 }

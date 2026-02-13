@@ -54,6 +54,7 @@ func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int
 	p := &Processor{
 		db:                        db,
 		client:                    client,
+		metrics:                   GetMetrics(),
 		watchedAddresses:          make(map[common.Address]bool),
 		retryQueue:                make(chan BlockData, retryQueueSize),
 		maxRetries:                3,
