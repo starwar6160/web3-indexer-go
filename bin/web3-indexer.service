@@ -7,8 +7,9 @@ Requires=docker.service
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/zwCode/web3-indexer-go
-# 启动前确保 Docker 基础设施已启动
-ExecStartPre=/usr/bin/docker compose -f /home/ubuntu/zwCode/web3-indexer-go/docker-compose.infra.yml up -d
+# 启动前确保 Docker 基础设施已启动并清理孤儿容器 (SRE 幂等性增强)
+ExecStartPre=-/usr/bin/docker compose -f /home/ubuntu/zwCode/web3-indexer-go/docker-compose.infra.yml down -v --remove-orphans
+ExecStartPre=/usr/bin/docker compose -f /home/ubuntu/zwCode/web3-indexer-go/docker-compose.infra.yml up -d --remove-orphans
 
 # 关键环境变量
 Environment=DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_indexer?sslmode=disable
