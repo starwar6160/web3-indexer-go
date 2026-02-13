@@ -22,6 +22,31 @@ func (p *Processor) updateCheckpointInTx(ctx context.Context, tx *sqlx.Tx, chain
 		return fmt.Errorf("failed to update checkpoint: %w", err)
 	}
 
+	// 同时更新 sync_status 表，以便 Grafana 展示
+	// 这里通过 SELECT 子查询实时计算最新块和延迟，避免额外的 RPC 调用
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, updated_at)
+		SELECT 
+			$1, 
+			$2::BIGINT, 
+			COALESCE(MAX(number), $2::BIGINT), 
+			GREATEST(0, COALESCE(MAX(number), $2::BIGINT) - $2::BIGINT),
+			'syncing',
+			NOW()
+		FROM blocks
+		ON CONFLICT (chain_id) DO UPDATE SET
+			last_synced_block = EXCLUDED.last_synced_block,
+			latest_block = EXCLUDED.latest_block,
+			sync_lag = EXCLUDED.sync_lag,
+			status = EXCLUDED.status,
+			updated_at = EXCLUDED.updated_at
+	`, chainID, blockNumber.String())
+
+	if err != nil {
+		// 记录错误但不中断流程
+		Logger.Warn("failed_to_update_sync_status", "error", err)
+	}
+
 	if p.metrics != nil {
 		p.metrics.RecordCheckpointUpdate()
 	}

@@ -12,7 +12,7 @@
       "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
       "targets": [
         {
-          "rawSql": "SELECT\n  now() AS \"time\",\n  COALESCE(MAX(number), 0) AS \"current_block\"\nFROM blocks",
+          "rawSql": "SELECT\n  now() AS \"time\",\n  COALESCE((SELECT last_synced_block FROM sync_status ORDER BY updated_at DESC LIMIT 1), 0) AS \"current_block\"\n",
           "refId": "A"
         }
       ],
@@ -50,7 +50,7 @@
       "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
       "targets": [
         {
-          "rawSql": "SELECT\n  0 AS \"lag\"\n",
+          "rawSql": "SELECT\n  COALESCE((SELECT sync_lag FROM sync_status ORDER BY updated_at DESC LIMIT 1), 0) AS \"lag\"\n",
           "refId": "A"
         }
       ],
