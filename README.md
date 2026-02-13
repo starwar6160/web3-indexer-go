@@ -20,6 +20,11 @@ Live demo: https://demo2.st6160.click/
   ```
   make demo 的流程：docker compose down -> docker compose up --build -> stress-test（包含 Anvil 私链、Postgres、Indexer、Dashboard 与压测工具）。
 
+### 配置管理
+本项目采用集中化配置管理，所有演示和生产配置都集中在 config/ 目录中，便于维护和部署：
+- 演示模式：使用安全的默认配置，一键启动
+- 生产部署：通过环境变量灵活配置敏感信息
+
 如何验证（建议步骤）
 1. 检查容器状态
   ```
