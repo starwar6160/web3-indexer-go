@@ -91,3 +91,4 @@ wg_keys/
 #*.md
 venv/
 bin/
+.windsurf/
