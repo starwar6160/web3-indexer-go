@@ -1,0 +1,172 @@
+# ==============================================================================
+# Web3 Indexer - Production-Grade GolangCI-Lint Configuration
+# Target: 6 nines reliability with automated quality gates
+# ==============================================================================
+
+# Linters enabled for Web3 production standards
+linters:
+  disable-all: true
+  enable:
+    # --- Essential Go Checks ---
+    - gofmt          # Code formatting (non-negotiable)
+    - govet          # Go vet static analysis (bug detection)
+    - errcheck       # ALL errors must be checked (no `_ = func()`)
+    - staticcheck    # Go static analysis (finds bugs & issues)
+    - unused         # Detect unused code, constants, vars, funcs
+
+    # --- Web3 Critical ---
+    - bodyclose      # Ensure HTTP/RPC bodies closed (memory leak prevention)
+    - errchkjson     # Check JSON encoding/decoding errors
+    - noctx          # Ensure context propagation (cancellation & timeout)
+    - sqlclosecheck  # Ensure sql.Rows/Stmt closed (DB resource leak)
+
+    # --- Code Quality ---
+    - goconst        # Detect repeated strings that could be constants
+    - gocritic       # Find code patterns needing improvement
+    - gocyclo        # Cyclomatic complexity (limit: 15)
+    - godot          # Check if comments end with period
+    - revive         # Fast, configurable linter (modern golint replacement)
+
+    # --- Style & Best Practices ---
+    - gosimple       # Simplify code (find unnecessary complexity)
+    - ineffassign    # Detect ineffectual assignments
+    - misspell       # Catch commonly misspelled English words
+    - prealloc       # Pre-allocate slices for performance
+    - unconvert      # Detect unnecessary type conversions
+    - unparam        # Detect unused function parameters
+
+    # --- Security ---
+    - gosec          # Security audit (hardcoded keys, SQL injection, etc.)
+
+linters-settings:
+  # Cyclomatic complexity limit (highly complex functions are bugs)
+  gocyclo:
+    min-complexity: 15
+
+  # Skip main files for errcheck (common in CLI apps)
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  # Detect repeated strings that should be constants
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  # Enable all gocritic checks (advanced diagnostics)
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+
+  # Revive configuration (modern golint)
+  revive:
+    confidence: 0.8
+    rules:
+      - name: exported
+        severity: warning
+      - name: var-naming
+        severity: warning
+      - name: blank-imports
+        severity: warning
+      - name: context-as-argument
+        severity: warning
+      - name: context-keys-type
+        severity: warning
+      - name: dot-imports
+        severity: warning
+      - name: error-return
+        severity: warning
+      - name: error-strings
+        severity: warning
+      - name: error-naming
+        severity: warning
+      - name: if-return
+        severity: warning
+      - name: increment-decrement
+        severity: warning
+      - name: var-declaration
+        severity: warning
+      - name: package-comments
+        severity: warning
+      - name: range
+        severity: warning
+      - name: receiver-naming
+        severity: warning
+      - name: time-naming
+        severity: warning
+      - name: unexported-return
+        severity: warning
+      - name: indent-error-flow
+        severity: warning
+      - name: errorf
+        severity: warning
+      - name: empty-block
+        severity: warning
+      - name: superfluous-else
+        severity: warning
+      - name: unused-parameter
+        severity: warning
+      - name: unreachable-code
+        severity: warning
+      - name: redefines-builtin-id
+        severity: warning
+
+  # GoSec security settings
+  gosec:
+    excludes:
+      - G104  # Allow errcheck to handle unchecked errors
+    config:
+      G101: # Look for hard-coded credentials
+        pattern: "(?i)(passwd|password|pwd|secret|api-key|apikey|api_key)"
+      G102: # Bind to all interfaces
+        no-ssh-host: true
+
+  # govet settings
+  govet:
+    enable-all: true
+    disable:
+      - shadow  # Can be noisy, but worth enabling in strict mode
+
+# Run configuration
+run:
+  # Timeout for analysis
+  timeout: 5m
+
+  # Which files to skip
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
+
+  # Build tags
+  build-tags:
+    - integration
+
+  # Which dirs to skip
+  skip-dirs:
+    - vendor
+    - third_party
+    - testdata
+
+  # Go version to use
+  go: "1.21"
+
+# Output configuration
+output:
+  # Format: colored-line-number|json|tab|checkstyle|code-climate
+  format: colored-line-number
+
+  # Print lines of code with linter issues
+  print-issued-lines: true
+
+  # Print linter name in the end of issue text
+  print-linter-name: true
+
+  # Make issues output unique by line
+  uniq-by-line: true
+
+  # Sort results by: filepath, line and column
+  sort-results: true
