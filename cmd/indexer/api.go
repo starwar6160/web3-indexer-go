@@ -165,7 +165,7 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 			// Success, exit the retry loop
 			return
 		}
-		
+
 		// Log the error but don't spam if it's a connection issue
 		if attempt < maxRetries-1 {
 			slog.Warn("failed_to_log_visitor_retrying", "err", err, "ip", ip, "attempt", attempt+1)
@@ -178,10 +178,10 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 }
 
 func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool *engine.RPCClientPool) {
-	latestChainBlock, _ := rpcPool.GetLatestBlockNumber(r.Context())
-	
+	latestChainBlock, err := rpcPool.GetLatestBlockNumber(r.Context())
+
 	var latestIndexedBlock string
-	err := db.GetContext(r.Context(), &latestIndexedBlock, "SELECT COALESCE(MAX(number), '0') FROM blocks")
+	err = db.GetContext(r.Context(), &latestIndexedBlock, "SELECT COALESCE(MAX(number), '0') FROM blocks")
 	if err != nil {
 		slog.Error("failed_to_get_latest_indexed_block", "err", err)
 		latestIndexedBlock = "0"
@@ -193,7 +193,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		slog.Error("failed_to_get_total_blocks", "err", err)
 		totalBlocks = 0
 	}
-	
+
 	err = db.GetContext(r.Context(), &totalTransfers, "SELECT COUNT(*) FROM transfers")
 	if err != nil {
 		slog.Error("failed_to_get_total_transfers", "err", err)

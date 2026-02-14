@@ -30,7 +30,7 @@ type Config struct {
 }
 
 func Load() *Config {
-	_ = godotenv.Load()
+	_ = godotenv.Load() // Config file is optional
 
 	// 明确演示模式
 	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == "true" || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == "true"
@@ -88,7 +88,7 @@ func Load() *Config {
 	} else if cfg.ChainID == 31337 {
 		networkName = "Anvil"
 	}
-	log.Printf("🚀 Architecture Loaded: mode=%v network=%s rps=%d targets=%d", 
+	log.Printf("🚀 Architecture Loaded: mode=%v network=%s rps=%d targets=%d",
 		cfg.DemoMode, networkName, cfg.RPCRateLimit, len(cfg.RPCURLs))
 
 	return cfg

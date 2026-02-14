@@ -70,12 +70,15 @@ linters-settings:
     exclude-functions:
       - (io.Closer).Close
       - (*github.com/ethereum/go-ethereum/ethclient.Client).Close
+      - (*github.com/gorilla/websocket.Conn).Close
+      - (*github.com/gorilla/websocket.Conn).SetReadDeadline
+      - (*github.com/gorilla/websocket.Conn).SetWriteDeadline
+      - (*github.com/gorilla/websocket.Conn).WriteMessage
       - (net/http.ResponseWriter).Write
-      - (net.Conn).SetReadDeadline
-      - (net.Conn).SetWriteDeadline
-      - (net.Conn).WriteMessage
+      - .Write
       - fmt.Sprintf
       - fmt.Fprintf
+      - (net/http.ResponseWriter).Write
 
   # Detect repeated strings that should be constants
   goconst:

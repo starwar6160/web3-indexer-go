@@ -14,7 +14,7 @@ func HandleStatic() http.Handler {
 }
 
 // RenderDashboard 渲染主页
-func RenderDashboard(w http.ResponseWriter, r *http.Request) {
+func RenderDashboard(w http.ResponseWriter, _ *http.Request) {
 	data, err := StaticAssets.ReadFile("dashboard.html")
 	if err != nil {
 		http.Error(w, "Dashboard not found", http.StatusNotFound)
@@ -25,7 +25,7 @@ func RenderDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 // RenderSecurity 渲染安全验证页
-func RenderSecurity(w http.ResponseWriter, r *http.Request) {
+func RenderSecurity(w http.ResponseWriter, _ *http.Request) {
 	data, err := StaticAssets.ReadFile("security.html")
 	if err != nil {
 		http.Error(w, "Security page not found", http.StatusNotFound)
