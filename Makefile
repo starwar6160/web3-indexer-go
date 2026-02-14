@@ -11,6 +11,8 @@ LOG_DIR=/var/log/$(BINARY_NAME)
 RUN_USER=$(shell whoami)
 PROJECT_ROOT=$(shell pwd)
 DOCKER_GATEWAY=$(shell docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || echo "172.17.0.1")
+GOPATH_BIN=$(shell go env GOPATH)/bin
+export PATH := $(GOPATH_BIN):$(PATH)
 
 .PHONY: help init build run air test test-quick test-cleanup check lint security clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service deploy-service-reset setup-demo check-env install-deps
 
@@ -155,7 +157,7 @@ lint:
 	@echo "🔍 Running golangci-lint..."
 	@if ! command -v golangci-lint >/dev/null 2>&1; then \
 		echo "⚠️  golangci-lint not found. Installing..."; \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH_BIN) latest; \
 	fi
 	@golangci-lint run --timeout=5m --config=.golangci.yml ./...
 	@echo "✅ Lint checks passed!"
