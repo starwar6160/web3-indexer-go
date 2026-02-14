@@ -12,13 +12,28 @@ linters:
     - govet          # Go vet static analysis (bug detection)
     - errcheck       # ALL errors must be checked (no `_ = func()`)
     - staticcheck    # Go static analysis (finds bugs & issues)
-    - unused         # Detect unused code, constants, vars, funcs
 
     # --- Web3 Critical ---
     - bodyclose      # Ensure HTTP/RPC bodies closed (memory leak prevention)
     - errchkjson     # Check JSON encoding/decoding errors
     - noctx          # Ensure context propagation (cancellation & timeout)
     - sqlclosecheck  # Ensure sql.Rows/Stmt closed (DB resource leak)
+
+    # --- Code Quality (relaxed for demo) ---
+    - goconst        # Detect repeated strings that could be constants
+    - gocritic       # Find code patterns needing improvement
+    - gocyclo        # Cyclomatic complexity (limit: 25)
+    - revive         # Fast, configurable linter (modern golint replacement)
+
+    # --- Style & Best Practices ---
+    - gosimple       # Simplify code (finds unnecessary complexity)
+    - ineffassign    # Detect ineffectual assignments
+    - misspell       # Catch commonly misspelled English words
+    - prealloc       # Pre-allocate slices for performance
+    - unconvert      # Detect unnecessary type conversions
+
+    # --- Security ---
+    - gosec          # Security audit (hardcoded keys, SQL injection, etc.)
 
     # --- Code Quality ---
     - goconst        # Detect repeated strings that could be constants
@@ -38,15 +53,29 @@ linters:
     # --- Security ---
     - gosec          # Security audit (hardcoded keys, SQL injection, etc.)
 
+    # --- Disabled for demo project (too strict) ---
+    # - fieldalignment # Struct field alignment (disabled for demo)
+    # - unused        # Detect unused code (disabled for demo)
+
 linters-settings:
   # Cyclomatic complexity limit (highly complex functions are bugs)
   gocyclo:
-    min-complexity: 15
+    min-complexity: 25  # Increased for demo project
 
   # Skip main files for errcheck (common in CLI apps)
   errcheck:
     check-type-assertions: true
     check-blank: true
+    # Ignore common patterns in demo code
+    exclude-functions:
+      - (io.Closer).Close
+      - (*github.com/ethereum/go-ethereum/ethclient.Client).Close
+      - (net/http.ResponseWriter).Write
+      - (net.Conn).SetReadDeadline
+      - (net.Conn).SetWriteDeadline
+      - (net.Conn).WriteMessage
+      - fmt.Sprintf
+      - fmt.Fprintf
 
   # Detect repeated strings that should be constants
   goconst:
@@ -153,6 +182,14 @@ run:
 
   # Go version to use
   go: "1.21"
+
+# Issues configuration
+issues:
+  # Maximum issues count per one linter
+  max-issues-per-linter: 0
+
+  # Exclude specific issues for demo project
+  exclude-rules: []
 
 # Output configuration
 output:

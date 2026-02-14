@@ -207,18 +207,18 @@ type Block struct {
 	ParentHash       string    `db:"parent_hash"`
 	Timestamp        uint64    `db:"timestamp"`
 	GasLimit         uint64    `db:"gas_limit"`
-	GasUsed          uint64  `db:"gas_used"`
-	BaseFeePerGas    *BigInt `db:"base_fee_per_gas"`
-	TransactionCount int     `db:"transaction_count"`
+	GasUsed          uint64    `db:"gas_used"`
+	BaseFeePerGas    *BigInt   `db:"base_fee_per_gas"`
+	TransactionCount int       `db:"transaction_count"`
 	ProcessedAt      time.Time `db:"processed_at"`
 }
 
 type Transfer struct {
-	BlockNumber  BigInt   `db:"block_number"`
-	TxHash       string   `db:"tx_hash"`
-	LogIndex     uint     `db:"log_index"`
-	From         string   `db:"from_address"`
-	To           string   `db:"to_address"`
-	Amount       Uint256  `db:"amount"`  // 使用 Uint256 保证金融级精度
-	TokenAddress string   `db:"token_address"`
+	BlockNumber  BigInt  `db:"block_number"`
+	TxHash       string  `db:"tx_hash"`
+	LogIndex     uint    `db:"log_index"`
+	From         string  `db:"from_address"`
+	To           string  `db:"to_address"`
+	Amount       Uint256 `db:"amount"` // 使用 Uint256 保证金融级精度
+	TokenAddress string  `db:"token_address"`
 }
