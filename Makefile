@@ -2,7 +2,7 @@
 # Web3 Indexer 工业级控制台 (Commander)
 # ==============================================================================
 
-.PHONY: help build run air test test-quick test-cleanup clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service deploy-service-reset setup-demo
+.PHONY: help build run air test test-quick test-cleanup check lint security clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service deploy-service-reset setup-demo
 
 # 默认目标
 help:
@@ -22,6 +22,9 @@ help:
 	@echo "  make deploy-service-reset - [生产] 编译并更新 systemd 服务运行新版本 (清除数据)"
 	@echo "  make test         - 运行所有测试（隔离环境，自动清理）"
 	@echo "  make test-quick   - 快速运行测试（复用现有数据库，不清理）"
+	@echo "  make check        - 运行所有质量检查（lint + security + test）"
+	@echo "  make lint         - 运行 golangci-lint 代码质量检查"
+	@echo "  make security     - 运行安全漏洞扫描（gosec + govulncheck）"
 
 build:
 	@echo "🔍 Running vet and build checks..."
@@ -141,3 +144,49 @@ test-cleanup:
 	@echo "🧹 Cleaning up isolated test environment..."
 	@docker compose -p web3_indexer_test -f docker-compose.test.yml down -v --remove-orphans || true
 	@echo "✅ Test environment cleaned up"
+
+# ==============================================================================
+# Production-Grade Quality Gates
+# ==============================================================================
+
+# Run all quality checks (lint + security + test)
+check: lint security test
+	@echo "✅ All quality gates passed!"
+
+# Run golangci-lint code quality checks
+lint:
+	@echo "🔍 Running golangci-lint..."
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "⚠️  golangci-lint not found. Installing..."; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+	fi
+	@golangci-lint run --timeout=5m --config=.golangci.yml ./...
+	@echo "✅ Lint checks passed!"
+
+# Run security vulnerability scans
+security:
+	@echo "🔒 Running security scans..."
+	@echo "🔍 Scanning for hardcoded secrets (gosec)..."
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "⚠️  gosec not found. Installing..."; \
+		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
+	fi
+	@gosec -no-fail -fmt text -out gosec-report.txt ./... || true
+	@echo "📋 GoSec report saved to gosec-report.txt"
+	@echo "🔍 Checking for known vulnerabilities (govulncheck)..."
+	@if ! command -v govulncheck >/dev/null 2>&1; then \
+		echo "⚠️  govulncheck not found. Installing..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	fi
+	@govulncheck ./...
+	@echo "✅ Security scans completed!"
+
+# Check code complexity (maintainability)
+complexity:
+	@echo "📊 Checking code complexity..."
+	@if ! command -v gocognit >/dev/null 2>&1; then \
+		echo "⚠️  gocognit not found. Installing..."; \
+		go install github.com/uudashr/gocognit/cmd/gocognit@latest; \
+	fi
+	@gocognit -over 15 ./... 2>&1 | { grep -v "ok" || true; }
+	@echo "✅ Complexity check completed!"
