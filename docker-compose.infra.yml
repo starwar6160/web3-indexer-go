@@ -58,6 +58,9 @@ services:
       - ./grafana-config/provisioning:/etc/grafana/provisioning
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=W3b3_Idx_Secur3_2026_Sec
+      - GF_SERVER_ROOT_URL=https://grafana-demo2.st6160.click
+      - GF_SERVER_DOMAIN=grafana-demo2.st6160.click
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
     networks:
       - indexer-network
     depends_on:
