@@ -39,8 +39,8 @@ help:
 	@echo "  make status       - 检查系统容器状态"
 
 build:
-	@echo "🛠️  Building shared indexer binary..."
-	go build -o bin/$(BINARY_NAME) ./cmd/indexer
+	@echo "🛠️  Building shared indexer binary (v1.0-Yokohama-Lab)..."
+	go build -ldflags "-X main.Version=v1.0-Yokohama-Lab" -o bin/$(BINARY_NAME) ./cmd/indexer
 
 clean:
 	@echo "🧹 Cleaning up artifacts..."
@@ -64,11 +64,3 @@ a1-pre-flight:
 	@echo "🔍 Running Sepolia pre-flight checks..."
 	@./scripts/check-a1-pre-flight.sh
 
-repair:
-	@echo "🛠️  Starting asynchronous hash chain repair..."
-	@if [ -f "venv/bin/python3" ]; then \
-		./venv/bin/python3 scripts/repair_hashes.py; \
-	else \
-		python3 scripts/repair_hashes.py; \
-	fi
-	@echo "✅ Repair process finished."

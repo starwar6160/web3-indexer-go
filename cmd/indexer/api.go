@@ -73,7 +73,7 @@ func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 			Hash:        b.Hash,
 			ParentHash:  b.ParentHash,
 			Timestamp:   b.Timestamp,
-			ProcessedAt: b.ProcessedAt.Format("15:04:05.000"),
+			ProcessedAt: b.ProcessedAt.Format("15:04:05.000"), // ⏳ 精确到毫秒的时刻
 		}
 	}
 
