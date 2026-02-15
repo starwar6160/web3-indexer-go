@@ -6,21 +6,111 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/dashboard.css">
+    <style>
+        /* 🚀 Critical CSS: Environment Switcher (Inlined to bypass CDN caching) */
+        #env-switcher {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            height: 45px !important;
+            background: #0d1117 !important; /* 深黑色底层，适配工业级审美 */
+            background-color: #0d1117 !important;
+            border-bottom: 1px solid #30363d !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            z-index: 9999 !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5) !important;
+            font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+        }
+
+        .banner-content {
+            width: 100% !important;
+            max-width: 1400px !important;
+            padding: 0 20px !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+        }
+
+        .env-group { display: flex !important; align-items: center !important; gap: 12px !important; }
+        .pulse-dot { width: 10px !important; height: 10px !important; border-radius: 50% !important; }
+        .pulse-dot.sepolia { background: #00ff00 !important; box-shadow: 0 0 10px #00ff00 !important; animation: pulse-green 2s infinite !important; }
+        .pulse-dot.anvil { background: #9333ea !important; box-shadow: 0 0 10px #9333ea !important; animation: pulse-purple 2s infinite !important; }
+
+        @keyframes pulse-green { 0% { transform: scale(0.95); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.8; } }
+        @keyframes pulse-purple { 0% { transform: scale(0.95); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.8; } }
+
+        .env-label { color: #8b949e !important; font-size: 11px !important; font-weight: bold !important; text-transform: uppercase !important; }
+        .env-name { color: #ffffff !important; font-size: 13px !important; font-weight: bold !important; }
+
+        .switch-btn {
+            text-decoration: none !important;
+            font-size: 12px !important;
+            padding: 4px 12px !important;
+            border-radius: 6px !important;
+            border: 1px solid #3b82f6 !important;
+            color: #3b82f6 !important;
+            font-weight: bold !important;
+            transition: all 0.2s ease !important;
+        }
+
+        .switch-btn:hover { background: #3b82f6 !important; color: #ffffff !important; }
+        .switch-btn.main { border-color: #f0883e !important; color: #f0883e !important; }
+        .switch-btn.main:hover { background: #f0883e !important; color: #0d1117 !important; }
+        
+        /* 调整 container 间距以适配 fixed header */
+        body { padding-top: 65px !important; }
+    </style>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const title = "{{ .Title }}";
-            if (title.includes("TESTNET")) {
-                document.body.style.borderTop = "5px solid #2563eb"; // 🔵 Blue for Testnet
-            } else if (title.includes("LOCAL")) {
-                document.body.style.borderTop = "5px solid #9333ea"; // 🟣 Purple for Local/Demo
+            const pulse = document.getElementById('env-pulse');
+            const name = document.getElementById('env-name');
+            const actions = document.getElementById('env-actions');
+            const grafanaIframe = document.getElementById('grafana-iframe');
+
+            // 增强的判断逻辑
+            const isSepolia = title.toUpperCase().includes("SEPOLIA") || title.toUpperCase().includes("TESTNET");
+            const isPublic = window.location.hostname.includes("st6160.click");
+
+            if (isSepolia) {
+                document.body.style.borderTop = "5px solid #2563eb";
+                if(pulse) pulse.classList.add('sepolia');
+                if(name) name.innerText = "🚀 SEPOLIA LIVE (demo1)";
+                if(actions) actions.innerHTML = '<a href="https://demo2.st6160.click" class="switch-btn">Switch to Local Lab (demo2) →</a>';
             } else {
-                document.body.style.borderTop = "5px solid #ff9800"; // 🟠 Orange for Default
+                document.body.style.borderTop = "5px solid #9333ea";
+                if(pulse) pulse.classList.add('anvil');
+                if(name) name.innerText = "🧪 LOCAL LAB (demo2)";
+                if(actions) actions.innerHTML = '<a href="https://demo1.st6160.click" class="switch-btn main">← Back to Sepolia Live (demo1)</a>';
+            }
+
+            // 🚀 动态修复 Grafana Iframe 地址，彻底消除 "查找本地设备" 警告
+            if (grafanaIframe) {
+                let grafanaBase = "http://localhost:4000";
+                if (isPublic) {
+                    grafanaBase = "https://grafana-demo2.st6160.click";
+                }
+                const dashboardPath = "/d/web3-indexer-sepolia/web3-indexer-sepolia?orgId=1&refresh=5s&kiosk";
+                grafanaIframe.src = grafanaBase + dashboardPath;
             }
         });
     </script>
 </head>
 
 <body>
+    <div id="env-switcher">
+        <div class="banner-content">
+            <div class="env-group">
+                <span id="env-pulse" class="pulse-dot"></span>
+                <span class="env-label">ENVIRONMENT:</span>
+                <span id="env-name" class="env-name">Loading...</span>
+            </div>
+            <div id="env-actions" class="env-actions"></div>
+        </div>
+    </div>
     <div class="container">
         <header>
             <h1>{{ .Title }}</h1>
@@ -148,7 +238,8 @@
             <div
                 style="border: 1px solid #222; border-radius: 12px; overflow: hidden; background: #000; height: 600px;">
                 <iframe
-                    src="https://grafana-demo2.st6160.click/d/web3-indexer-sepolia/web3-indexer-sepolia?orgId=1&refresh=5s&kiosk"
+                    id="grafana-iframe"
+                    src=""
                     width="100%" height="100%" frameborder="0" style="background: #121212">
                 </iframe>
             </div>
