@@ -70,7 +70,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "indexer_sync_lag_blocks",
+          "expr": "max(indexer_sync_lag_blocks)",
           "refId": "A"
         }
       ],
@@ -140,7 +140,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "rate(indexer_transfers_total[1m])",
+          "expr": "sum(rate(indexer_transfers_total[1m]))",
           "legendFormat": "Real-time TPS",
           "refId": "A"
         }
@@ -203,7 +203,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "indexer_sync_lag_blocks * 12",
+          "expr": "max(indexer_sync_lag_blocks) * 12",
           "refId": "A"
         }
       ],
@@ -272,7 +272,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "indexer_rpc_healthy_nodes",
+          "expr": "max(indexer_rpc_healthy_nodes)",
           "refId": "A"
         }
       ],

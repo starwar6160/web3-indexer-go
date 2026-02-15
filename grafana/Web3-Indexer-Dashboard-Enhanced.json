@@ -68,7 +68,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "indexer_sync_lag_blocks",
+          "expr": "max(indexer_sync_lag_blocks)",
           "refId": "A"
         }
       ],
@@ -138,7 +138,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "rate(indexer_transfers_total[1m])",
+          "expr": "sum(rate(indexer_transfers_total[1m]))",
           "legendFormat": "Real-time TPS",
           "refId": "A"
         }
@@ -424,7 +424,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "rate(indexer_rpc_requests_total[1m])",
+          "expr": "sum(rate(indexer_rpc_requests_total[1m]))",
           "legendFormat": "RPC QPS",
           "refId": "A"
         }
@@ -493,12 +493,12 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "indexer_current_chain_height",
+          "expr": "max(indexer_current_chain_height)",
           "legendFormat": "Chain Head",
           "refId": "A"
         },
         {
-          "expr": "indexer_current_sync_height",
+          "expr": "max(indexer_current_sync_height)",
           "legendFormat": "Synced Height",
           "refId": "B"
         }
