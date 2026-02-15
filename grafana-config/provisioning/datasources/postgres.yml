@@ -5,12 +5,26 @@ datasources:
     type: postgres
     uid: PCC52D03280B7034C
     access: proxy
-    url: postgres:5432
+    url: db:5432
     database: web3_indexer
-    user: indexer_user
+    user: postgres
     secureJsonData:
       password: W3b3_Idx_Secur3_2026_Sec
     jsonData:
       sslmode: disable
       postgresVersion: 1500
     isDefault: true
+
+  - name: Sepolia-DB
+    type: postgres
+    uid: sepolia_db_001
+    access: proxy
+    url: sepolia-db:5432
+    database: web3_sepolia
+    user: postgres
+    secureJsonData:
+      password: W3b3_Idx_Secur3_2026_Sec
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+    isDefault: false

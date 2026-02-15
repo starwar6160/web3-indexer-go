@@ -84,7 +84,20 @@ run:
 	go run ./cmd/indexer --reset
 
 air:
-	export PATH=$(PATH):$(shell go env GOPATH)/bin && air
+	@echo "🔍 Checking for air (live reload tool)..."
+	@if ! command -v air >/dev/null 2>&1; then \
+		echo "📦 air not found, installing via go install..."; \
+		go install github.com/air-verse/air@latest; \
+	fi
+	@echo "🛑 Stopping indexer container to free port 8081..."
+	-@docker compose -f docker-compose.testnet.yml -p web3-testnet stop sepolia-indexer >/dev/null 2>&1 || true
+	@echo "🚀 Starting Air with .env.local..."
+	@if [ -f ".env.local" ]; then \
+		export $$(grep -v '^#' .env.local | xargs) && $(shell go env GOPATH)/bin/air; \
+	else \
+		echo "⚠️  .env.local not found, using system environment"; \
+		$(shell go env GOPATH)/bin/air; \
+	fi
 
 infra-up:
 	docker compose up -d db anvil
@@ -120,7 +133,10 @@ clean:
 	@echo "✅ Local artifacts cleaned"
 
 docs-sync:
-	@echo "📚 Scanning docs/ directory and generating SUMMARY.md..."
+	@echo "📚 Synchronizing documentation..."
+	@mkdir -p docs/01-Architecture docs/03-Web3-RPC docs/04-Observability docs/99-Operations
+	@mv ACHIEVEMENT_SUMMARY.md docs/99-Operations/ 2>/dev/null || true
+	@mv LazyIndexMode.md docs/01-Architecture/ 2>/dev/null || true
 	@go run scripts/generate_docs_index.go
 	@echo "✅ Documentation index updated in docs/SUMMARY.md"
 
@@ -148,11 +164,19 @@ test:
 # Integration Test: API Logic Guards (Python-based)
 test-api:
 	@echo "🧪 Running API Logic Integration Tests..."
-	@if ! command -v pytest >/dev/null 2>&1; then \
-		echo "📦 Installing pytest and requests..."; \
-		pip3 install pytest requests; \
+	@if [ -x "./venv/bin/pip" ]; then \
+		echo "🐍 Using project virtual environment (./venv)..."; \
+		./venv/bin/pip install -q pytest requests; \
+		INDEXER_API_URL="http://localhost:8081/api" ./venv/bin/pytest tests/test_api_logic.py -v -s || (echo "❌ API Logic Check Failed!"; exit 1); \
+	elif [ -x "/home/ubuntu/venv/bin/pip" ]; then \
+		echo "🐍 Using home virtual environment (~/venv)..."; \
+		/home/ubuntu/venv/bin/pip install -q pytest requests; \
+		INDEXER_API_URL="http://localhost:8081/api" /home/ubuntu/venv/bin/pytest tests/test_api_logic.py -v -s || (echo "❌ API Logic Check Failed!"; exit 1); \
+	else \
+		echo "⚠️  No full venv found, falling back to system python..."; \
+		pip3 install -q pytest requests || echo "⚠️ pip3 install failed, trying to run anyway..."; \
+		INDEXER_API_URL="http://localhost:8081/api" pytest tests/test_api_logic.py -v -s || (echo "❌ API Logic Check Failed!"; exit 1); \
 	fi
-	@INDEXER_API_URL="http://localhost:8081/api" pytest tests/test_api_logic.py -v -s || (echo "❌ API Logic Check Failed!"; exit 1)
 	@echo "✅ All API Logic Guards Passed."
 
 # Quick test run - reuses existing database (for rapid iteration during development)
@@ -442,28 +466,13 @@ a1: a1-pre-flight check-env clean-testnet
 	@echo "🎮 Starting Testnet Mode (Isolated Environment)..."
 	@echo "📦 Project: web3-testnet"
 	@echo "🔗 Target: Sepolia Testnet (configurable via .env.testnet)"
-	# 1. Load environment variables from .env.testnet.local if exists
+	# Start isolated testnet infrastructure with proper env file priority
 	@if [ -f ".env.testnet.local" ]; then \
-		echo "🔑 Loading API keys from .env.testnet.local..."; \
-		set -a && \
-		. .env.testnet.local && \
-		set +a && \
-		export $$(grep -v '^#' .env.testnet.local | xargs); \
-	fi
-	# 2. Check if SEPOLIA_RPC_URLS is set
-	@if [ -z "$$SEPOLIA_RPC_URLS" ]; then \
-		echo "❌ Error: SEPOLIA_RPC_URLS environment variable is required"; \
-		echo "💡 Example: export SEPOLIA_RPC_URLS='https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY'"; \
-		echo "💡 Or create .env.testnet.local with your API keys"; \
-		exit 1; \
-	fi
-	# 3. Start isolated testnet infrastructure (pass environment variables)
-	@echo "🚀 Starting testnet infrastructure (db, indexer)..."
-	@echo "📡 Using RPC: $$SEPOLIA_RPC_URLS"
-	@if [ -f ".env.testnet.local" ]; then \
-		docker compose -f docker-compose.testnet.yml --env-file .env.testnet.local -p web3-testnet up -d sepolia-db sepolia-indexer; \
+		echo "🚀 Starting testnet infrastructure with .env.testnet.local..."; \
+		docker compose -f docker-compose.testnet.yml --env-file .env.testnet --env-file .env.testnet.local -p web3-testnet up -d --build sepolia-db sepolia-indexer; \
 	else \
-		docker compose -f docker-compose.testnet.yml -p web3-testnet up -d sepolia-db sepolia-indexer; \
+		echo "🚀 Starting testnet infrastructure with .env.testnet..."; \
+		docker compose -f docker-compose.testnet.yml --env-file .env.testnet -p web3-testnet up -d --build sepolia-db sepolia-indexer; \
 	fi
 	# 4. Wait for database to be ready
 	@echo "⏳ Waiting for testnet database to be ready..."

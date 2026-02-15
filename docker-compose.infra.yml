@@ -63,6 +63,7 @@ services:
       - GF_SERVER_SERVE_FROM_SUB_PATH=false
     networks:
       - indexer-network
+      - web3-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +79,7 @@ services:
       - ./prometheus-config/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - indexer-network
+      - web3-network
     depends_on:
       - postgres
 
@@ -88,3 +90,6 @@ volumes:
 networks:
   indexer-network:
     driver: bridge
+  web3-network:
+    external: true
+    name: web3-testnet_web3-network
