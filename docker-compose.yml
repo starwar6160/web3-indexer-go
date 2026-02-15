@@ -1,53 +1,21 @@
-version: '3.8'
-
 services:
-  # Shared Database Service (Stub for dependency)
-  # 实际使用的是 infra 中的 postgres，这里只是为了让 depends_on 不报错
-  # 或者每个实例使用自己独立的 DB 容器（这里采用独立容器方案以实现完全隔离）
-  db:
-    image: postgres:15-alpine
-    container_name: ${COMPOSE_PROJECT_NAME}-db
-    restart: always
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-web3_indexer}
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
-    volumes:
-      - ${DB_VOLUME:-postgres_data}:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
-    ports:
-      - "127.0.0.1:${DB_PORT:-15432}:5432"
-      - "100.66.253.77:${DB_PORT:-15432}:5432"
-      - "172.17.0.1:${DB_PORT:-15432}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-web3_indexer}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - web3-network
-
-  # Indexer Application
+  # Web3 Indexer Application
   indexer:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME}-app
+    network_mode: host  # 👈 核心修改：使用 Host 模式，彻底打通 Tailscale 和宿主机端口
     environment:
-      - DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@db:5432/${POSTGRES_DB:-web3_indexer}?sslmode=disable
+      # 直接连接宿主机的基础设施数据库 (15432)
+      - DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_indexer?sslmode=disable
       - RPC_URLS=${RPC_URLS}
       - CHAIN_ID=${CHAIN_ID}
       - START_BLOCK=${START_BLOCK}
       - DEMO_MODE=${DEMO_MODE}
       - IS_TESTNET=${IS_TESTNET}
       - ENABLE_ENERGY_SAVING=${ENABLE_ENERGY_SAVING}
-    ports:
-      - "${EXTERNAL_PORT:-8080}:8080"
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - web3-network
+      - PORT=8081  # 宿主机上监听 8081
     restart: unless-stopped
 
   # Anvil Service (Only for Demo Mode)
@@ -55,16 +23,9 @@ services:
     image: ghcr.io/foundry-rs/foundry:latest
     container_name: ${COMPOSE_PROJECT_NAME}-anvil
     profiles: ["demo"]
+    network_mode: host # 也可以改为 host
     entrypoint: ["anvil"]
     command: ["--host", "0.0.0.0", "--port", "8545", "--block-time", "1"]
-    ports:
-      - "8545:8545"
-    networks:
-      - web3-network
+    restart: always
 
-networks:
-  web3-network:
-    driver: bridge
-
-volumes:
-  postgres_data:
+# 移除独立的 db 网络定义，因为我们现在复用宿主机的基础设施
