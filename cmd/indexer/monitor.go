@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 	"time"
 	"web3-indexer-go/internal/engine"
@@ -25,12 +26,23 @@ func startPerformanceMonitor(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			currTx, currBlock := m.GetSnapshot()
+			currTx, currBlock, _, _ := m.GetSnapshot()
 			if lastTx > 0 {
 				diffTx := currTx - lastTx
 				diffBlock := currBlock - lastBlock
-				currentTPS.Store(diffTx / 2) // 2秒间隔
+				// 2秒间隔，计算每秒速率
+				currentTPS.Store(diffTx / 2)
 				currentBPS.Store(diffBlock / 2)
+
+				// 调试日志（每 30 秒打印一次）
+				if diffBlock > 0 || diffTx > 0 {
+					slog.Info("performance_update",
+						"blocks_in_2s", diffBlock,
+						"bps", diffBlock/2,
+						"transfers_in_2s", diffTx,
+						"tps", diffTx/2,
+					)
+				}
 			}
 			lastTx = currTx
 			lastBlock = currBlock

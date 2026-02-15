@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -237,9 +239,47 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 
 	// 计算 E2E Latency（秒）
+	// 添加上限检测和修正机制
 	var e2eLatencySeconds int64
+	var e2eLatencyDisplay string // 友好的显示格式
 	if latestChainBlock != nil && latestIndexedBlockInt64 > 0 {
-		e2eLatencySeconds = syncLag * 12 // Sepolia 平均出块时间 12 秒
+		rawLatency := syncLag * 12 // Sepolia 平均出块时间 12 秒
+
+		// 上限检测：最大显示 1 小时（3600 秒）
+		// 超过 1 小时显示 "Catching up..."
+		if rawLatency > 3600 {
+			e2eLatencySeconds = 3600
+			e2eLatencyDisplay = fmt.Sprintf("Catching up... %d blocks remaining", syncLag)
+		} else if rawLatency <= 0 {
+			// 实时模式：Sync Lag 很小（<= 10），尝试计算真实的索引延迟
+			if syncLag <= 10 {
+				// 查询最新已索引块的处理时间
+				var processedAtStr string
+				err = db.GetContext(r.Context(), &processedAtStr,
+					"SELECT processed_at FROM blocks WHERE number = $1", latestIndexedBlock)
+				if err == nil && processedAtStr != "" {
+					processedAt, _ := time.Parse(time.RFC3339, processedAtStr)
+					actualLatency := time.Since(processedAt).Seconds()
+					e2eLatencySeconds = int64(actualLatency)
+					e2eLatencyDisplay = fmt.Sprintf("%.1fs", actualLatency)
+				} else {
+					e2eLatencySeconds = rawLatency
+					e2eLatencyDisplay = fmt.Sprintf("%ds", rawLatency)
+				}
+			} else {
+				e2eLatencySeconds = rawLatency
+				e2eLatencyDisplay = fmt.Sprintf("%ds", rawLatency)
+			}
+		} else {
+			e2eLatencySeconds = rawLatency
+			minutes := rawLatency / 60
+			seconds := rawLatency % 60
+			if minutes > 0 {
+				e2eLatencyDisplay = fmt.Sprintf("%dm %ds", minutes, seconds)
+			} else {
+				e2eLatencyDisplay = fmt.Sprintf("%ds", seconds)
+			}
+		}
 	}
 
 	adminIP := globalAnalyzer.GetAdminIP()
@@ -249,24 +289,25 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 
 	status := map[string]interface{}{
-		"state":                "active",
-		"latest_block":         latestBlockStr,
-		"latest_indexed":       latestIndexedBlock,
-		"sync_lag":             syncLag,
-		"total_blocks":         totalBlocks,
-		"total_transfers":      totalTransfers,
-		"total_visitors":       totalVisitors,
-		"tps":                  calculateTPS(totalTransfers, totalBlocks), // 实时 TPS
-		"bps":                  currentBPS.Load(),
-		"is_healthy":           rpcPool.GetHealthyNodeCount() > 0,
-		"self_healing_count":   selfHealingEvents.Load(),
-		"admin_ip":             adminIP,
+		"state":                 "active",
+		"latest_block":          latestBlockStr,
+		"latest_indexed":        latestIndexedBlock,
+		"sync_lag":              syncLag,
+		"total_blocks":          totalBlocks,
+		"total_transfers":       totalTransfers,
+		"total_visitors":        totalVisitors,
+		"tps":                   calculateTPS(totalTransfers, totalBlocks), // 实时 TPS
+		"bps":                   currentBPS.Load(),
+		"is_healthy":            rpcPool.GetHealthyNodeCount() > 0,
+		"self_healing_count":    selfHealingEvents.Load(),
+		"admin_ip":              adminIP,
 		"rpc_nodes": map[string]int{
 			"healthy": rpcPool.GetHealthyNodeCount(),
 			"total":   rpcPool.GetTotalNodeCount(),
 		},
-		// 新增：E2E Latency（秒）
-		"e2e_latency_seconds": e2eLatencySeconds,
+		// E2E Latency（带上限检测和友好显示）
+		"e2e_latency_seconds":  e2eLatencySeconds,
+		"e2e_latency_display":  e2eLatencyDisplay,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -276,6 +317,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 }
 
 // calculateTPS 计算 Transactions Per Second（基于历史数据）
+// 保留 2 位小数，避免长浮点数显示
 func calculateTPS(totalTransfers, totalBlocks int64) float64 {
 	if totalBlocks == 0 {
 		return 0.0
@@ -283,5 +325,8 @@ func calculateTPS(totalTransfers, totalBlocks int64) float64 {
 	// 简化计算：平均每个区块的转账数 / 12 秒（Sepolia 出块时间）
 	// 注意：这是历史平均值，不是实时速率
 	avgTransfersPerBlock := float64(totalTransfers) / float64(totalBlocks)
-	return avgTransfersPerBlock / 12.0
+	rawTPS := avgTransfersPerBlock / 12.0
+
+	// 保留 2 位小数（四舍五入）
+	return math.Round(rawTPS*100) / 100
 }
