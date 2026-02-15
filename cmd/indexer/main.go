@@ -54,6 +54,7 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 	}
 
 	// Priority 3: START_BLOCK=latest config (highest config priority)
+	// ✨ 实现"启动即瞬移"：从链头开始，带 Reorg 安全偏移
 	if cfg.StartBlockStr == "latest" {
 		latestChainBlock, err := rpcPool.GetLatestBlockNumber(ctx)
 		if err != nil {
@@ -61,33 +62,37 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 			return big.NewInt(0), nil
 		}
 
-		// 🛡️ 安全下限：确保起始块 >= 10262444
-		minStartBlock := big.NewInt(10262444)
-		if latestChainBlock.Cmp(minStartBlock) < 0 {
-			slog.Warn("🛡️ START_BLOCK_BELOW_MINIMUM",
-				"latest_block", latestChainBlock.String(),
-				"minimum_block", minStartBlock.String(),
-				"action", "using_minimum")
-			return new(big.Int).Add(minStartBlock, big.NewInt(1)), nil
+		// 🛡️ Reorg 安全：从链头倒数第 6 个块开始（约 72 秒缓冲）
+		// 这确保了数据一致性，同时保持低延迟（< 2 分钟）
+		reorgSafetyOffset := int64(6)
+		startBlock := new(big.Int).Sub(latestChainBlock, big.NewInt(reorgSafetyOffset))
+
+		// 确保不为负数
+		if startBlock.Cmp(big.NewInt(0)) < 0 {
+			startBlock = big.NewInt(0)
 		}
 
-		// 记录检查点覆盖（用于可观测性）
+		slog.Info("🚀 STARTING_FROM_LATEST_TELEPORT",
+			"chain_head", latestChainBlock.String(),
+			"start_block", startBlock.String(),
+			"reorg_safety_offset", reorgSafetyOffset,
+			"reason", "START_BLOCK=latest with Reorg protection (chain_head - 6)")
+
+		// 检查是否有旧的检查点需要覆盖
 		var lastSyncedBlock string
 		err = db.GetContext(ctx, &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
 
 		if err == nil && lastSyncedBlock != "" {
 			checkpointNum, _ := new(big.Int).SetString(lastSyncedBlock, 10)
-			lag := new(big.Int).Sub(latestChainBlock, checkpointNum)
-
-			slog.Info("🚀 STARTING_FROM_LATEST",
-				"latest_block", latestChainBlock.String(),
-				"checkpoint_block", checkpointNum.String(),
-				"lag", lag.String(),
-				"reason", "START_BLOCK=latest config overrides checkpoint")
+			if checkpointNum.Cmp(startBlock) < 0 {
+				slog.Info("🧹 OVERWRITING_OLD_CHECKPOINT",
+					"old_checkpoint", checkpointNum.String(),
+					"new_start", startBlock.String(),
+					"reason", "START_BLOCK=latest overrides stale checkpoint")
+			}
 		}
 
-		// 从最新块开始（+1，因为我们要从下一个块开始索引）
-		return new(big.Int).Add(latestChainBlock, big.NewInt(1)), nil
+		return startBlock, nil
 	}
 
 	// Priority 4: START_BLOCK=<number> config
@@ -177,7 +182,6 @@ func main() {
 	// 🎬 演示模式：慢速可见的同步速度（适用于 testnet）
 	if cfg.IsTestnet {
 		slog.Info("🎬 DEMO_MODE_ENABLED", "settings", map[string]interface{}{
-			"min_start_block": 10262444,
 			"concurrency":     1,
 			"qps":             3,
 			"description":     "慢速人眼可见演示",
@@ -188,13 +192,12 @@ func main() {
 		cfg.RPCRateLimit = 3
 		cfg.MaxSyncBatch = 1
 
-		// 设置起始块下限（10262444）
-		// 如果 START_BLOCK 配置值 < 下限，则使用下限
-		// 如果 START_BLOCK=latest 或未设置，动态获取时也会检查下限
-		if cfg.StartBlock < 10262444 {
-			cfg.StartBlock = 10262444
-			cfg.StartBlockStr = "10262444"
-		}
+		// ✨ 实现"启动即瞬移"：START_BLOCK=latest 时从链头开始
+		// 如果用户明确指定了数字起始块（如 START_BLOCK=10262444），则使用指定值
+		// 如果 START_BLOCK=latest 或未设置，由 getStartBlockFromCheckpoint 动态解析
+		// 移除硬编码下限，允许真正的"latest - N" 逻辑
+		slog.Info("✨ STARTUP_TELEPORT_ENABLED",
+			"logic", "START_BLOCK=latest will resolve to chain_head - 6 (Reorg safety)")
 	}
 
 	var db *sqlx.DB
