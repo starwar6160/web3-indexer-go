@@ -40,7 +40,18 @@ type Transfer struct {
 
 func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 	var blocks []Block
-	err := db.SelectContext(r.Context(), &blocks, "SELECT number, hash, parent_hash, timestamp, processed_at FROM blocks ORDER BY number DESC LIMIT 10")
+	// 强制要求字段顺序，并使用 AS 别名消除混淆
+	err := db.SelectContext(r.Context(), &blocks, `
+		SELECT 
+			number, 
+			hash, 
+			parent_hash, 
+			timestamp, 
+			processed_at 
+		FROM blocks 
+		ORDER BY number DESC 
+		LIMIT 10
+	`)
 	if err != nil {
 		slog.Error("failed_to_get_blocks", "err", err)
 		http.Error(w, "Failed to retrieve blocks", 500)
@@ -195,10 +206,29 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		lazyManager.Trigger()
 	}
 
-	latestChainBlock, _ := rpcPool.GetLatestBlockNumber(r.Context())
+	// 1. 尝试实时获取链头
+	latestChainBlock, err := rpcPool.GetLatestBlockNumber(r.Context())
+	
+	// 2. 缓存降级逻辑：如果 RPC 失败（如限流），从数据库读取 Heartbeat 记录
+	latestBlockStr := "0"
+	var latestChainInt64 int64
+	if err == nil && latestChainBlock != nil {
+		latestChainInt64 = latestChainBlock.Int64()
+		latestBlockStr = latestChainBlock.String()
+	} else {
+		// 从 sync_checkpoints 读取心跳缓存
+		var cachedBlock string
+		err = db.GetContext(r.Context(), &cachedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = 1")
+		if err == nil && cachedBlock != "" {
+			latestBlockStr = cachedBlock
+			if val, ok := new(big.Int).SetString(cachedBlock, 10); ok {
+				latestChainInt64 = val.Int64()
+			}
+			slog.Debug("using_cached_chain_head", "height", latestBlockStr)
+		}
+	}
 
 	var latestIndexedBlock string
-	var err error
 	err = db.GetContext(r.Context(), &latestIndexedBlock, "SELECT COALESCE(MAX(number), '0') FROM blocks")
 	if err != nil {
 		slog.Error("failed_to_get_latest_indexed_block", "err", err)
@@ -225,7 +255,6 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		totalVisitors = 0
 	}
 
-	// 解析最新已同步区块号
 	latestIndexedBlockInt64 := int64(0)
 	if latestIndexedBlock != "" && latestIndexedBlock != "0" {
 		if parsed, ok := new(big.Int).SetString(latestIndexedBlock, 10); ok {
@@ -233,57 +262,42 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		}
 	}
 
-	latestBlockStr := "0"
 	var syncLag int64
-	if latestChainBlock != nil {
-		latestBlockStr = latestChainBlock.String()
-		// 修复：正确计算同步滞后 = 链头高度 - 最新已同步区块号
-		syncLag = latestChainBlock.Int64() - latestIndexedBlockInt64
+	if latestChainInt64 > 0 {
+		// 修复：使用缓存或实时的链头高度进行计算
+		syncLag = latestChainInt64 - latestIndexedBlockInt64
 		if syncLag < 0 {
 			syncLag = 0
 		}
 	}
 
 	// 计算 E2E Latency（秒）
-	// 添加上限检测和修正机制
-	var e2eLatencySeconds int64
-	var e2eLatencyDisplay string // 友好的显示格式
-	if latestChainBlock != nil && latestIndexedBlockInt64 > 0 {
-		rawLatency := syncLag * 12 // Sepolia 平均出块时间 12 秒
+	var e2eLatencySeconds float64
+	var e2eLatencyDisplay string 
+	if latestChainInt64 > 0 && latestIndexedBlockInt64 > 0 {
+		// 估算逻辑
+		syncLag := latestChainInt64 - latestIndexedBlockInt64
+		if syncLag < 0 { syncLag = 0 }
+		
+		rawLatency := float64(syncLag) * 12 // Sepolia 平均出块时间
 
-		// 上限检测：最大显示 1 小时（3600 秒）
-		// 超过 1 小时显示 "Catching up..."
-		if rawLatency > 3600 {
-			e2eLatencySeconds = 3600
-			e2eLatencyDisplay = fmt.Sprintf("Catching up... %d blocks remaining", syncLag)
-		} else if rawLatency <= 0 {
-			// 实时模式：Sync Lag 很小（<= 10），尝试计算真实的索引延迟
-			if syncLag <= 10 {
-				// 查询最新已索引块的处理时间
-				var processedAtStr string
-				err = db.GetContext(r.Context(), &processedAtStr,
-					"SELECT processed_at FROM blocks WHERE number = $1", latestIndexedBlock)
-				if err == nil && processedAtStr != "" {
-					processedAt, _ := time.Parse(time.RFC3339, processedAtStr)
-					actualLatency := time.Since(processedAt).Seconds()
-					e2eLatencySeconds = int64(actualLatency)
-					e2eLatencyDisplay = fmt.Sprintf("%.1fs", actualLatency)
-				} else {
-					e2eLatencySeconds = rawLatency
-					e2eLatencyDisplay = fmt.Sprintf("%ds", rawLatency)
-				}
+		if syncLag > 100 {
+			// 大规模追赶模式：显示剩余块数
+			e2eLatencySeconds = rawLatency
+			e2eLatencyDisplay = fmt.Sprintf("Catching up... (%d blocks behind)", syncLag)
+		} else {
+			// 实时/小延迟模式：计算处理延迟
+			var processedAt time.Time
+			err = db.GetContext(r.Context(), &processedAt, 
+				"SELECT processed_at FROM blocks WHERE number = $1", latestIndexedBlock)
+			
+			if err == nil && !processedAt.IsZero() {
+				actualLatency := time.Since(processedAt).Seconds()
+				e2eLatencySeconds = actualLatency
+				e2eLatencyDisplay = fmt.Sprintf("%.2fs", actualLatency)
 			} else {
 				e2eLatencySeconds = rawLatency
-				e2eLatencyDisplay = fmt.Sprintf("%ds", rawLatency)
-			}
-		} else {
-			e2eLatencySeconds = rawLatency
-			minutes := rawLatency / 60
-			seconds := rawLatency % 60
-			if minutes > 0 {
-				e2eLatencyDisplay = fmt.Sprintf("%dm %ds", minutes, seconds)
-			} else {
-				e2eLatencyDisplay = fmt.Sprintf("%ds", seconds)
+				e2eLatencyDisplay = fmt.Sprintf("%.2fs", rawLatency)
 			}
 		}
 	}
