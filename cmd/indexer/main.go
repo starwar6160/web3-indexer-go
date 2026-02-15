@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -24,6 +25,15 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// DBWrapper wraps sqlx.DB to match the DBInterface
+type DBWrapper struct {
+	db *sqlx.DB
+}
+
+func (w *DBWrapper) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return w.db.ExecContext(ctx, query, args...)
+}
 
 var (
 	cfg               *config.Config
@@ -265,6 +275,31 @@ func main() {
 	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize)
 	sm.processor.SetBatchCheckpoint(1)
 
+	// Initialize LazyManager for controlling indexing based on demand
+	// Using 3-minute cooldown and 3-minute active period
+	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
+	
+	// Mode Selection: Energy Saving (Lazy) vs. Continuous Sync
+	if cfg.EnableEnergySaving {
+		// Start initial indexing for 60 seconds on startup, then pause (Lazy Mode)
+		go func() {
+			slog.Info("🔄 INITIALIZING LAZY INDEXER", "initial_duration", "60s")
+			lazyManager.StartInitialIndexing()
+			// After 60 seconds, pause indexing initially
+			time.Sleep(60 * time.Second)
+			lazyManager.DeactivateIndexingForced() 
+			slog.Info("⏸️ INITIAL INDEXING COMPLETE", "state", "paused_until_triggered")
+		}()
+	} else {
+		// Continuous Sync Mode: Always active
+		slog.Info("⚡ CONTINUOUS_SYNC_MODE_ENABLED", "reason", "ENABLE_ENERGY_SAVING=false")
+		lazyManager.StartInitialIndexing()
+		// No forced deactivation, indexing will continue indefinitely
+	}
+	
+	// Start the heartbeat mechanism to keep chain head updated even when paused
+	lazyManager.StartHeartbeat(ctx, &DBWrapper{db})
+
 	wsHub := web.NewHub()
 	wg.Add(1)
 	go func() { defer wg.Done(); wsHub.Run(ctx) }()
@@ -304,7 +339,7 @@ func main() {
 	mux.HandleFunc("/", web.RenderDashboard)
 	mux.HandleFunc("/security", web.RenderSecurity)
 	mux.HandleFunc("/ws", wsHub.HandleWS)
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) { handleGetStatus(w, r, db, rpcPool) })
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) { handleGetStatus(w, r, db, rpcPool, lazyManager) })
 	mux.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) { handleGetBlocks(w, r, db) })
 	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) { handleGetTransfers(w, r, db) })
 
@@ -318,8 +353,14 @@ func main() {
 	// 应用访问者审计中间件 (SRE 增强)
 	auditedHandler := VisitorStatsMiddleware(db, signedHandler)
 
+	// Get port from environment variable, default to 8080
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	slog.Info("🚀 Indexer API Server starting", "port", port)
 	server := &http.Server{
-		Addr:              "0.0.0.0:8080",
+		Addr:              "0.0.0.0:" + port,
 		Handler:           auditedHandler,
 		ReadHeaderTimeout: 30 * time.Second,
 	}

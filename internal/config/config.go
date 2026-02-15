@@ -16,6 +16,7 @@ type Config struct {
 	WSSURL           string
 	ChainID          int64
 	StartBlock       int64
+	StartBlockStr    string      // String representation to handle "latest"
 	LogLevel         string
 	LogFormat        string
 	RPCTimeout       time.Duration // RPC超时配置
@@ -27,13 +28,17 @@ type Config struct {
 	CheckpointBatch  int           // 多少个区块更新一次数据库检查点 (默认 100)
 	RetryQueueSize   int           // 失败任务重试队列的大小 (默认 500)
 	DemoMode         bool          // 是否开启演示模式
+	IsTestnet        bool          // 是否为测试网模式
+	MaxSyncBatch     int           // 最大同步批次大小（用于控制请求频率）
+	EnableEnergySaving bool        // 是否开启节能模式（懒惰模式）
 }
 
 func Load() *Config {
-	_ = godotenv.Load() // Config file is optional
+	_ = godotenv.Load() // Config file is optional, ignore error
 
-	// 明确演示模式
+	// 明确模式
 	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == "true" || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == "true"
+	energySaving := strings.ToLower(os.Getenv("ENABLE_ENERGY_SAVING")) == "true"
 
 	// 解析RPC URL列表
 	rpcUrlsStr := getEnv("RPC_URLS", "https://eth.llamarpc.com")
@@ -50,13 +55,36 @@ func Load() *Config {
 	gasSafetyMargin := int(getEnvAsInt64("GAS_SAFETY_MARGIN", 20))
 	checkpointBatch := int(getEnvAsInt64("CHECKPOINT_BATCH", 100))
 	retryQueueSize := int(getEnvAsInt64("RETRY_QUEUE_SIZE", 500))
+	maxSyncBatch := int(getEnvAsInt64("MAX_SYNC_BATCH", 5)) // Default to 5 for testnet safety
+
+	// Check if we're connecting to a testnet
+	isTestnet := false
+	for _, url := range rpcUrls {
+		if strings.Contains(strings.ToLower(url), "sepolia") || 
+		   strings.Contains(strings.ToLower(url), "holesky") ||
+		   strings.Contains(strings.ToLower(url), "goerli") {
+			isTestnet = true
+			break
+		}
+	}
+
+	// Handle START_BLOCK with special "latest" keyword
+	startBlockStr := getEnv("START_BLOCK", "10000000")
+	var startBlock int64
+	
+	if startBlockStr == "latest" {
+		startBlock = -1 // Special value to indicate "latest" - will be resolved at runtime
+	} else {
+		startBlock = getEnvAsInt64("START_BLOCK", 10000000)
+	}
 
 	cfg := &Config{
 		DatabaseURL:      getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
 		RPCURLs:          rpcUrls,
 		WSSURL:           getEnv("WSS_URL", ""),
 		ChainID:          getEnvAsInt64("CHAIN_ID", 1),
-		StartBlock:       getEnvAsInt64("START_BLOCK", 10000000),
+		StartBlock:       startBlock,
+		StartBlockStr:    startBlockStr,
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 		LogFormat:        getEnv("LOG_FORMAT", "json"),
 		RPCTimeout:       time.Duration(rpcTimeoutSeconds) * time.Second,
@@ -68,6 +96,9 @@ func Load() *Config {
 		CheckpointBatch:  checkpointBatch,
 		RetryQueueSize:   retryQueueSize,
 		DemoMode:         demoMode,
+		IsTestnet:        isTestnet,
+		MaxSyncBatch:     maxSyncBatch,
+		EnableEnergySaving: energySaving,
 	}
 
 	// 🚨 核弹级锁定：演示模式下，默认锁定本地环境，但允许通过环境变量覆盖以支持 Docker
