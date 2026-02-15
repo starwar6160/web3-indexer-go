@@ -14,8 +14,8 @@ import (
 
 // WSEvent 定义发送到前端的消息结构
 type WSEvent struct {
-	Data   interface{} `json:"data"`
-	Type   string      `json:"type"` // "block" or "transfer"
+	Data interface{} `json:"data"`
+	Type string      `json:"type"` // "block" or "transfer"
 }
 
 const (
@@ -137,7 +137,7 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -154,7 +154,7 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 	for {
 		select {

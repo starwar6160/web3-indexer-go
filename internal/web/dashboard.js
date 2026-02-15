@@ -139,16 +139,19 @@ function updateBlocksTable(block) {
     const table = document.getElementById('blocksTable');
     if (table.querySelector('.loading')) table.innerHTML = '';
     
-    // 💡 工业级防御：支持多种命名的字段读取 (snake_case vs camelCase)
+    // 💡 工业级防御：探测所有可能的字段变体
     const number = block.number || block.Number || '0';
-    const hash = block.hash || block.Hash || '0x0000...';
-    const parentHash = block.parent_hash || block.ParentHash || '0x0000...';
+    const hash = block.hash || block.Hash || '0x...';
+    const parentHash = block.parent_hash || block.parentHash || block.ParentHash || '⛓️ Syncing...';
+    
+    // 🚀 实时数据修正
+    const blockTime = block.timestamp ? new Date(parseInt(block.timestamp) * 1000).toLocaleTimeString() : 'Now';
     
     const row = `<tr>
         <td class="stat-value">${number}</td>
         <td class="hash" title="${hash}">${hash.substring(0, 16)}...</td>
         <td class="hash" title="${parentHash}">${parentHash.substring(0, 16)}...</td>
-        <td>${new Date().toLocaleTimeString()}</td>
+        <td>${blockTime}</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
     if (table.rows.length > 10) table.deleteRow(10);
@@ -200,13 +203,17 @@ async function fetchData() {
                 const number = b.number || b.Number || '0';
                 const hash = b.hash || b.Hash || '0x...';
                 const parent = b.parent_hash || b.ParentHash || '0x...';
-                // 格式化时间为可读格式
-                const processedAt = b.processed_at ? new Date(b.processed_at).toLocaleString() : 'Recent';
+                
+                // 🚀 修复：以太坊 timestamp 是秒，JS 需要毫秒
+                const blockTime = b.timestamp ? new Date(parseInt(b.timestamp) * 1000).toLocaleString() : 'Pending';
+                // processed_at 已经是后端格式化好的字符串 (15:04:05.000)
+                const processedAt = b.processed_at || 'Recent';
+                
                 return `<tr>
                     <td class="stat-value">${number}</td>
                     <td class="hash" title="${hash}">${hash.substring(0, 16)}...</td>
                     <td class="hash" title="${parent}">${parent.substring(0, 16)}...</td>
-                    <td>${processedAt}</td>
+                    <td>${blockTime} <br><small style="color:#666">${processedAt}</small></td>
                 </tr>`;
             }).join('');
         }
