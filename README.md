@@ -1,8 +1,16 @@
-Web3 Indexer Dashboard — 项目简介（简洁、便于技术验证）
+---
+title: Web3 Indexer Go
+description: "Industrial-grade blockchain indexer for Ethereum/Sepolia with high-performance Go engine and real-time observability."
+ai_context: "Primary entry point for the Web3 Indexer Go project. Refer to docs/SUMMARY.md for detailed technical documentation."
+---
+
+# Web3 Indexer Go 🚀
+
+> **"Industrial-Grade Blockchain Indexer for Ethereum/Sepolia"**
 
 Live demo: https://demo2.st6160.click/
 
-概述
+## 📖 概述
 - 一个全栈容器化的 Web3 索引器示例工程，侧重可观测性与稳定性。实现了 Fetcher / Sequencer / Processor 解耦的流水线设计、RPC 池的自动故障转移、以及面向高频交易场景的 nonce 对齐与状态持久化。工程以可复现的方式提供端到端环境，便于技术人员验证功能与性能指标。
 
 ### 快速启动（最少依赖）
@@ -15,9 +23,56 @@ Live demo: https://demo2.st6160.click/
   ```
   make demo 的流程：docker compose down -> docker compose up --build -> stress-test（包含 Anvil 私链、Postgres、Indexer、Dashboard 与压测工具）。
 
+### 测试网连接与多环境管理
+本项目支持连接到公共测试网（如 Sepolia）并提供了完整的环境隔离方案：
+
+#### 启动测试网环境
+1. 配置测试网 RPC URLs：
+   ```bash
+   export SEPOLIA_RPC_URLS="https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY,https://sepolia.infura.io/v3/YOUR_KEY"
+   ```
+   
+2. 启动测试网环境：
+   ```bash
+   ./manage-env.sh start-sepolia
+   ```
+   
+3. 同时运行本地和测试网环境：
+   ```bash
+   ./manage-env.sh start-both
+   ```
+
+#### 环境管理脚本
+使用 `manage-env.sh` 脚本来管理不同环境：
+- `start-anvil`: 启动本地 Anvil 环境
+- `start-sepolia`: 启动 Sepolia 测试网环境  
+- `start-both`: 同时启动两个环境
+- `stop-all`: 停止所有环境
+- `logs-anvil` / `logs-sepolia`: 查看对应环境日志
+- `status`: 查看所有容器状态
+
+#### 安全防护措施
+- **智能限流**: 测试网模式下自动启用保守的 QPS 限制（默认 1 QPS）
+- **批量同步控制**: 限制单次同步的区块数量（默认 5 个），防止 API 额度过快消耗
+- **多数据库隔离**: 本地环境使用 `web3_indexer` 库，测试网使用 `web3_sepolia` 库
+- **故障自动恢复**: 集成指数退避算法，遇到限流时自动降级
+- **智能起始点**: 测试网模式默认从 `latest` 区块开始同步，避免同步历史数据造成的时间和资源浪费
+
 ### 配置管理
 本项目采用集中化配置管理，所有演示和生产配置都集中在 config/ 目录中，便于维护和部署：
-- 演示模式：使用安全的默认配置，一键启动
+
+#### 环境变量配置
+- `IS_TESTNET`: 布尔值，启用测试网模式（自动启用保守限流策略）
+- `MAX_SYNC_BATCH`: 整数值，单次同步的最大区块数量（测试网推荐 5，本地环境可设更高）
+- `RPC_RATE_LIMIT`: 整数值，每秒最大 RPC 请求数（测试网推荐 1-2，本地环境可设更高）
+- `SEPOLIA_RPC_URLS`: 字符串，逗号分隔的测试网 RPC URLs（支持多提供商故障转移）
+
+#### 配置文件
+- `.env.testnet`: 测试网专用配置模板
+- `docker-compose.testnet.yml`: 测试网专用 Docker 配置
+- `config/config.go`: 集中式配置加载逻辑
+
+#### 演示模式：使用安全的默认配置，一键启动
 - 生产部署：通过环境变量灵活配置敏感信息
 
 ### 技术特性与设计决策

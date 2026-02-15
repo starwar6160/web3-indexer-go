@@ -1,3 +1,10 @@
+---
+title: Configuration Management
+module: Operations
+ai_context: "Details on environment variables, config files, and deployment options for both demo and production environments."
+last_updated: 2026-02-15
+---
+
 # 配置管理说明
 
 本项目采用集中化配置管理，以简化部署和维护工作。

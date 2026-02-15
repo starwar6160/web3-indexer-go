@@ -1,3 +1,10 @@
+---
+title: Testnet Migration Architecture
+module: Core-Architecture
+ai_context: "High-level architectural overview of the Testnet (Sepolia) migration system, including isolation strategies and verification steps."
+last_updated: 2026-02-15
+---
+
 # Testnet 迁移系统 - 架构总结
 
 > **设计理念**：追求 6 个 9 持久性的资深后端工程师如何管理复杂基础设施

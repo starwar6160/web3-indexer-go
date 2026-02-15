@@ -1,0 +1,205 @@
+================================================================================
+ALL-IN-DOCKER QUICK START GUIDE
+Web3 Indexer - Zero Configuration, One-Click Deployment
+================================================================================
+
+🚀 FASTEST WAY TO START (Recommended)
+================================================================================
+
+1. One-command deployment:
+   $ make deploy
+
+   This will:
+   - Clean up old containers
+   - Build the Go indexer image
+   - Start PostgreSQL database
+   - Start Anvil RPC node
+   - Start the indexer service
+   - Wait for all services to be ready
+
+2. Access the dashboard:
+   http://localhost:8080
+
+3. Check health:
+   http://localhost:8080/healthz
+
+4. View logs:
+   $ make deploy-logs
+
+5. Stop everything:
+   $ make deploy-clean
+
+
+📦 ARCHITECTURE TOPOLOGY
+================================================================================
+
+   ┌─────────────────────────────────────────┐
+   │       Docker Compose Network            │
+   │  ┌──────────┐  ┌──────────┐  ┌────────┐ │
+   │  │    db    │  │  anvil   │  │indexer │ │
+   │  │ :5432    │  │  :8545   │  │ :8080  │ │
+   │  └──────────┘  └──────────┘  └────────┘ │
+   └─────────────────────────────────────────┘
+
+Service Names (internal Docker network):
+  - Database:  db:5432
+  - Anvil RPC: anvil:8545
+  - Indexer:   indexer:8080
+
+External Access:
+  - Indexer API: http://localhost:8080
+
+
+🔧 CONFIGURATION
+================================================================================
+
+All services use Docker service names for zero-configuration communication:
+
+Database URL:  postgres://postgres:postgres@db:5432/web3_indexer
+RPC URL:       http://anvil:8545
+Chain ID:      31337 (Anvil local chain)
+Start Block:   0
+
+Configuration is defined in:
+  - docker-compose.yml (service definitions)
+  - .env.docker (environment variables)
+
+
+📊 USEFUL COMMANDS
+================================================================================
+
+Deployment:
+  make deploy              - Start all services
+  make deploy-clean        - Stop and clean all services
+  make deploy-logs         - View service logs
+  make deploy-status       - Check service status
+
+Docker Compose (direct):
+  docker compose up -d --build      - Start services
+  docker compose down -v             - Stop and clean
+  docker compose ps                  - List services
+  docker compose logs -f             - View logs
+  docker compose restart             - Restart services
+
+Health Checks:
+  curl http://localhost:8080/healthz  - Check indexer health
+  ./scripts/docker-health-check.sh     - Full health check
+
+
+🔍 MONITORING
+================================================================================
+
+View logs in real-time:
+  $ docker compose logs -f
+
+View specific service logs:
+  $ docker compose logs -f indexer
+  $ docker compose logs -f db
+  $ docker compose logs -f anvil
+
+Check service status:
+  $ docker compose ps
+
+Full health check:
+  $ ./scripts/docker-health-check.sh
+
+
+🐛 TROUBLESHOOTING
+================================================================================
+
+Service won't start:
+  1. Check Docker is running: docker ps
+  2. View logs: docker compose logs
+  3. Clean and restart: make deploy-clean && make deploy
+
+Port conflicts:
+  - Indexer uses port 8080
+  - Database uses port 5432 (internal only)
+  - Anvil uses port 8545 (internal only)
+  
+  If ports are in use, stop other services or modify docker-compose.yml
+
+Database connection issues:
+  - Ensure db service is healthy: docker compose ps
+  - Check database logs: docker compose logs db
+  - Verify DATABASE_URL in docker-compose.yml
+
+Indexer not responding:
+  - Check if service is running: docker compose ps
+  - View logs: docker compose logs indexer
+  - Check health: curl http://localhost:8080/healthz
+
+
+📝 FILE STRUCTURE
+================================================================================
+
+docker-compose.yml          - Main service definitions (all-in-Docker)
+docker-compose.dev.yml      - Development overrides
+Dockerfile                  - Multi-stage Go build
+.env.docker                 - Environment variables for Docker
+scripts/docker-deploy.sh    - Deployment script
+scripts/docker-health-check.sh - Health monitoring script
+
+
+🎯 KEY FEATURES
+================================================================================
+
+✅ Zero Configuration
+   - All services communicate via Docker service names
+   - No localhost/IP address configuration needed
+   - Environment variables injected at runtime
+
+✅ Zero Environment Dependencies
+   - Everything runs in containers
+   - No need to install PostgreSQL, Anvil, or Go locally
+   - Only Docker required
+
+✅ One-Click Deployment
+   - Single command: make deploy
+   - Automatic service orchestration
+   - Health checks and readiness probes
+
+✅ Production-Ready
+   - Multi-stage Docker build for optimization
+   - Health checks for all services
+   - Proper dependency management
+   - Restart policies
+
+✅ Go Language Advantages
+   - Static compilation to single binary
+   - Minimal Docker image size
+   - Fast startup time
+   - No runtime dependencies
+
+
+🚀 NEXT STEPS
+================================================================================
+
+1. Deploy the application:
+   $ make deploy
+
+2. Monitor the startup:
+   $ make deploy-logs
+
+3. Verify health:
+   $ make deploy-status
+
+4. Access dashboard:
+   http://localhost:8080
+
+5. For development, use docker-compose.dev.yml:
+   $ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+
+📚 ADDITIONAL RESOURCES
+================================================================================
+
+- Docker Compose Documentation: https://docs.docker.com/compose/
+- Go Docker Best Practices: https://docs.docker.com/language/golang/
+- PostgreSQL Docker: https://hub.docker.com/_/postgres
+- Foundry Anvil: https://book.getfoundry.sh/anvil/
+
+
+================================================================================
+For more information, see the main README.md or CLAUDE.md
+================================================================================

@@ -51,6 +51,7 @@ help:
 	@echo "  make deploy-service-reset - [生产] 编译并部署 systemd 服务 (清除数据)"
 	@echo ""
 	@echo "🔧 Utilities:"
+	@echo "  make docs-sync    - [文档] 自动扫描 docs/ 目录并生成 SUMMARY.md 索引"
 	@echo "  make clean        - 清理本地构建产物"
 	@echo "  make sign-readme  - 使用 EdDSA GPG 密钥签署 README.md"
 	@echo "  make verify-identity - 验证存储库的加密身份"
@@ -111,6 +112,16 @@ verify-identity:
 	gpg --verify README.md.asc README.md
 	@echo "\n验证公钥导出文件..."
 	gpg --import PUBLIC_KEY.asc
+
+clean:
+	@echo "🧹 Cleaning up local build artifacts..."
+	@rm -rf bin/ logs/ gosec-report.txt
+	@echo "✅ Local artifacts cleaned"
+
+docs-sync:
+	@echo "📚 Scanning docs/ directory and generating SUMMARY.md..."
+	@go run scripts/generate_docs_index.go
+	@echo "✅ Documentation index updated in docs/SUMMARY.md"
 
 # Run all tests (unit + integration) - isolated environment with auto cleanup
 test:
