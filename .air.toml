@@ -33,7 +33,7 @@ tmp_dir = "tmp"
 [screen]
   clear_on_rebuild = true
 
-# 💡 核心：注入开发环境变量
+# 💡 核心：动态运行，由 Makefile 注入环境变量
 [run]
-  # 💡 强力注入：在启动命令中直接显式指定环境变量，防止 air 注入失效
-  full_bin = "DATABASE_URL=postgres://postgres:postgres@localhost:15432/web3_indexer?sslmode=disable RPC_URLS=http://localhost:8545 EMULATOR_ENABLED=true EMULATOR_TX_INTERVAL=500ms LOG_LEVEL=debug CONTINUOUS_MODE=true DEMO_MODE=true ./tmp/main --reset"
+  # 移除写死的环境变量，只保留启动命令
+  full_bin = "./tmp/main"
