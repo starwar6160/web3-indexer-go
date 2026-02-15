@@ -130,8 +130,7 @@ async function fetchStatus() {
 }
 
 function updateBlocksTable(block) {
-    if (!block || !block.hash) return;
-    // 💡 只要收到区块，说明链路必通，强制点绿
+    if (!block) return;
     if (!isWSConnected) {
         isWSConnected = true;
         updateSystemState('● LIVE', 'status-live', true);
@@ -139,12 +138,16 @@ function updateBlocksTable(block) {
 
     const table = document.getElementById('blocksTable');
     if (table.querySelector('.loading')) table.innerHTML = '';
-    const hashStr = block.hash || '0x0000...';
-    const parentHashStr = block.parent_hash || '0x0000...';
+    
+    // 💡 工业级防御：支持多种命名的字段读取 (snake_case vs camelCase)
+    const number = block.number || block.Number || '0';
+    const hash = block.hash || block.Hash || '0x0000...';
+    const parentHash = block.parent_hash || block.ParentHash || '0x0000...';
+    
     const row = `<tr>
-        <td class="stat-value">${block.number || '0'}</td>
-        <td class="hash">${hashStr.substring(0, 16)}...</td>
-        <td class="hash">${parentHashStr.substring(0, 16)}...</td>
+        <td class="stat-value">${number}</td>
+        <td class="hash" title="${hash}">${hash.substring(0, 16)}...</td>
+        <td class="hash" title="${parentHash}">${parentHash.substring(0, 16)}...</td>
         <td>${new Date().toLocaleTimeString()}</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
@@ -194,13 +197,16 @@ async function fetchData() {
         if (blocksData && blocksData.blocks) {
             const table = document.getElementById('blocksTable');
             table.innerHTML = blocksData.blocks.map(b => {
-                const hash = b.hash || '0x...';
-                const parent = b.parent_hash || '0x...';
+                const number = b.number || b.Number || '0';
+                const hash = b.hash || b.Hash || '0x...';
+                const parent = b.parent_hash || b.ParentHash || '0x...';
+                // 格式化时间为可读格式
+                const processedAt = b.processed_at ? new Date(b.processed_at).toLocaleString() : 'Recent';
                 return `<tr>
-                    <td class="stat-value">${b.number || '0'}</td>
-                    <td class="hash">${hash.substring(0, 16)}...</td>
-                    <td class="hash">${parent.substring(0, 16)}...</td>
-                    <td>${new Date(b.processed_at).toLocaleString()}</td>
+                    <td class="stat-value">${number}</td>
+                    <td class="hash" title="${hash}">${hash.substring(0, 16)}...</td>
+                    <td class="hash" title="${parent}">${parent.substring(0, 16)}...</td>
+                    <td>${processedAt}</td>
                 </tr>`;
             }).join('');
         }

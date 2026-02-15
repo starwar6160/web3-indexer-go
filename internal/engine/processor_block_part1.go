@@ -303,11 +303,12 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		if latency < 0 { latency = 0 }
 
 		p.EventHook("block", map[string]interface{}{
-			"number":     block.NumberU64(),
-			"hash":       block.Hash().Hex(),
-			"timestamp":  block.Time(),
-			"tx_count":   len(block.Transactions()),
-			"latency_ms": latency,
+			"number":      block.NumberU64(),
+			"hash":        block.Hash().Hex(),
+			"parent_hash": block.ParentHash().Hex(), // 🚀 补齐这个关键字段
+			"timestamp":   block.Time(),
+			"tx_count":    len(block.Transactions()),
+			"latency_ms":  latency,
 		})
 
 		p.EventHook("log", map[string]interface{}{
