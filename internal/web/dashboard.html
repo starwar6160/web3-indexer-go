@@ -2,16 +2,28 @@
 <html>
 
 <head>
-    <title>Web3 Indexer Dashboard</title>
+    <title>{{ .Title }}</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/dashboard.css">
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const title = "{{ .Title }}";
+            if (title.includes("TESTNET")) {
+                document.body.style.borderTop = "5px solid #2563eb"; // 🔵 Blue for Testnet
+            } else if (title.includes("LOCAL")) {
+                document.body.style.borderTop = "5px solid #9333ea"; // 🟣 Purple for Local/Demo
+            } else {
+                document.body.style.borderTop = "5px solid #ff9800"; // 🟠 Orange for Default
+            }
+        });
+    </script>
 </head>
 
 <body>
     <div class="container">
         <header>
-            <h1>🚀 Web3 Indexer Dashboard</h1>
+            <h1>{{ .Title }}</h1>
             <p class="header-subtitle">Real-time blockchain indexing with Go | Industrial Grade Architecture</p>
         </header>
 

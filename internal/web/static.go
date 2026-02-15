@@ -2,7 +2,9 @@ package web
 
 import (
 	"embed"
+	"html/template"
 	"net/http"
+	"os"
 )
 
 //go:embed dashboard.html dashboard.js dashboard.css security.html PUBLIC_KEY.asc README.md.asc
@@ -15,13 +17,31 @@ func HandleStatic() http.Handler {
 
 // RenderDashboard 渲染主页
 func RenderDashboard(w http.ResponseWriter, _ *http.Request) {
-	data, err := StaticAssets.ReadFile("dashboard.html")
+	tmplContent, err := StaticAssets.ReadFile("dashboard.html")
 	if err != nil {
-		http.Error(w, "Dashboard not found", http.StatusNotFound)
+		http.Error(w, "Dashboard template not found", http.StatusNotFound)
 		return
 	}
+
+	tmpl, err := template.New("dashboard").Parse(string(tmplContent))
+	if err != nil {
+		http.Error(w, "Template parsing error", http.StatusInternalServerError)
+		return
+	}
+
+	title := os.Getenv("APP_TITLE")
+	if title == "" {
+		title = "🚀 Web3 Indexer Dashboard"
+	}
+
+	data := struct {
+		Title string
+	}{
+		Title: title,
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(data)
+	tmpl.Execute(w, data)
 }
 
 // RenderSecurity 渲染安全验证页
