@@ -50,6 +50,7 @@ type Metrics struct {
 	CurrentSyncHeight   prometheus.Gauge
 	CurrentChainHeight  prometheus.Gauge // 新增：链头高度
 	SyncLag             prometheus.Gauge // 新增：同步滞后
+	E2ELatency          prometheus.Gauge // 新增：秒级 E2E 延迟
 	RealtimeTPS         prometheus.Gauge // 新增：实时 TPS
 
 	// 实时性能指标 (用于 Dashboard)
@@ -194,6 +195,10 @@ func NewMetrics() *Metrics {
 		SyncLag: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "indexer_sync_lag_blocks",
 			Help: "Number of blocks behind chain head",
+		}),
+		E2ELatency: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_e2e_latency_seconds",
+			Help: "Real-time latency between block timestamp and indexing time",
 		}),
 		RealtimeTPS: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "indexer_realtime_tps",

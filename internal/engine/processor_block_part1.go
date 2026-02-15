@@ -335,6 +335,15 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		// 更新当前同步高度 gauge (增加溢出安全性检查)
 		if blockNum.IsInt64() {
 			p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
+			slog.Debug("metrics_updated", "height", blockNum.Int64())
+
+			// 计算并更新高精度 E2E Latency
+			blockTime := time.Unix(int64(block.Time()), 0)
+			latency := time.Since(blockTime).Seconds()
+			if latency < 0 {
+				latency = 0
+			}
+			p.metrics.UpdateE2ELatency(latency)
 		} else {
 			Logger.Warn("block_number_overflows_int64_for_metrics", slog.String("block", blockNum.String()))
 		}

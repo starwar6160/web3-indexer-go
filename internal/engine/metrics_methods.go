@@ -136,6 +136,11 @@ func (m *Metrics) UpdateSyncLag(lag int64) {
 	m.SyncLag.Set(float64(lag))
 }
 
+// UpdateE2ELatency 更新 E2E 延迟指标 (秒)
+func (m *Metrics) UpdateE2ELatency(seconds float64) {
+	m.E2ELatency.Set(seconds)
+}
+
 // UpdateRealtimeTPS 更新实时 TPS 指标
 func (m *Metrics) UpdateRealtimeTPS(tps float64) {
 	m.RealtimeTPS.Set(tps)

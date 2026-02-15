@@ -8,6 +8,22 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// StartHealthCheck starts a background goroutine to periodically check the health of RPC nodes.
+func (p *RPCClientPool) StartHealthCheck(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				p.CheckHealth()
+			}
+		}
+	}()
+}
+
 // CheckHealth 检查所有节点的健康状态
 func (p *RPCClientPool) CheckHealth() bool {
 	p.mu.Lock()
@@ -44,6 +60,9 @@ func (p *RPCClientPool) CheckHealth() bool {
 			}
 		}
 	}
+
+	// Report to Prometheus
+	GetMetrics().UpdateRPCHealthyNodes("default", healthyNodes)
 
 	return healthyNodes > 0
 }

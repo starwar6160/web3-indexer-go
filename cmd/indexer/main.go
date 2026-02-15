@@ -82,7 +82,7 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 		if startBlock.Cmp(big.NewInt(0)) < 0 {
 			startBlock = big.NewInt(0)
 		}
-		
+
 		// 🚀 额外优化：确保 startBlock 的父哈希可追溯
 		// 如果 startBlock 是链的第一个块，或者其父块在数据库中不存在
 		// 并且其 number > 0，则尝试获取其父块并确保其 hash 可用。
@@ -90,7 +90,7 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 			parentBlockNum := new(big.Int).Sub(startBlock, big.NewInt(1))
 			var parentBlockHash string
 			err = db.GetContext(ctx, &parentBlockHash, "SELECT hash FROM blocks WHERE number = $1", parentBlockNum.String())
-			
+
 			if err != nil { // 如果父块不存在于数据库
 				// 尝试通过 RPC 获取父块并存入，确保链条完整性
 				slog.Info("🔍 Pre-fetching parent block for chain integrity", "block_num", parentBlockNum.String())
@@ -240,9 +240,9 @@ func main() {
 	// 🎬 演示模式：慢速可见的同步速度（适用于 testnet）
 	if cfg.IsTestnet {
 		slog.Info("🎬 DEMO_MODE_ENABLED", "settings", map[string]interface{}{
-			"concurrency":     1,
-			"qps":             3,
-			"description":     "慢速人眼可见演示",
+			"concurrency": 1,
+			"qps":         3,
+			"description": "慢速人眼可见演示",
 		})
 
 		// 演示模式参数：并发 1，QPS 3
@@ -299,6 +299,45 @@ func main() {
 		}
 	}
 
+	// Create context first for health checks
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
+
+	var rpcPool engine.RPCClient
+	if cfg.IsTestnet {
+		// Use enhanced RPC pool for testnet with strict rate limiting
+		rpcPool, err = engine.NewEnhancedRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.IsTestnet, cfg.MaxSyncBatch, cfg.RPCTimeout)
+		if err != nil || rpcPool == nil {
+			slog.Error("enhanced_rpc_fail")
+			os.Exit(1)
+		}
+		slog.Info("Using enhanced RPC pool for testnet", "max_sync_batch", cfg.MaxSyncBatch)
+		// Start health check for enhanced pool
+		if enhancedPool, ok := rpcPool.(*engine.EnhancedRPCClientPool); ok {
+			enhancedPool.StartHealthCheck(ctx)
+		}
+	} else {
+		// Use standard RPC pool for local/anvil
+		rpcPool, err = engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
+		if err != nil || rpcPool == nil {
+			slog.Error("rpc_fail")
+			os.Exit(1)
+		}
+		if standardPool, ok := rpcPool.(*engine.RPCClientPool); ok {
+			standardPool.SetRateLimit(cfg.RPCRateLimit, cfg.RPCRateLimit*2)
+			standardPool.StartHealthCheck(ctx)
+		}
+	}
+	defer func() {
+		if closer, ok := rpcPool.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}()
+
+	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize)
+	sm.processor.SetBatchCheckpoint(1)
+
 	// 🚀 最后 5% 优化：清理当前起点之前的孤立旧块
 	startBlock, err := sm.GetStartBlock(ctx, forceFrom)
 	if err == nil && startBlock != nil {
@@ -311,43 +350,10 @@ func main() {
 		}
 	}
 
-	var rpcPool engine.RPCClient
-	if cfg.IsTestnet {
-		// Use enhanced RPC pool for testnet with strict rate limiting
-		rpcPool, err = engine.NewEnhancedRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.IsTestnet, cfg.MaxSyncBatch, cfg.RPCTimeout)
-		if err != nil || rpcPool == nil {
-			slog.Error("enhanced_rpc_fail")
-			os.Exit(1)
-		}
-		slog.Info("Using enhanced RPC pool for testnet", "max_sync_batch", cfg.MaxSyncBatch)
-	} else {
-		// Use standard RPC pool for local/anvil
-		rpcPool, err = engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
-		if err != nil || rpcPool == nil {
-			slog.Error("rpc_fail")
-			os.Exit(1)
-		}
-		if standardPool, ok := rpcPool.(*engine.RPCClientPool); ok {
-			standardPool.SetRateLimit(cfg.RPCRateLimit, cfg.RPCRateLimit*2)
-		}
-	}
-	defer func() {
-		if closer, ok := rpcPool.(interface{ Close() }); ok {
-			closer.Close()
-		}
-	}()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var wg sync.WaitGroup
-
-	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize)
-	sm.processor.SetBatchCheckpoint(1)
-
 	// Initialize LazyManager for controlling indexing based on demand
 	// Using 3-minute cooldown and 3-minute active period
 	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
-	
+
 	// Mode Selection: Energy Saving (Lazy) vs. Continuous Sync
 	if cfg.EnableEnergySaving {
 		// Start initial indexing for 60 seconds on startup, then pause (Lazy Mode)
@@ -356,7 +362,7 @@ func main() {
 			lazyManager.StartInitialIndexing()
 			// After 60 seconds, pause indexing initially
 			time.Sleep(60 * time.Second)
-			lazyManager.DeactivateIndexingForced() 
+			lazyManager.DeactivateIndexingForced()
 			slog.Info("⏸️ INITIAL INDEXING COMPLETE", "state", "paused_until_triggered")
 		}()
 	} else {
@@ -365,7 +371,7 @@ func main() {
 		lazyManager.StartInitialIndexing()
 		// No forced deactivation, indexing will continue indefinitely
 	}
-	
+
 	// Start the heartbeat mechanism to keep chain head updated even when paused
 	lazyManager.StartHeartbeat(ctx, &DBWrapper{db}, cfg.ChainID)
 
@@ -408,7 +414,9 @@ func main() {
 	mux.HandleFunc("/", web.RenderDashboard)
 	mux.HandleFunc("/security", web.RenderSecurity)
 	mux.HandleFunc("/ws", wsHub.HandleWS)
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) { handleGetStatus(w, r, db, rpcPool, lazyManager, cfg.ChainID) })
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		handleGetStatus(w, r, db, rpcPool, lazyManager, cfg.ChainID)
+	})
 	mux.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) { handleGetBlocks(w, r, db) })
 	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) { handleGetTransfers(w, r, db) })
 
@@ -435,7 +443,8 @@ func main() {
 	}
 	go func() { _ = server.ListenAndServe() }()
 
-	startBlock, err := sm.GetStartBlock(ctx, forceFrom)
+	// 使用赋值 = 而非声明 := 因为 startBlock 已在上方定义
+	startBlock, err = sm.GetStartBlock(ctx, forceFrom)
 	if err != nil || startBlock == nil {
 		startBlock = big.NewInt(0)
 	}
