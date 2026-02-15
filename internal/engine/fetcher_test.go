@@ -25,7 +25,8 @@ func (m *MockRPCClient) BlockByNumber(ctx context.Context, number *big.Int) (*ty
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*types.Block), args.Error(1)
+	block, _ := args.Get(0).(*types.Block)
+	return block, args.Error(1)
 }
 
 func (m *MockRPCClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
@@ -33,7 +34,8 @@ func (m *MockRPCClient) HeaderByNumber(ctx context.Context, number *big.Int) (*t
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*types.Header), args.Error(1)
+	header, _ := args.Get(0).(*types.Header)
+	return header, args.Error(1)
 }
 
 func (m *MockRPCClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
@@ -41,7 +43,8 @@ func (m *MockRPCClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) 
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]types.Log), args.Error(1)
+	logs, _ := args.Get(0).([]types.Log)
+	return logs, args.Error(1)
 }
 
 func (m *MockRPCClient) GetLatestBlockNumber(ctx context.Context) (*big.Int, error) {
@@ -131,7 +134,7 @@ func TestFetcher_fetchBlockWithLogs_Error(t *testing.T) {
 
 func TestFetcher_StartStop(t *testing.T) {
 	mockRPC := new(MockRPCClient)
-	
+
 	// Don't expect any calls since we're just testing start/stop
 	fetcher := NewFetcher(mockRPC, 2)
 

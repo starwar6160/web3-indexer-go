@@ -11,9 +11,9 @@ import (
 
 // HealthStatus 健康状态响应
 type HealthStatus struct {
-	Status    string            `json:"status"`
-	Timestamp time.Time         `json:"timestamp"`
-	Checks    map[string]Check  `json:"checks"`
+	Timestamp time.Time        `json:"timestamp"`
+	Status    string           `json:"status"`
+	Checks    map[string]Check `json:"checks"`
 }
 
 // Check 单个检查项
@@ -65,7 +65,7 @@ func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. 计算延迟 (Sync Lag)
-	var syncLag int64 = 0
+	var syncLag int64
 	if latestChainBlock != nil && h.sequencer != nil {
 		syncLag = latestChainBlock.Int64() - h.sequencer.GetExpectedBlock().Int64()
 	}

@@ -21,3 +21,6 @@ type RPCClient interface {
 
 // 确保RPCClientPool实现了RPCClient接口
 var _ RPCClient = (*RPCClientPool)(nil)
+
+// 确保EnhancedRPCClientPool也实现了RPCClient接口
+var _ RPCClient = (*EnhancedRPCClientPool)(nil)

@@ -14,8 +14,8 @@ import (
 type BlockData struct {
 	Number *big.Int
 	Block  *types.Block
-	Logs   []types.Log
 	Err    error
+	Logs   []types.Log
 }
 
 type Fetcher struct {
@@ -67,7 +67,7 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 	return f
 }
 
-func NewFetcherWithLimiter(pool RPCClient, concurrency int, rps int, burst int) *Fetcher {
+func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher {
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 
 	f := &Fetcher{

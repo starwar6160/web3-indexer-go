@@ -1,4 +1,5 @@
 //go:build integration
+
 package engine
 
 import (
@@ -50,7 +51,6 @@ func TestMain(m *testing.M) {
 		Started: true,
 	})
 	if err != nil {
-		// 清理已启动的 PG
 		_ = pgContainer.Terminate(ctx)
 		log.Fatalf("failed to start anvil container: %s", err)
 	}
@@ -65,8 +65,8 @@ func TestMain(m *testing.M) {
 	testAnvilRPC = fmt.Sprintf("http://%s:%s", anvilHost, anvilPort.Port())
 
 	// 4. 注入环境变量供测试读取 (必须在 setupDatabase 之前，因为 setupDatabase 内部也可能依赖)
-	os.Setenv("DATABASE_URL", testPostgresURL)
-	os.Setenv("RPC_URLS", testAnvilRPC)
+	_ = os.Setenv("DATABASE_URL", testPostgresURL)
+	_ = os.Setenv("RPC_URLS", testAnvilRPC)
 
 	// 5. 初始化数据库 Schema
 	if err := setupDatabase(testPostgresURL); err != nil {

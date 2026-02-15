@@ -46,7 +46,8 @@ func (h *HealthServer) checkRPC(ctx context.Context) Check {
 		}
 	}
 
-	status := "healthy"
+	const healthyStatus = "healthy"
+	status := healthyStatus
 	if healthyCount < totalCount {
 		status = "degraded"
 	}
@@ -59,7 +60,7 @@ func (h *HealthServer) checkRPC(ctx context.Context) Check {
 }
 
 // checkSequencer 检查 Sequencer 状态
-func (h *HealthServer) checkSequencer(ctx context.Context) Check {
+func (h *HealthServer) checkSequencer(_ context.Context) Check {
 	if h.sequencer == nil {
 		return Check{
 			Status:  "unhealthy",
@@ -85,7 +86,7 @@ func (h *HealthServer) checkSequencer(ctx context.Context) Check {
 }
 
 // checkFetcher 检查 Fetcher 状态
-func (h *HealthServer) checkFetcher(ctx context.Context) Check {
+func (h *HealthServer) checkFetcher(_ context.Context) Check {
 	if h.fetcher == nil {
 		return Check{
 			Status:  "unhealthy",

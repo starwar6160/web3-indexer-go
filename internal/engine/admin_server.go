@@ -6,12 +6,12 @@ import (
 	"time"
 )
 
-// AdminServer 管理员API服务器
+// AdminServer 管理员API服务器.
 type AdminServer struct {
 	stateManager *StateManager
 }
 
-// NewAdminServer 创建管理员服务器
+// NewAdminServer 创建管理员服务器.
 func NewAdminServer(stateManager *StateManager) *AdminServer {
 	return &AdminServer{
 		stateManager: stateManager,
@@ -50,7 +50,7 @@ func (a *AdminServer) StartDemo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 
 	Logger.Info("demo_started_via_api",
 		"remote_addr", r.RemoteAddr,
@@ -77,7 +77,7 @@ func (a *AdminServer) Stop(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 
 	Logger.Info("indexer_stopped_via_api",
 		"remote_addr", r.RemoteAddr,
@@ -112,7 +112,7 @@ func (a *AdminServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // GetConfig 获取配置信息
@@ -140,7 +140,7 @@ func (a *AdminServer) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(config)
+	_ = json.NewEncoder(w).Encode(config)
 }
 
 // getRPCQuotaUsage 获取RPC配额使用估算

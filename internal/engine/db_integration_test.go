@@ -1,4 +1,5 @@
 //go:build integration
+
 package engine
 
 import (
@@ -54,7 +55,7 @@ func TestMirror_SchemaAlignment(t *testing.T) {
 
 	// 2. 执行批量插入 (触发 COPY 协议或 UNNEST 逻辑)
 	err := inserter.InsertBlocksBatch(ctx, []models.Block{mockBlock})
-	
+
 	// 断言：如果字段不匹配（如 tx_hash vs hash），这里会立即崩溃
 	assert.NoError(t, err, "数据库 Schema 与 Go 模型必须物理对齐")
 
@@ -74,11 +75,11 @@ func TestGauntlet_EVMPrecision(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. 预插入父区块以满足外键约束
-	db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, transaction_count) VALUES (999, '0x999', '0x0', 123, 30000000, 1000000, 1)")
+	_, _ = db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, transaction_count) VALUES (999, '0x999', '0x0', 123, 30000000, 1000000, 1)")
 
 	// 2. 构造 MaxUint256
 	maxVal := uint256.MustFromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
-	
+
 	transfer := models.Transfer{
 		BlockNumber:  models.NewBigInt(999),
 		TxHash:       "0x" + strings.Repeat("f", 64),
@@ -107,7 +108,7 @@ func TestSanity_NotNullConstraints(t *testing.T) {
 
 	// 故意尝试插入缺少非空字段的数据 (通过原生 SQL 绕过 Go 层面的默认值赋值)
 	_, err := db.Exec("INSERT INTO blocks (number, hash) VALUES (1, '0x1')")
-	
+
 	// 断言：由于我们设置了 NOT NULL，数据库必须报错，而不是存入脏数据
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "null value in column \"parent_hash\"")

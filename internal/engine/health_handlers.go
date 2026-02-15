@@ -34,7 +34,7 @@ func (h *HealthServer) Ready(w http.ResponseWriter, r *http.Request) {
 }
 
 // Live 存活检查（进程是否存活）
-func (h *HealthServer) Live(w http.ResponseWriter, r *http.Request) {
+func (h *HealthServer) Live(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "alive",

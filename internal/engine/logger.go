@@ -105,19 +105,19 @@ func LogDatabaseError(operation string, err error) {
 }
 
 // LogRPCRequestFailed 记录 RPC 请求失败日志
-func LogRPCRequestFailed(method string, node string, err error) {
+func LogRPCRequestFailed(stage, url string, err error) {
 	Logger.Warn("rpc_request_failed",
-		slog.String("method", method),
-		slog.String("node", node),
+		slog.String("stage", stage),
+		slog.String("url", url),
 		slog.String("error", err.Error()),
 	)
 }
 
 // LogTransactionFailed 记录事务处理失败日志
-func LogTransactionFailed(operation string, blockNumber string, err error) {
+func LogTransactionFailed(stage, blockNum string, err error) {
 	Logger.Error("transaction_failed",
-		slog.String("operation", operation),
-		slog.String("block_number", blockNumber),
+		slog.String("stage", stage),
+		slog.String("block_number", blockNum),
 		slog.String("error", err.Error()),
 	)
 }

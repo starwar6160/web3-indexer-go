@@ -33,8 +33,8 @@ func TestMetrics_Recorders(t *testing.T) {
 	m.RecordCheckpointUpdate()
 	m.RecordStartTime()
 	m.UpdateCurrentSyncHeight(123456)
-	
-	txProcessed, blocksProcessed := m.GetSnapshot()
+
+	txProcessed, blocksProcessed, _, _ := m.GetSnapshot()
 	assert.GreaterOrEqual(t, txProcessed, uint64(0))
 	assert.GreaterOrEqual(t, blocksProcessed, uint64(1))
 }

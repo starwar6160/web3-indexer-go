@@ -54,6 +54,6 @@ func (sm *StateManager) Stop() {
 
 	// 偌止索引器
 	if sm.indexer.IsRunning() {
-		sm.indexer.Stop()
+		_ = sm.indexer.Stop()
 	}
 }

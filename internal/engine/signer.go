@@ -5,21 +5,25 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"os"
 )
 
 type SigningMiddleware struct {
 	PrivateKey ed25519.PrivateKey
-	PublicKey  ed25519.PublicKey
 	KeyID      string
+	PublicKey  ed25519.PublicKey
 }
 
-func NewSigningMiddleware(seedHex string, keyID string) (*SigningMiddleware, error) {
+func NewSigningMiddleware(seedHex, keyID string) (*SigningMiddleware, error) {
 	seed, err := hex.DecodeString(seedHex)
 	if err != nil || len(seed) != 32 {
 		// 如果没有提供有效的 seed，我们生成一个临时的（仅用于演示）
-		pub, priv, _ := ed25519.GenerateKey(nil)
+		pub, priv, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate key: %w", err)
+		}
 		return &SigningMiddleware{
 			PrivateKey: priv,
 			PublicKey:  pub,
@@ -78,7 +82,7 @@ func (sm *SigningMiddleware) Handler(next http.Handler) http.Handler {
 			w.Header().Set("X-Payload-Signature", sigBase64)
 			w.Header().Set("X-Signer-ID", sm.KeyID)
 			w.Header().Set("X-Content-Integrity", "Ed25519")
-			
+
 			// 手动触发写入状态码和之前捕获的数据
 			w.WriteHeader(rw.statusCode)
 			w.Write(data)

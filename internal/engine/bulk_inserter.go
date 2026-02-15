@@ -59,9 +59,9 @@ func (b *BulkInserter) InsertBlocksBatch(ctx context.Context, blocks []models.Bl
 					blocks[i].Number.String(),
 					blocks[i].Hash,
 					blocks[i].ParentHash,
-					int64(blocks[i].Timestamp),
-					int64(blocks[i].GasLimit),
-					int64(blocks[i].GasUsed),
+					blocks[i].Timestamp,
+					blocks[i].GasLimit,
+					blocks[i].GasUsed,
 					baseFee,
 					blocks[i].TransactionCount,
 				}, nil
@@ -102,7 +102,7 @@ func (b *BulkInserter) InsertTransfersBatch(ctx context.Context, transfers []mod
 				return []interface{}{
 					transfers[i].BlockNumber.String(),
 					transfers[i].TxHash,
-					int64(transfers[i].LogIndex),
+					transfers[i].LogIndex,
 					transfers[i].From,
 					transfers[i].To,
 					transfers[i].Amount.String(),

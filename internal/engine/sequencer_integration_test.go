@@ -1,4 +1,5 @@
 //go:build integration
+
 package engine
 
 import (
@@ -9,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,7 +103,8 @@ func TestSequencerBuffering(t *testing.T) {
 	defer db.Close()
 
 	// 强制应用最新 Schema 补丁（工业级防御）
-	_, _ = db.Exec("ALTER TABLE blocks ADD COLUMN IF NOT EXISTS parent_hash VARCHAR(66) NOT NULL DEFAULT ''")
+	_, err = db.Exec("ALTER TABLE blocks ADD COLUMN IF NOT EXISTS parent_hash VARCHAR(66) NOT NULL DEFAULT ''")
+	require.NoError(t, err)
 
 	rpcPool, err := NewRPCClientPoolWithTimeout([]string{"https://rpc.sepolia.org"}, 10*time.Second)
 	require.NoError(t, err)

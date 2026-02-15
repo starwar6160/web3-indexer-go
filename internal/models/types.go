@@ -10,8 +10,8 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// Uint256 封装 uint256.Int 以支持 sql.Scanner 和 driver.Valuer
-// 专为 EVM 链金额计算设计，避免精度丢失
+// Uint256 封装 uint256.Int 以支持 sql.Scanner 和 driver.Valuer.
+// 专为 EVM 链金额计算设计，避免精度丢失.
 type Uint256 struct {
 	*uint256.Int
 }
@@ -40,7 +40,7 @@ func NewUint256FromString(s string) (Uint256, bool) {
 	return Uint256{u}, true
 }
 
-// Value 实现 driver.Valuer (写入数据库)
+// Value 实现 driver.Valuer (写入数据库).
 func (u Uint256) Value() (driver.Value, error) {
 	if u.Int == nil {
 		return "0", nil
@@ -48,7 +48,7 @@ func (u Uint256) Value() (driver.Value, error) {
 	return u.Int.Dec(), nil
 }
 
-// Scan 实现 sql.Scanner (读取数据库)
+// Scan 实现 sql.Scanner (读取数据库).
 func (u *Uint256) Scan(value interface{}) error {
 	if value == nil {
 		u.Int = uint256.NewInt(0)
@@ -93,7 +93,7 @@ func (u *Uint256) Scan(value interface{}) error {
 	return nil
 }
 
-// String 返回十进制字符串表示
+// String 返回十进制字符串表示.
 func (u Uint256) String() string {
 	if u.Int == nil {
 		return "0"
@@ -101,10 +101,10 @@ func (u Uint256) String() string {
 	return u.Int.Dec()
 }
 
-// 以下保留 BigInt 兼容性，推荐新项目使用 Uint256
+// 以下保留 BigInt 兼容性，推荐新项目使用 Uint256.
 
-// BigInt 封装 math/big.Int 以支持 sql.Scanner 和 driver.Valuer
-// 它可以自动处理 Go BigInt <-> Postgres NUMERIC 的转换
+// BigInt 封装 math/big.Int 以支持 sql.Scanner 和 driver.Valuer.
+// 它可以自动处理 Go BigInt <-> Postgres NUMERIC 的转换.
 type BigInt struct {
 	*big.Int
 }
@@ -118,7 +118,7 @@ func NewBigIntFromString(s string) (BigInt, bool) {
 	return BigInt{i}, ok
 }
 
-// Value 实现 driver.Valuer (写入数据库)
+// Value 实现 driver.Valuer (写入数据库).
 func (b BigInt) Value() (driver.Value, error) {
 	if b.Int == nil {
 		return "0", nil
@@ -126,7 +126,7 @@ func (b BigInt) Value() (driver.Value, error) {
 	return b.Int.String(), nil
 }
 
-// Scan 实现 sql.Scanner (读取数据库)
+// Scan 实现 sql.Scanner (读取数据库).
 func (b *BigInt) Scan(value interface{}) error {
 	if value == nil {
 		b.Int = new(big.Int)
@@ -202,6 +202,7 @@ func (b *BigInt) Scan(value interface{}) error {
 
 // 对应数据库的结构体
 type Block struct {
+	ProcessedAt      time.Time `db:"processed_at"`
 	Number           BigInt    `db:"number"`
 	Hash             string    `db:"hash"`
 	ParentHash       string    `db:"parent_hash"`
@@ -210,7 +211,6 @@ type Block struct {
 	GasUsed          uint64    `db:"gas_used"`
 	BaseFeePerGas    *BigInt   `db:"base_fee_per_gas"`
 	TransactionCount int       `db:"transaction_count"`
-	ProcessedAt      time.Time `db:"processed_at"`
 }
 
 type Transfer struct {
@@ -219,6 +219,6 @@ type Transfer struct {
 	LogIndex     uint    `db:"log_index"`
 	From         string  `db:"from_address"`
 	To           string  `db:"to_address"`
-	Amount       Uint256 `db:"amount"` // 使用 Uint256 保证金融级精度
 	TokenAddress string  `db:"token_address"`
+	Amount       Uint256 `db:"amount"` // 使用 Uint256 保证金融级精度
 }

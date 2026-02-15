@@ -58,7 +58,7 @@ func (sm *StateManager) executeTransition(ctx context.Context, newState IndexerS
 	case StateIdle:
 		// 闲置模式：不仅是停顿，还要确保资源释放
 		Logger.Info("entering_true_sleep_mode_releasing_resources")
-		sm.indexer.Stop()
+		_ = sm.indexer.Stop()
 	case StateWatching:
 		sm.startWatchingMode(ctx)
 	}

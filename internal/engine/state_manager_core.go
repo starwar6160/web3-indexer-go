@@ -33,9 +33,6 @@ func (s IndexerState) String() string {
 
 // StateManager 智能状态管理器
 type StateManager struct {
-	currentState atomic.Int32 // 当前状态
-	lastAccess   atomic.Int64 // 最后访问时间(Unix纳秒)
-
 	// 组件引用
 	indexer IndexerService
 	rpcPool *RPCClientPool
@@ -49,6 +46,10 @@ type StateManager struct {
 	idleTimeout    time.Duration // 闲置超时时间
 	checkInterval  time.Duration // 检查间隔
 	continuousMode bool          // 持续运行模式（禁用智能休眠）
+
+	// 状态
+	currentState atomic.Int32 // 当前状态
+	lastAccess   atomic.Int64 // 最后访问时间(Unix纳秒)
 
 	mu sync.RWMutex
 }

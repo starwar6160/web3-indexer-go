@@ -56,10 +56,10 @@ func TestStateManager_Basic(t *testing.T) {
 	sm.Start(ctx)
 
 	assert.Equal(t, StateIdle, sm.GetState())
-	
+
 	mockIndexer.On("Start", mock.Anything).Return(nil)
 	sm.StartDemo()
-	
+
 	// Wait for async transition
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, StateActive, sm.GetState())
@@ -74,8 +74,8 @@ func TestAdminServer_Routes(t *testing.T) {
 	mockIndexer := new(MockIndexerService)
 	// RPC Pool needs a valid URL or it might fail initialization if I'm not careful
 	// but here I use NewRPCClientPool which does a dial.
-	mockRPC := &RPCClientPool{} 
-	
+	mockRPC := &RPCClientPool{}
+
 	sm := NewStateManager(mockIndexer, mockRPC)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -90,7 +90,7 @@ func TestAdminServer_Routes(t *testing.T) {
 	mockIndexer.On("GetCurrentBlock").Return("0").Maybe()
 
 	t.Run("GetStatus", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/admin/status", nil)
+		req, _ := http.NewRequest("GET", "/admin/state", nil)
 		rr := httptest.NewRecorder()
 		admin.GetStatus(rr, req)
 

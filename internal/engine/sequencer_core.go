@@ -110,7 +110,7 @@ func (s *Sequencer) Run(ctx context.Context) {
 							slog.String("from", expectedStr),
 							slog.String("to", gapEnd.String()),
 						)
-						go s.fetcher.Schedule(ctx, expectedCopy, gapEnd)
+						go func() { _ = s.fetcher.Schedule(ctx, expectedCopy, gapEnd) }()
 						s.gapFillCount++
 					}
 				} else {
