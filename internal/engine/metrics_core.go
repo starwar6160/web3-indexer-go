@@ -10,12 +10,12 @@ import (
 // Metrics holds all Prometheus metrics for the indexer
 type Metrics struct {
 	// Block processing metrics
-	BlocksProcessed   prometheus.Counter
-	BlocksFailed      prometheus.Counter
-	BlocksSkipped     prometheus.Counter
-	ProcessingTime    prometheus.Histogram
-	ReorgsDetected    prometheus.Counter
-	ReorgsHandled     prometheus.Counter
+	BlocksProcessed prometheus.Counter
+	BlocksFailed    prometheus.Counter
+	BlocksSkipped   prometheus.Counter
+	ProcessingTime  prometheus.Histogram
+	ReorgsDetected  prometheus.Counter
+	ReorgsHandled   prometheus.Counter
 
 	// Transfer metrics
 	TransfersProcessed prometheus.Counter
@@ -33,10 +33,10 @@ type Metrics struct {
 	SequencerBufferFull prometheus.Counter
 
 	// RPC Pool metrics
-	RPCRequestsTotal    *prometheus.CounterVec
-	RPCRequestsFailed   *prometheus.CounterVec
-	RPCLatency          *prometheus.HistogramVec
-	RPCHealthyNodes     *prometheus.GaugeVec
+	RPCRequestsTotal  *prometheus.CounterVec
+	RPCRequestsFailed *prometheus.CounterVec
+	RPCLatency        *prometheus.HistogramVec
+	RPCHealthyNodes   *prometheus.GaugeVec
 
 	// Database metrics
 	DBConnectionsActive prometheus.Gauge
@@ -45,9 +45,12 @@ type Metrics struct {
 	DBErrors            *prometheus.CounterVec
 
 	// System metrics
-	CheckpointUpdates   prometheus.Counter
+	CheckpointUpdates  prometheus.Counter
 	StartTime           prometheus.Gauge
 	CurrentSyncHeight   prometheus.Gauge
+	CurrentChainHeight  prometheus.Gauge // 新增：链头高度
+	SyncLag             prometheus.Gauge // 新增：同步滞后
+	RealtimeTPS         prometheus.Gauge // 新增：实时 TPS
 
 	// 实时性能指标 (用于 Dashboard)
 	totalTxProcessed     uint64
@@ -183,6 +186,18 @@ func NewMetrics() *Metrics {
 		CurrentSyncHeight: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "indexer_current_sync_height",
 			Help: "Current block height being synced",
+		}),
+		CurrentChainHeight: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_current_chain_height",
+			Help: "Current chain head height",
+		}),
+		SyncLag: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_sync_lag_blocks",
+			Help: "Number of blocks behind chain head",
+		}),
+		RealtimeTPS: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_realtime_tps",
+			Help: "Real-time transactions per second",
 		}),
 	}
 }

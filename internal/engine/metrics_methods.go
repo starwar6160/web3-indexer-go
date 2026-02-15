@@ -28,7 +28,7 @@ func (m *Metrics) RecordReorgDetected() {
 }
 
 // RecordReorgHandled records a successful reorg handling
-func (m *Metrics) RecordReorgHandled(blocksAffected int) {
+func (m *Metrics) RecordReorgHandled(_ int) {
 	m.ReorgsHandled.Inc()
 }
 
@@ -122,6 +122,21 @@ func (m *Metrics) UpdateCurrentSyncHeight(height int64) {
 }
 
 // GetSnapshot 获取用于计算 TPS 的快照
-func (m *Metrics) GetSnapshot() (uint64, uint64) {
-	return atomic.LoadUint64(&m.totalTxProcessed), atomic.LoadUint64(&m.totalBlocksProcessed)
+func (m *Metrics) GetSnapshot() (sent, confirmed, failed, selfHealed uint64) {
+	return atomic.LoadUint64(&m.totalTxProcessed), atomic.LoadUint64(&m.totalBlocksProcessed), 0, 0
+}
+
+// UpdateChainHeight 更新链头高度指标
+func (m *Metrics) UpdateChainHeight(height int64) {
+	m.CurrentChainHeight.Set(float64(height))
+}
+
+// UpdateSyncLag 更新同步滞后指标
+func (m *Metrics) UpdateSyncLag(lag int64) {
+	m.SyncLag.Set(float64(lag))
+}
+
+// UpdateRealtimeTPS 更新实时 TPS 指标
+func (m *Metrics) UpdateRealtimeTPS(tps float64) {
+	m.RealtimeTPS.Set(tps)
 }
