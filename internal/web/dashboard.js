@@ -39,9 +39,6 @@ function connectWS() {
             const msg = JSON.parse(event.data);
             if (msg.type === 'block') {
                 updateBlocksTable(msg.data);
-                if (msg.data.latency_ms) {
-                    document.getElementById('latency').textContent = `${msg.data.latency_ms}ms`;
-                }
                 fetchStatus();
             } else if (msg.type === 'transfer') {
                 const tx = msg.data;
@@ -121,6 +118,7 @@ async function fetchStatus() {
         document.getElementById('tps').textContent = data?.tps || '0';
         document.getElementById('bps').textContent = data?.bps || '0';
         document.getElementById('syncLag').textContent = data?.sync_lag || '0';
+        document.getElementById('latency').textContent = data?.e2e_latency_display || '0s';
         document.getElementById('totalVisitors').textContent = data?.total_visitors || '0';
         document.getElementById('adminIP').textContent = data?.admin_ip || 'None';
         document.getElementById('selfHealing').textContent = data?.self_healing_count || '0';
@@ -142,10 +140,11 @@ function updateBlocksTable(block) {
     const table = document.getElementById('blocksTable');
     if (table.querySelector('.loading')) table.innerHTML = '';
     const hashStr = block.hash || '0x0000...';
+    const parentHashStr = block.parent_hash || '0x0000...';
     const row = `<tr>
         <td class="stat-value">${block.number || '0'}</td>
         <td class="hash">${hashStr.substring(0, 16)}...</td>
-        <td class="hash">${(block.parent_hash || hashStr).substring(0, 16)}...</td>
+        <td class="hash">${parentHashStr.substring(0, 16)}...</td>
         <td>${new Date().toLocaleTimeString()}</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
