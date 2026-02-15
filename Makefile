@@ -14,19 +14,25 @@ DOCKER_GATEWAY=$(shell docker network inspect bridge -f '{{range .IPAM.Config}}{
 GOPATH_BIN=$(shell go env GOPATH)/bin
 export PATH := $(GOPATH_BIN):$(PATH)
 
-.PHONY: help init build run air test test-quick test-cleanup check lint security clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service deploy-service-reset setup-demo check-env install-deps
+.PHONY: help init build run air test test-quick test-cleanup check lint security clean demo start stop logs infra-up infra-down status stress-test docker-build sign-readme verify-identity deploy-service deploy-service-reset setup-demo check-env install-deps a1-pre-flight
 
 # Default target
 help:
 	@echo "可用指令:"
 	@echo ""
 	@echo "📦 Development & Testing:"
-	@echo "  make demo         - [推荐] 一键启动 Docker 全栈演示环境 (含压测)"
+	@echo "  make demo         - [推荐] 一次性启动 Docker 全栈演示环境 (含压测)"
+	@echo "  make a1           - [测试网] 启动 Sepolia 测试网索引器 (隔离环境，含预检)"
+	@echo "  make a1-pre-flight - [测试网] 单独运行预检脚本 (5 步原子化验证)"
+	@echo "  make reset-a1     - [测试网] 完全重置测试网环境 (停止+清理+重置数据库)"
+	@echo "  make clean-testnet - [测试网] 清理测试网容器环境"
+	@echo "  make reset-testnet-db - [测试网] 重置测试网数据库表 (保留schema)"
 	@echo "  make setup-demo   - 设置演示环境 (使用集中配置)"
 	@echo "  make start        - 启动服务 (alias for demo)"
 	@echo "  make stop         - 停止并清理 Docker 环境"
 	@echo "  make status       - 检查容器运行状态"
 	@echo "  make logs         - 查看实时索引日志"
+	@echo "  make logs-testnet - 查看测试网索引日志"
 	@echo "  make docker-build - 强制重新构建 Indexer 镜像"
 	@echo "  make air          - [本地开发] 启动热重载 (需本地 Go 环境)"
 	@echo ""
@@ -382,6 +388,82 @@ deploy-service-reset: check-env build
 # ==============================================================================
 # Hybrid Deployment (Container DB + Host Binary)
 # ==============================================================================
+
+# Clean up testnet environment
+clean-testnet:
+	@echo "🧹 Cleaning up testnet environment..."
+	@docker compose -f docker-compose.testnet.yml -p web3-testnet down --remove-orphans || true
+	@echo "✅ Testnet environment cleaned up"
+
+# Reset testnet database tables (preserving schema)
+reset-testnet-db:
+	@echo "🗑️  Resetting testnet database tables (preserving schema)..."
+	@if docker compose -f docker-compose.testnet.yml -p web3-testnet ps | grep -q sepolia-db; then \
+		echo "✅ Testnet database is running, resetting tables..."; \
+		docker compose -f docker-compose.testnet.yml -p web3-testnet exec sepolia-db psql -U postgres -d web3_sepolia -c "TRUNCATE TABLE blocks, transfers, sync_checkpoints RESTART IDENTITY;" 2>/dev/null || \
+		echo "⚠️  Could not truncate tables (database may not be ready yet)"; \
+	else \
+		echo "⚠️  Testnet database container not running, skipping table reset"; \
+	fi
+
+# ==============================================================================
+# Testnet Pre-flight Checks (原子化验证)
+# ==============================================================================
+
+# Run pre-flight checks before starting testnet
+a1-pre-flight:
+	@echo "🔍 Running pre-flight checks..."
+	@./scripts/check-a1-pre-flight.sh
+
+# Testnet mode: isolated environment for Sepolia/Holesky (with pre-flight checks)
+a1: a1-pre-flight check-env clean-testnet
+	@echo "🎮 Starting Testnet Mode (Isolated Environment)..."
+	@echo "📦 Project: web3-testnet"
+	@echo "🔗 Target: Sepolia Testnet (configurable via .env.testnet)"
+	# 1. Load environment variables from .env.testnet.local if exists
+	@if [ -f ".env.testnet.local" ]; then \
+		echo "🔑 Loading API keys from .env.testnet.local..."; \
+		set -a && \
+		. .env.testnet.local && \
+		set +a && \
+		export $$(grep -v '^#' .env.testnet.local | xargs); \
+	fi
+	# 2. Check if SEPOLIA_RPC_URLS is set
+	@if [ -z "$$SEPOLIA_RPC_URLS" ]; then \
+		echo "❌ Error: SEPOLIA_RPC_URLS environment variable is required"; \
+		echo "💡 Example: export SEPOLIA_RPC_URLS='https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY'"; \
+		echo "💡 Or create .env.testnet.local with your API keys"; \
+		exit 1; \
+	fi
+	# 3. Start isolated testnet infrastructure (pass environment variables)
+	@echo "🚀 Starting testnet infrastructure (db, indexer)..."
+	@echo "📡 Using RPC: $$SEPOLIA_RPC_URLS"
+	@if [ -f ".env.testnet.local" ]; then \
+		docker compose -f docker-compose.testnet.yml --env-file .env.testnet.local -p web3-testnet up -d sepolia-db sepolia-indexer; \
+	else \
+		docker compose -f docker-compose.testnet.yml -p web3-testnet up -d sepolia-db sepolia-indexer; \
+	fi
+	# 4. Wait for database to be ready
+	@echo "⏳ Waiting for testnet database to be ready..."
+	@until docker compose -f docker-compose.testnet.yml -p web3-testnet exec -T sepolia-db pg_isready -U postgres > /dev/null 2>&1; do \
+		sleep 1; \
+	done
+	@echo "✅ Testnet infrastructure ready"
+	@echo "🌐 Sepolia indexer is now running on http://localhost:8081"
+	@echo "📊 Monitor at: http://localhost:8081/metrics"
+	@echo "📋 View logs: make logs-testnet"
+
+# View testnet logs
+logs-testnet:
+	docker compose -f docker-compose.testnet.yml -p web3-testnet logs -f sepolia-indexer
+
+# Stop testnet environment
+stop-testnet:
+	docker compose -f docker-compose.testnet.yml -p web3-testnet down
+
+# Full reset: stop, clean, and restart testnet environment
+reset-a1: stop-testnet clean-testnet reset-testnet-db
+	@echo "🔄 Full reset complete. Run 'make a1' to start fresh."
 
 # Hybrid demo mode: containerized infrastructure + host binary
 demo: check-env
