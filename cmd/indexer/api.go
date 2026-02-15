@@ -156,6 +156,7 @@ func VisitorStatsMiddleware(db *sqlx.DB, next http.Handler) http.Handler {
 	})
 }
 
+
 func logVisitor(db *sqlx.DB, ip, ua, path string) {
 	metadata := map[string]interface{}{
 		"path":       path,
@@ -188,7 +189,12 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 	}
 }
 
-func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient) {
+func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager) {
+	// Trigger indexing if cooldown period has passed
+	if lazyManager != nil {
+		lazyManager.Trigger()
+	}
+
 	latestChainBlock, _ := rpcPool.GetLatestBlockNumber(r.Context())
 
 	var latestIndexedBlock string
@@ -309,6 +315,12 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		"e2e_latency_seconds":  e2eLatencySeconds,
 		"e2e_latency_display":  e2eLatencyDisplay,
 	}
+	
+	// Add lazy indexer status if available
+	if lazyManager != nil {
+		lazyStatus := lazyManager.GetStatus()
+		status["lazy_indexer"] = lazyStatus
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(status); err != nil {
@@ -329,4 +341,12 @@ func calculateTPS(totalTransfers, totalBlocks int64) float64 {
 
 	// 保留 2 位小数（四舍五入）
 	return math.Round(rawTPS*100) / 100
+}
+
+// getLazyIndexerStatus returns a human-readable status for the lazy indexer
+func getLazyIndexerStatus(isActive bool) string {
+	if isActive {
+		return "● 正在追赶中 (Catching up...)"
+	}
+	return "● 节能模式 (Lazy Mode)"
 }
