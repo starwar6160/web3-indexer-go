@@ -1,7 +1,9 @@
 version: '3.8'
 
 services:
-  # Shared Database Service
+  # Shared Database Service (Stub for dependency)
+  # 实际使用的是 infra 中的 postgres，这里只是为了让 depends_on 不报错
+  # 或者每个实例使用自己独立的 DB 容器（这里采用独立容器方案以实现完全隔离）
   db:
     image: postgres:15-alpine
     container_name: ${COMPOSE_PROJECT_NAME}-db
@@ -16,6 +18,7 @@ services:
     ports:
       - "127.0.0.1:${DB_PORT:-15432}:5432"
       - "100.66.253.77:${DB_PORT:-15432}:5432"
+      - "172.17.0.1:${DB_PORT:-15432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-web3_indexer}"]
       interval: 5s
@@ -47,7 +50,7 @@ services:
       - web3-network
     restart: unless-stopped
 
-  # Optional Anvil Service (only for demo mode)
+  # Anvil Service (Only for Demo Mode)
   anvil:
     image: ghcr.io/foundry-rs/foundry:latest
     container_name: ${COMPOSE_PROJECT_NAME}-anvil
@@ -65,4 +68,3 @@ networks:
 
 volumes:
   postgres_data:
-  sepolia_postgres_data:

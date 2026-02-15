@@ -1,5 +1,5 @@
 services:
-  # PostgreSQL 数据库
+  # PostgreSQL 数据库 (基础设施核心)
   postgres:
     image: postgres:15-alpine
     container_name: web3-indexer-db
@@ -9,8 +9,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
     ports:
-      - "127.0.0.1:15432:5432"
-      - "100.66.253.77:15432:5432"
+      - "127.0.0.1:15432:5432"      # 宿主机本地
+      - "100.66.253.77:15432:5432"  # Tailscale
+      - "172.17.0.1:15432:5432"     # Docker 网桥 (供 Grafana 访问)
     volumes:
       - indexer_db_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
@@ -21,31 +22,6 @@ services:
       retries: 5
     networks:
       - indexer-network
-
-  # Anvil 本地以太坊节点
-  anvil:
-    image: ghcr.io/foundry-rs/foundry:latest
-    container_name: web3-indexer-anvil
-    restart: always
-    ports:
-      - "127.0.0.1:8545:8545"
-    entrypoint: ["anvil"]
-    command: ["--host", "0.0.0.0", "--block-time", "1", "--chain-id", "31337", "--accounts", "10"]
-    volumes:
-      - indexer_anvil_data:/root/.foundry/anvil
-    environment:
-      - FOUNDRY_DISABLE_NIGHTLY_WARNING=true
-    networks:
-      - indexer-network
-    healthcheck:
-      test: ["CMD", "cast", "block-number", "--rpc-url", "http://localhost:8545"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   # Grafana 可观测性面板
   grafana:
@@ -64,7 +40,8 @@ services:
       - GF_SERVER_SERVE_FROM_SUB_PATH=false
     networks:
       - indexer-network
-      - web3-network
+      - testnet-network
+      - demo-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,17 +57,20 @@ services:
       - ./prometheus-config/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - indexer-network
-      - web3-network
+      - testnet-network
+      - demo-network
     depends_on:
       - postgres
 
 volumes:
   indexer_db_data:
-  indexer_anvil_data:
 
 networks:
   indexer-network:
     driver: bridge
-  web3-network:
+  testnet-network:
     external: true
     name: web3-testnet_web3-network
+  demo-network:
+    external: true
+    name: web3-demo2_web3-network
