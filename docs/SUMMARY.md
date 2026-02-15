@@ -9,6 +9,7 @@ Welcome to the Web3 Indexer documentation. This index is automatically generated
 - [Native Go Emulator Integration](01-Architecture/EMULATOR.md)
 - [Cryptographic Identity](01-Architecture/IDENTITY.md)
 - [Dual Instance Architecture](01-Architecture/dual-instance.md)
+- [Web3 Indexer: Final Green Light Milestone](01-Architecture/final-milestone.md)
 
 ---
 *Last Updated: Sunday, February 15, 2026*

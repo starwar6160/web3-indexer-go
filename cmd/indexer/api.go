@@ -20,11 +20,11 @@ import (
 
 // REST Models
 type Block struct {
-	ProcessedAt time.Time `db:"processed_at" json:"processed_at"`
-	Number      string    `db:"number" json:"number"`
-	Hash        string    `db:"hash" json:"hash"`
-	ParentHash  string    `db:"parent_hash" json:"parent_hash"`
-	Timestamp   string    `db:"timestamp" json:"timestamp"`
+	ProcessedAt string `db:"processed_at" json:"processed_at"`
+	Number      string `db:"number" json:"number"`
+	Hash        string `db:"hash" json:"hash"`
+	ParentHash  string `db:"parent_hash" json:"parent_hash"`
+	Timestamp   string `db:"timestamp" json:"timestamp"`
 }
 
 type Transfer struct {
@@ -39,9 +39,16 @@ type Transfer struct {
 }
 
 func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
-	var blocks []Block
+	type dbBlock struct {
+		ProcessedAt time.Time `db:"processed_at"`
+		Number      string    `db:"number"`
+		Hash        string    `db:"hash"`
+		ParentHash  string    `db:"parent_hash"`
+		Timestamp   string    `db:"timestamp"`
+	}
+	var rawBlocks []dbBlock
 	// 强制要求字段顺序，并使用 AS 别名消除混淆
-	err := db.SelectContext(r.Context(), &blocks, `
+	err := db.SelectContext(r.Context(), &rawBlocks, `
 		SELECT 
 			number, 
 			hash, 
@@ -57,6 +64,19 @@ func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 		http.Error(w, "Failed to retrieve blocks", 500)
 		return
 	}
+
+	// 格式化时间戳为可读字符串 (15:04:05.000)
+	blocks := make([]Block, len(rawBlocks))
+	for i, b := range rawBlocks {
+		blocks[i] = Block{
+			Number:      b.Number,
+			Hash:        b.Hash,
+			ParentHash:  b.ParentHash,
+			Timestamp:   b.Timestamp,
+			ProcessedAt: b.ProcessedAt.Format("15:04:05.000"),
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"blocks": blocks}); err != nil {
 		slog.Error("failed_to_encode_blocks", "err", err)

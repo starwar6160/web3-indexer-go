@@ -299,6 +299,18 @@ func main() {
 		}
 	}
 
+	// 🚀 最后 5% 优化：清理当前起点之前的孤立旧块
+	startBlock, err := sm.GetStartBlock(ctx, forceFrom)
+	if err == nil && startBlock != nil {
+		res, err := db.ExecContext(ctx, "DELETE FROM blocks WHERE number < $1", startBlock.String())
+		if err == nil {
+			rows, _ := res.RowsAffected()
+			if rows > 0 {
+				slog.Info("🧹 Data Purity: Removed orphaned old blocks", "count", rows, "before", startBlock.String())
+			}
+		}
+	}
+
 	var rpcPool engine.RPCClient
 	if cfg.IsTestnet {
 		// Use enhanced RPC pool for testnet with strict rate limiting
