@@ -70,6 +70,14 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		baseFee = &models.BigInt{Int: block.BaseFee()}
 	}
 
+	// 🛡️ 工业级逻辑守卫：哈希自指检测
+	if block.Hash().Hex() == block.ParentHash().Hex() {
+		Logger.Error("❌ FATAL: Block hash equals parent hash!", 
+			slog.String("block", blockNum.String()),
+			slog.String("hash", block.Hash().Hex()))
+		return fmt.Errorf("hash self-reference detected at block %s", blockNum.String())
+	}
+
 	_, err = dbTx.NamedExecContext(ctx, `
 		INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, base_fee_per_gas, transaction_count)
 		VALUES (:number, :hash, :parent_hash, :timestamp, :gas_limit, :gas_used, :base_fee_per_gas, :transaction_count)
