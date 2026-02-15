@@ -10,6 +10,7 @@ services:
       POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
     ports:
       - "127.0.0.1:15432:5432"
+      - "100.66.253.77:15432:5432"
     volumes:
       - indexer_db_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
@@ -52,7 +53,7 @@ services:
     container_name: web3-indexer-grafana
     restart: always
     ports:
-      - "127.0.0.1:4000:3000"
+      - "4000:3000"
     volumes:
       - ./grafana-config/grafana.ini:/etc/grafana/grafana.ini
       - ./grafana-config/provisioning:/etc/grafana/provisioning
@@ -74,7 +75,7 @@ services:
     container_name: web3-indexer-prometheus
     restart: always
     ports:
-      - "127.0.0.1:9091:9090"
+      - "9091:9090"
     volumes:
       - ./prometheus-config/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
