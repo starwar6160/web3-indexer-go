@@ -14,9 +14,9 @@ import (
 type NonceManager struct {
 	client       *ethclient.Client
 	address      common.Address
-	mu           sync.Mutex
 	pendingNonce uint64
 	logger       *slog.Logger
+	mu           sync.Mutex
 }
 
 func NewNonceManager(client *ethclient.Client, addr common.Address, logger *slog.Logger) (*NonceManager, error) {

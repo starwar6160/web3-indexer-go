@@ -17,16 +17,16 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// EmulatorMetrics 记录仿真器运行状态
-type EmulatorMetrics struct {
+// Metrics 记录仿真器运行状态
+type Metrics struct {
 	Sent       atomic.Uint64
 	Confirmed  atomic.Uint64
 	Failed     atomic.Uint64
 	SelfHealed atomic.Uint64
 }
 
-// EmulatorMetricsSnapshot is a snapshot of metrics that can be safely passed to callbacks
-type EmulatorMetricsSnapshot struct {
+// MetricsSnapshot is a snapshot of metrics that can be safely passed to callbacks
+type MetricsSnapshot struct {
 	Sent       uint64
 	Confirmed  uint64
 	Failed     uint64
@@ -41,23 +41,23 @@ type Emulator struct {
 	contract   common.Address
 	chainID    *big.Int
 	nm         *NonceManager
-	Metrics    EmulatorMetrics
+	Metrics    Metrics
 
 	// 回调
 	OnSelfHealing func(reason string)
-	OnMetrics     func(m EmulatorMetricsSnapshot)
+	OnMetrics     func(m MetricsSnapshot)
 
 	// 配置参数
-	blockInterval   time.Duration
-	txInterval      time.Duration
 	txAmount        *big.Int
 	maxGasPrice     int64 // 最大允许的 Gas Price (Gwei)
 	gasSafetyMargin int   // Gas Limit 安全裕度 (%)
+	blockInterval   time.Duration
+	txInterval      time.Duration
 
 	logger *slog.Logger
 }
 
-func NewEmulator(rpcURL string, privKeyHex string, opts ...func(*Emulator)) (*Emulator, error) {
+func NewEmulator(rpcURL, privKeyHex string, opts ...func(*Emulator)) (*Emulator, error) {
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to RPC: %w", err)

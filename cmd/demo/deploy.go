@@ -16,7 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// SimpleERC20 is a minimal ERC20 contract ABI for testing
+// SimpleERC20 is a minimal ERC20 contract ABI for testing.
 const SimpleERC20ABI = `[
 	{"type":"constructor","inputs":[{"name":"initialSupply","type":"uint256"}]},
 	{"type":"function","name":"transfer","inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
@@ -24,7 +24,7 @@ const SimpleERC20ABI = `[
 	{"type":"event","name":"Transfer","inputs":[{"name":"from","type":"address","indexed":true},{"name":"to","type":"address","indexed":true},{"name":"value","type":"uint256","indexed":false}]}
 ]`
 
-// SimpleERC20Bytecode is the compiled bytecode for a minimal ERC20 contract
+// SimpleERC20Bytecode is the compiled bytecode for a minimal ERC20 contract.
 const SimpleERC20Bytecode = `608060405234801561001057600080fd5b506040516103b03803806103b083398101604081905261002f91610062565b600080546001600160a01b031916331790556001805461004f8382610099565b50505061012e565b60006020828403121561007457600080fd5b5051919050565b634e487b7160e01b600052604160045260246000fd5b80820180821115610128577f4e487b7160e01b600052601160045260246000fd5b92915050565b6102738061013d6000396000f3fe608060405234801561001057600080fd5b50600436106100415760003560e01c806306fdde031461004657806370a0823114610064578063a9059cbb14610095575b600080fd5b61004e6100c6565b60405161005b9190610154565b60405180910390f35b61007e6100723660046101a0565b60016020526000908152604090205481565b60405190815260200161005b565b6100b86100a33660046101c2565b6100d4565b604051901515815260200161005b565b60606040518060400160405280600381526020016245524360e01b815250905090565b6000336001600160a01b0316600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020541061014a57600080fd5b600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002054600160008573ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600082825461019e91906101e4565b9091555050600192915050565b6000602082840312156101b257600080fd5b81356001600160a01b03811681146101c957600080fd5b9392505050565b600080604083850312156101e357600080fd5b50508035906020909101359150565b8082018082111561020a577f4e487b7160e01b600052601160045260246000fd5b9291505056fea26469706673582212204d5a1b5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a64736f6c63430008140033`
 
 func main() {
@@ -45,6 +45,7 @@ func main() {
 	// Verify connection
 	chainID, err := client.ChainID(ctx)
 	if err != nil {
+		client.Close()
 		log.Fatalf("Failed to get chain ID: %v", err)
 	}
 	fmt.Printf("✅ Connected to Anvil (Chain ID: %d)\n", chainID)
@@ -113,13 +114,13 @@ func main() {
 	fmt.Printf("   RPC_URLS=http://localhost:8545 CHAIN_ID=31337 START_BLOCK=0 ./bin/indexer\n")
 }
 
-func deployContract(ctx context.Context, client *ethclient.Client, privateKey *ecdsa.PrivateKey, nonce uint64, gasPrice *big.Int, chainID *big.Int) (common.Address, common.Hash, error) {
+func deployContract(ctx context.Context, client *ethclient.Client, privateKey *ecdsa.PrivateKey, nonce uint64, gasPrice, chainID *big.Int) (common.Address, common.Hash, error) {
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
 	if err != nil {
 		return common.Address{}, common.Hash{}, err
 	}
 
-	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Nonce = new(big.Int).SetUint64(nonce)
 	auth.Value = big.NewInt(0)
 	auth.GasLimit = uint64(3000000)
 	auth.GasPrice = gasPrice
@@ -146,13 +147,13 @@ func deployContract(ctx context.Context, client *ethclient.Client, privateKey *e
 	return receipt.ContractAddress, receipt.TxHash, nil
 }
 
-func sendTransfer(ctx context.Context, client *ethclient.Client, privateKey *ecdsa.PrivateKey, nonce uint64, gasPrice *big.Int, chainID *big.Int, contractAddr, toAddr common.Address) (common.Hash, error) {
+func sendTransfer(ctx context.Context, client *ethclient.Client, privateKey *ecdsa.PrivateKey, nonce uint64, gasPrice, chainID *big.Int, contractAddr, toAddr common.Address) (common.Hash, error) {
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
 	if err != nil {
 		return common.Hash{}, err
 	}
 
-	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Nonce = new(big.Int).SetUint64(nonce)
 	auth.Value = big.NewInt(0)
 	auth.GasLimit = uint64(100000)
 	auth.GasPrice = gasPrice

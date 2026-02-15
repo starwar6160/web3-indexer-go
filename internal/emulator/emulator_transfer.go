@@ -36,14 +36,20 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 		gasPrice = maxPrice
 	}
 
-	// 演示级随机金额生成 (1-100)
-	randomVal, _ := rand.Int(rand.Reader, big.NewInt(100))
+	randomVal, err := rand.Int(rand.Reader, big.NewInt(100))
+	if err != nil {
+		e.logger.Error("random_val_generation_failed", slog.Any("err", err))
+		return
+	}
 	transferVal := new(big.Int).Add(randomVal, big.NewInt(1))
 
 	methodID := common.FromHex("0xa9059cbb")
 	// 演示级：随机生成接收地址，增加视觉丰富度
 	randomAddrBytes := make([]byte, 20)
-	rand.Read(randomAddrBytes)
+	if _, err := rand.Read(randomAddrBytes); err != nil {
+		e.logger.Error("random_addr_generation_failed", slog.Any("err", err))
+		return
+	}
 	targetAddr := common.BytesToAddress(randomAddrBytes)
 
 	toAddr := common.LeftPadBytes(targetAddr.Bytes(), 32)
@@ -79,7 +85,7 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 			if e.OnSelfHealing != nil {
 				e.OnSelfHealing("nonce_mismatch")
 			}
-			e.nm.ResyncNonce(ctx)
+			_ = e.nm.ResyncNonce(ctx)
 		} else {
 			// 对于其他网络错误，尝试回滚 nonce 以便下次重试该号
 			e.nm.RollbackNonce(nonce)
@@ -95,15 +101,15 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 		confirmed := e.Metrics.Confirmed.Load()
 		failed := e.Metrics.Failed.Load()
 		selfHealed := e.Metrics.SelfHealed.Load()
-		
+
 		// Create a snapshot of metrics
-		metricsSnapshot := EmulatorMetricsSnapshot{
+		metricsSnapshot := MetricsSnapshot{
 			Sent:       sent,
 			Confirmed:  confirmed,
 			Failed:     failed,
 			SelfHealed: selfHealed,
 		}
-		
+
 		e.OnMetrics(metricsSnapshot)
 	}
 

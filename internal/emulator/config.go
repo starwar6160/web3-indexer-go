@@ -6,17 +6,17 @@ import (
 	"time"
 )
 
-// Config holds emulator configuration
+// Config holds emulator configuration.
 type Config struct {
 	Enabled       bool
-	RpcURL        string
 	PrivateKey    string
+	TxAmount      string
+	RPCURL        string
 	BlockInterval time.Duration
 	TxInterval    time.Duration
-	TxAmount      string
 }
 
-// LoadConfig loads emulator configuration from environment variables
+// LoadConfig loads emulator configuration from environment variables.
 func LoadConfig() Config {
 	enabled := strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == "true"
 
@@ -46,7 +46,7 @@ func LoadConfig() Config {
 
 	return Config{
 		Enabled:       enabled,
-		RpcURL:        os.Getenv("EMULATOR_RPC_URL"),
+		RPCURL:        os.Getenv("EMULATOR_RPC_URL"),
 		PrivateKey:    privKey,
 		BlockInterval: blockInterval,
 		TxInterval:    txInterval,
@@ -54,7 +54,7 @@ func LoadConfig() Config {
 	}
 }
 
-// IsValid checks if the configuration is valid
+// IsValid checks if the configuration is valid.
 func (c Config) IsValid() bool {
-	return c.RpcURL != "" && c.PrivateKey != ""
+	return c.RPCURL != "" && c.PrivateKey != ""
 }

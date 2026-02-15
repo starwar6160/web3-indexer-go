@@ -87,7 +87,7 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 	}
 
 	if err := e.client.SendTransaction(ctx, signedTx); err != nil {
-		e.nm.ResyncNonce(ctx)
+		_ = e.nm.ResyncNonce(ctx)
 		return common.Address{}, err
 	}
 
@@ -97,4 +97,3 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 	}
 	return receipt.ContractAddress, nil
 }
-
