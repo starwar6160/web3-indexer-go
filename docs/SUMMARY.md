@@ -1,33 +1,14 @@
-# Documentation Index (SUMMARY.md)
+# Documentation Index
 
-Welcome to the Web3 Indexer documentation. This project is optimized for both human engineering and AI-assisted maintenance.
+Welcome to the Web3 Indexer documentation. This index is automatically generated.
 
-## 📂 01-Architecture
-| Component | Path | AI Context (RAG) |
-| --- | --- | --- |
-| **Logic Guards** | `docs/01-Architecture/A1_ARCHITECTURE.md` | Core state-machine and sync logic. |
-| **Audit Summary** | `docs/01-Architecture/ARCHITECTURE_AUDIT_FIXES.md` | Fixes for hash-self-reference and lag. |
-| **Lazy Strategy** | `docs/01-Architecture/LazyIndexMode.md` | `ENABLE_ENERGY_SAVING` toggle & sleep logic. |
-| **Visual Mapping** | `docs/01-Architecture/ARCHITECTURE_DIAGRAM.md` | System data flow and component decoupling. |
-
-## 📂 03-Web3-RPC
-| Provider | Path | AI Context (RAG) |
-| --- | --- | --- |
-| **Anvil Setup** | `docs/03-Web3-RPC/ANVIL_QUICK_START.md` | Local Ethereum simulator configuration. |
-| **Sepolia Env** | `docs/03-Web3-RPC/SEPOLIA_DEPLOYMENT.md` | Public testnet endpoint and rate-limit settings. |
-
-## 📂 04-Observability
-| Layer | Path | AI Context (RAG) |
-| --- | --- | --- |
-| **Metrics Def** | `docs/04-Observability/REALTIME_MONITORING.md` | Prometheus metrics and E2E latency formulas. |
-| **Grafana Fix** | `docs/04-Observability/GRAFANA_TUNNEL_FIX.md` | Cloudflare tunnel and dashboard access logic. |
-
-## 📂 99-Operations
-| Manual | Path | AI Context (RAG) |
-| --- | --- | --- |
-| **Quick Start** | `docs/99-Operations/QUICK_START.md` | One-command setup for development. |
-| **Deployment** | `docs/99-Operations/DEPLOYMENT.md` | Production-grade Docker & systemd procedures. |
-| **Achievements** | `docs/99-Operations/ACHIEVEMENT_SUMMARY.md` | Project milestones and 5600U performance data. |
+## 01-Architecture
+- [Testnet Migration Architecture](01-Architecture/A1_ARCHITECTURE.md) - High-level architectural overview of the Testnet (Sepolia) migration system, including isolation strategies and verification steps.
+- [🏗️ Web3 Indexer 架构审计修复总结](01-Architecture/ARCHITECTURE_AUDIT_FIXES.md)
+- [Project Architecture Diagram](01-Architecture/ARCHITECTURE_DIAGRAM.md)
+- [Native Go Emulator Integration](01-Architecture/EMULATOR.md)
+- [Cryptographic Identity](01-Architecture/IDENTITY.md)
+- [Dual Instance Architecture](01-Architecture/dual-instance.md)
 
 ---
-*Last Updated: 2026-02-15 · Environment: Ubuntu 5600U · Status: 6-Nines Ready*
+*Last Updated: Sunday, February 15, 2026*
