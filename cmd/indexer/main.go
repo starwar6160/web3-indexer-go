@@ -19,6 +19,7 @@ import (
 	"web3-indexer-go/internal/config"
 	"web3-indexer-go/internal/emulator"
 	"web3-indexer-go/internal/engine"
+	"web3-indexer-go/internal/models" // Add this import
 	"web3-indexer-go/internal/web"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -80,6 +81,53 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 		// 确保不为负数
 		if startBlock.Cmp(big.NewInt(0)) < 0 {
 			startBlock = big.NewInt(0)
+		}
+		
+		// 🚀 额外优化：确保 startBlock 的父哈希可追溯
+		// 如果 startBlock 是链的第一个块，或者其父块在数据库中不存在
+		// 并且其 number > 0，则尝试获取其父块并确保其 hash 可用。
+		if startBlock.Cmp(big.NewInt(0)) > 0 {
+			parentBlockNum := new(big.Int).Sub(startBlock, big.NewInt(1))
+			var parentBlockHash string
+			err = db.GetContext(ctx, &parentBlockHash, "SELECT hash FROM blocks WHERE number = $1", parentBlockNum.String())
+			
+			if err != nil { // 如果父块不存在于数据库
+				// 尝试通过 RPC 获取父块并存入，确保链条完整性
+				slog.Info("🔍 Pre-fetching parent block for chain integrity", "block_num", parentBlockNum.String())
+				parentBlock, err := rpcPool.BlockByNumber(ctx, parentBlockNum)
+				if err == nil && parentBlock != nil {
+					// 插入父块数据，注意要处理冲突
+					_, err = db.NamedExecContext(ctx, `
+						INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, base_fee_per_gas, transaction_count)
+						VALUES (:number, :hash, :parent_hash, :timestamp, :gas_limit, :gas_used, :base_fee_per_gas, :transaction_count)
+						ON CONFLICT (number) DO UPDATE SET
+							hash = EXCLUDED.hash,
+							parent_hash = EXCLUDED.parent_hash,
+							timestamp = EXCLUDED.timestamp,
+							gas_limit = EXCLUDED.gas_limit,
+							gas_used = EXCLUDED.gas_used,
+							base_fee_per_gas = EXCLUDED.base_fee_per_gas,
+							transaction_count = EXCLUDED.transaction_count,
+							processed_at = NOW()
+					`, models.Block{
+						Number:           models.BigInt{Int: parentBlockNum},
+						Hash:             parentBlock.Hash().Hex(),
+						ParentHash:       parentBlock.ParentHash().Hex(),
+						Timestamp:        parentBlock.Time(),
+						GasLimit:         parentBlock.GasLimit(),
+						GasUsed:          parentBlock.GasUsed(),
+						BaseFeePerGas:    &models.BigInt{Int: parentBlock.BaseFee()},
+						TransactionCount: len(parentBlock.Transactions()),
+					})
+					if err != nil {
+						slog.Warn("failed_to_pre_fetch_parent_block", "err", err, "block_num", parentBlockNum.String())
+					} else {
+						slog.Info("✅ Successfully pre-fetched parent block", "block_num", parentBlockNum.String())
+					}
+				} else {
+					slog.Warn("failed_to_get_parent_block_from_rpc", "err", err, "block_num", parentBlockNum.String())
+				}
+			}
 		}
 
 		slog.Info("🚀 STARTING_FROM_LATEST_TELEPORT",

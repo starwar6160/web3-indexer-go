@@ -200,7 +200,7 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 	}
 }
 
-func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager) {
+func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64) {
 	// Trigger indexing if cooldown period has passed
 	if lazyManager != nil {
 		lazyManager.Trigger()
@@ -216,15 +216,15 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		latestChainInt64 = latestChainBlock.Int64()
 		latestBlockStr = latestChainBlock.String()
 	} else {
-		// 从 sync_checkpoints 读取心跳缓存
+		// 从 sync_checkpoints 读取心跳缓存 (动态根据 chainID)
 		var cachedBlock string
-		err = db.GetContext(r.Context(), &cachedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = 1")
+		err = db.GetContext(r.Context(), &cachedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
 		if err == nil && cachedBlock != "" {
 			latestBlockStr = cachedBlock
 			if val, ok := new(big.Int).SetString(cachedBlock, 10); ok {
 				latestChainInt64 = val.Int64()
 			}
-			slog.Debug("using_cached_chain_head", "height", latestBlockStr)
+			slog.Debug("using_cached_chain_head", "height", latestBlockStr, "chain_id", chainID)
 		}
 	}
 
