@@ -15,7 +15,8 @@ services:
       - DEMO_MODE=${DEMO_MODE}
       - IS_TESTNET=${IS_TESTNET}
       - ENABLE_ENERGY_SAVING=${ENABLE_ENERGY_SAVING}
-      - PORT=8081  # 宿主机上监听 8081
+      - APP_TITLE=${APP_TITLE:-🚀 Web3 Indexer (Default)}
+      - PORT=${PORT:-8080}  # 使用环境变量中的端口
     restart: unless-stopped
 
   # Anvil Service (Only for Demo Mode)

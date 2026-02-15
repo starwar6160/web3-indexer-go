@@ -15,12 +15,11 @@ a1: a1-pre-flight infra-up
 	@echo "✅ Sepolia instance live on http://localhost:8081"
 
 a2: infra-up
-	@echo "🚀 Deploying stable Anvil instance (8080)..."
+	@echo "🚀 Deploying stable Anvil instance (8082)..."
 	@set -a; \
 	[ -f .env.demo2 ] && . ./.env.demo2; \
-	set +a; \
 	docker compose -p web3-demo2 -f docker-compose.yml --profile demo up -d --build --force-recreate
-	@echo "✅ Anvil instance live on http://localhost:8080"
+	@echo "✅ Anvil instance live on http://localhost:8082"
 
 stop-all:
 	@echo "🛑 Stopping all containers..."

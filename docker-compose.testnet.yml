@@ -17,6 +17,7 @@ services:
       - LOG_LEVEL=info
       - DEMO_MODE=false
       - IS_TESTNET=true
+      - APP_TITLE=${APP_TITLE}
       - MAX_SYNC_BATCH=5
       - RPC_RATE_LIMIT=1
       - FETCH_CONCURRENCY=2
