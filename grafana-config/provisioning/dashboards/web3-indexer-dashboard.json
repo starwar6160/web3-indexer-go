@@ -1,17 +1,5 @@
 {
-  "annotations": {
-    "list": [
-      {
-        "builtIn": 1,
-        "datasource": "-- Grafana --",
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
-      }
-    ]
-  },
+  "annotations": { "list": [] },
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
@@ -19,254 +7,106 @@
   "links": [],
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null }
-            ]
-          },
-          "unit": "none"
-        }
-      },
+      "id": 1,
+      "title": "Current Indexed Block",
+      "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "id": 101,
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "targets": [ { "expr": "max(indexer_current_sync_height)", "refId": "A" } ],
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
         "textMode": "auto"
-      },
-      "targets": [
-        { "expr": "indexer_current_sync_height", "refId": "A" }
-      ],
-      "title": "Current Indexed Block",
-      "type": "stat"
+      }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
-            ]
-          },
-          "unit": "short"
-        }
-      },
+      "id": 2,
+      "title": "Sync Lag (Blocks)",
+      "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "id": 1,
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "targets": [ { "expr": "max(indexer_sync_lag_blocks)", "refId": "A" } ],
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
         "textMode": "auto"
-      },
-      "targets": [
-        { "expr": "indexer_sync_lag_blocks", "refId": "A" }
-      ],
-      "title": "Sync Lag (Blocks Behind)",
-      "type": "stat"
+      }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "decimals": 2,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 60 },
-              { "color": "red", "value": 300 }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "id": 3,
+      "title": "E2E Latency (Real-time)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "targets": [ { "expr": "max(indexer_e2e_latency_seconds)", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 1 }
+      },
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "text": { "suffix": "s" },
-        "textMode": "auto"
-      },
-      "targets": [
-        { "expr": "indexer_sync_lag_blocks * 12", "refId": "A" }
-      ],
-      "title": "E2E Latency (Fixed Seconds)",
-      "type": "stat"
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [
-            {
-              "options": {
-                "0": { "color": "red", "index": 1, "text": "Unhealthy" },
-                "1": { "color": "green", "index": 0, "text": "Healthy" }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [ { "color": "red", "value": null } ]
-          }
-        }
-      },
+      "id": 4,
+      "title": "RPC Health",
+      "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "id": 7,
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
+      "targets": [ { "expr": "max(indexer_rpc_healthy_nodes)", "refId": "A" } ],
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
         "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
         "textMode": "value"
-      },
-      "targets": [
-        { "expr": "indexer_rpc_healthy_nodes", "refId": "A" }
-      ],
-      "title": "RPC Health",
-      "type": "stat"
+      }
     },
     {
-      "datasource": { "type": "postgres", "uid": "sepolia_db_001" },
-      "description": "Real-time verification of the blockchain link structure.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "custom": { "align": "auto", "displayMode": "auto" },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [ { "color": "green", "value": null } ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "hash" },
-            "properties": [ { "id": "custom.width", "value": 280 } ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "parent_hash" },
-            "properties": [ { "id": "custom.width", "value": 280 } ]
-          }
-        ]
-      },
+      "id": 5,
+      "title": "Latest Blocks (Direct SQL Feed)",
+      "type": "table",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 4 },
-      "id": 11,
-      "options": { "showHeader": true, "sortBy": [] },
+      "datasource": { "type": "postgres", "uid": "sepolia_db_001" },
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT number, hash, parent_hash, timestamp, processed_at FROM blocks ORDER BY number DESC LIMIT 10;",
+          "rawSql": "SELECT number AS \"Block #\", substring(hash, 1, 16) || '...' AS \"Hash\", processed_at AS \"Time\", ROUND(EXTRACT(EPOCH FROM (processed_at - to_timestamp(timestamp)))::numeric, 1) AS \"Lag\" FROM blocks ORDER BY number DESC LIMIT 10;",
           "refId": "A"
         }
       ],
-      "title": "Latest Blocks (Chain Link Verification)",
-      "type": "table"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": true
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
-      "id": 2,
-      "options": {
-        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "single" }
-      },
-      "targets": [
-        {
-          "expr": "rate(indexer_transfers_total[1m])",
-          "legendFormat": "Real-time TPS",
-          "refId": "A"
-        }
-      ],
-      "title": "Real-time TPS (Transactions/Second)",
-      "type": "timeseries"
+          "custom": { "align": "center", "displayMode": "auto" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Time" },
+            "properties": [ { "id": "unit", "value": "dateTimeAsIso" } ]
+          }
+        ]
+      }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "Latency (ms)",
-            "axisPlacement": "auto",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "auto",
-            "spanNulls": true
-          },
-          "unit": "ms"
-        }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
       "id": 6,
-      "options": {
-        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
-        "tooltip": { "mode": "multi" }
-      },
+      "title": "Processing TPS",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds_001" },
       "targets": [
-        {
-          "expr": "histogram_quantile(0.95, indexer_db_query_duration_seconds_bucket)",
-          "legendFormat": "p95 DB Latency",
-          "refId": "A"
-        }
-      ],
-      "title": "Database Performance (SQL Latency)",
-      "type": "timeseries"
+        { "expr": "sum(rate(indexer_transfers_processed_total[1m]))", "legendFormat": "TPS", "refId": "A" }
+      ]
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 27,
+  "schemaVersion": 39,
   "style": "dark",
-  "tags": ["blockchain", "indexer", "sepolia"],
-  "time": { "from": "now-1h", "to": "now" },
-  "title": "Web3 Indexer - Sepolia Dashboard",
+  "timezone": "browser",
+  "title": "Web3 Indexer - Industrial Dashboard",
   "uid": "web3-indexer-sepolia",
-  "version": 1
+  "version": 25
 }
