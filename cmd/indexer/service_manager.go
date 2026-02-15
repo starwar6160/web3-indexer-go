@@ -13,14 +13,14 @@ import (
 // ServiceManager 负责协调所有底层组件
 type ServiceManager struct {
 	db         *sqlx.DB
-	rpcPool    *engine.RPCClientPool
+	rpcPool    engine.RPCClient
 	fetcher    *engine.Fetcher
 	processor  *engine.Processor
 	reconciler *engine.Reconciler
 	chainID    int64
 }
 
-func NewServiceManager(db *sqlx.DB, rpcPool *engine.RPCClientPool, chainID int64, retryQueueSize int) *ServiceManager {
+func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int) *ServiceManager {
 	fetcher := engine.NewFetcher(rpcPool, 10) // 默认并发 10
 	processor := engine.NewProcessor(db, rpcPool, retryQueueSize, chainID)
 	reconciler := engine.NewReconciler(db, rpcPool, engine.GetMetrics())
@@ -36,8 +36,8 @@ func NewServiceManager(db *sqlx.DB, rpcPool *engine.RPCClientPool, chainID int64
 }
 
 // GetStartBlock 封装自愈逻辑
-func (sm *ServiceManager) GetStartBlock(ctx context.Context) (*big.Int, error) {
-	return getStartBlockFromCheckpoint(ctx, sm.db, sm.rpcPool, sm.chainID)
+func (sm *ServiceManager) GetStartBlock(ctx context.Context, forceFrom string) (*big.Int, error) {
+	return getStartBlockFromCheckpoint(ctx, sm.db, sm.rpcPool, sm.chainID, forceFrom)
 }
 
 // StartTailFollow 启动持续追踪

@@ -28,9 +28,75 @@ import (
 var (
 	cfg               *config.Config
 	selfHealingEvents atomic.Uint64
+	forceFrom         string // 强制起始块
 )
 
-func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool *engine.RPCClientPool, chainID int64) (*big.Int, error) {
+func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, forceFrom string) (*big.Int, error) {
+	// Priority 2: --start-from flag (highest runtime priority)
+	if forceFrom != "" {
+		if forceFrom == "latest" {
+			latestChainBlock, err := rpcPool.GetLatestBlockNumber(ctx)
+			if err != nil {
+				slog.Error("failed_to_get_latest_block", "err", err)
+				return big.NewInt(0), nil
+			}
+			slog.Info("🔄 FORCED_START", "from", "latest", "reason", "--start-from flag")
+			return new(big.Int).Add(latestChainBlock, big.NewInt(1)), nil
+		}
+
+		// 尝试解析为区块号
+		if blockNum, ok := new(big.Int).SetString(forceFrom, 10); ok {
+			slog.Info("🔄 FORCED_START", "block", blockNum.String(), "reason", "--start-from flag")
+			return blockNum, nil
+		}
+
+		slog.Warn("invalid_start_from_value", "value", forceFrom, "fallback", "checkpoint")
+	}
+
+	// Priority 3: START_BLOCK=latest config (highest config priority)
+	if cfg.StartBlockStr == "latest" {
+		latestChainBlock, err := rpcPool.GetLatestBlockNumber(ctx)
+		if err != nil {
+			slog.Error("failed_to_get_latest_block", "err", err)
+			return big.NewInt(0), nil
+		}
+
+		// 🛡️ 安全下限：确保起始块 >= 10262444
+		minStartBlock := big.NewInt(10262444)
+		if latestChainBlock.Cmp(minStartBlock) < 0 {
+			slog.Warn("🛡️ START_BLOCK_BELOW_MINIMUM",
+				"latest_block", latestChainBlock.String(),
+				"minimum_block", minStartBlock.String(),
+				"action", "using_minimum")
+			return new(big.Int).Add(minStartBlock, big.NewInt(1)), nil
+		}
+
+		// 记录检查点覆盖（用于可观测性）
+		var lastSyncedBlock string
+		err = db.GetContext(ctx, &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
+
+		if err == nil && lastSyncedBlock != "" {
+			checkpointNum, _ := new(big.Int).SetString(lastSyncedBlock, 10)
+			lag := new(big.Int).Sub(latestChainBlock, checkpointNum)
+
+			slog.Info("🚀 STARTING_FROM_LATEST",
+				"latest_block", latestChainBlock.String(),
+				"checkpoint_block", checkpointNum.String(),
+				"lag", lag.String(),
+				"reason", "START_BLOCK=latest config overrides checkpoint")
+		}
+
+		// 从最新块开始（+1，因为我们要从下一个块开始索引）
+		return new(big.Int).Add(latestChainBlock, big.NewInt(1)), nil
+	}
+
+	// Priority 4: START_BLOCK=<number> config
+	if cfg.StartBlock > 0 {
+		slog.Info("🎯 STARTING_FROM_CONFIG", "block", cfg.StartBlock)
+		return new(big.Int).SetInt64(cfg.StartBlock), nil
+	}
+
+	// Priority 5: Genesis hash validation (environment reset detection)
 	rpcGenesis, err := rpcPool.BlockByNumber(ctx, big.NewInt(0))
 	if err == nil && rpcGenesis != nil {
 		var dbGenesisHash string
@@ -43,15 +109,30 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool *engi
 		}
 	}
 
+	// Priority 6: Database checkpoint (default recovery behavior)
 	var lastSyncedBlock string
 	err = db.GetContext(ctx, &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
 
-	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
 	if err != nil || lastSyncedBlock == "" {
-		return big.NewInt(0), nil
+		slog.Info("🆕 NO_CHECKPOINT", "action", "starting_from_minimum")
+		// 🛡️ 使用安全下限而非创世块
+		return big.NewInt(10262444), nil
 	}
 
 	blockNum, _ := new(big.Int).SetString(lastSyncedBlock, 10)
+
+	// 🛡️ 安全下限检查：检查点必须 >= 10262444
+	minStartBlock := big.NewInt(10262444)
+	if blockNum.Cmp(minStartBlock) < 0 {
+		slog.Warn("🛡️ CHECKPOINT_BELOW_MINIMUM",
+			"checkpoint_block", blockNum.String(),
+			"minimum_block", minStartBlock.String(),
+			"action", "using_minimum")
+		return minStartBlock, nil
+	}
+
+	// 检查检查点漂移
+	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
 	if rpcErr == nil && latestChainBlock != nil {
 		if blockNum.Cmp(latestChainBlock) > 0 {
 			slog.Warn("🚨 CHECKPOINT_DRIFT_DETECTED", "action", "cleaning_future_data")
@@ -59,21 +140,30 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool *engi
 			_, _ = db.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1 WHERE chain_id = $2", latestChainBlock.String(), chainID)
 			return latestChainBlock, nil
 		}
-		// 演示模式滑动窗口
-		lag := new(big.Int).Sub(latestChainBlock, blockNum)
-		if lag.Cmp(big.NewInt(5000)) > 0 {
-			slog.Warn("⏩ JUMPING_TO_LATEST", "lag", lag.String())
-			return new(big.Int).Sub(latestChainBlock, big.NewInt(1000)), nil
+
+		// 演示模式滑动窗口（仅在落后 > 5000 块时）
+		if cfg.DemoMode {
+			lag := new(big.Int).Sub(latestChainBlock, blockNum)
+			if lag.Cmp(big.NewInt(5000)) > 0 {
+				slog.Warn("⏩ JUMPING_TO_LATEST", "lag", lag.String(), "reason", "demo_mode_sliding_window")
+				return new(big.Int).Sub(latestChainBlock, big.NewInt(1000)), nil
+			}
 		}
 	}
+
+	slog.Info("♻️ RESUMING_FROM_CHECKPOINT", "block", blockNum.String())
 	return new(big.Int).Add(blockNum, big.NewInt(1)), nil
 }
 
 func main() {
 	resetDB := flag.Bool("reset", false, "Reset database")
+	startFrom := flag.String("start-from", "", "Force start from: 'latest' or specific block number")
 	flag.Parse()
 	cfg = config.Load()
 	engine.InitLogger(cfg.LogLevel)
+
+	// 保存命令行参数供后续使用
+	forceFrom = *startFrom
 
 	if cfg.DemoMode {
 		for _, url := range cfg.RPCURLs {
@@ -84,33 +174,86 @@ func main() {
 		}
 	}
 
-	db, err := sqlx.Connect("pgx", cfg.DatabaseURL)
+	// 🎬 演示模式：慢速可见的同步速度（适用于 testnet）
+	if cfg.IsTestnet {
+		slog.Info("🎬 DEMO_MODE_ENABLED", "settings", map[string]interface{}{
+			"min_start_block": 10262444,
+			"concurrency":     1,
+			"qps":             3,
+			"description":     "慢速人眼可见演示",
+		})
+
+		// 演示模式参数：并发 1，QPS 3
+		cfg.FetchConcurrency = 1
+		cfg.RPCRateLimit = 3
+		cfg.MaxSyncBatch = 1
+
+		// 设置起始块下限（10262444）
+		// 如果 START_BLOCK 配置值 < 下限，则使用下限
+		// 如果 START_BLOCK=latest 或未设置，动态获取时也会检查下限
+		if cfg.StartBlock < 10262444 {
+			cfg.StartBlock = 10262444
+			cfg.StartBlockStr = "10262444"
+		}
+	}
+
+	var db *sqlx.DB
+	var err error
+	db, err = sqlx.Connect("pgx", cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("db_fail", "err", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("db_close_fail", "err", err)
+		}
+	}()
 
 	// 确保访问者统计表存在 (SRE 审计强化)
-	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS visitor_stats (
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS visitor_stats (
 		id SERIAL PRIMARY KEY,
 		ip_address INET NOT NULL,
 		user_agent TEXT,
 		metadata JSONB NOT NULL,
 		created_at TIMESTAMPTZ DEFAULT NOW()
 	); CREATE INDEX IF NOT EXISTS idx_visitor_metadata ON visitor_stats USING GIN (metadata);`)
+	if err != nil {
+		slog.Error("create_table_fail", "err", err)
+	}
 
 	if *resetDB {
-		_, _ = db.Exec("TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
+		_, err = db.Exec("TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
+		if err != nil {
+			slog.Error("reset_db_fail", "err", err)
+		}
 	}
 
-	rpcPool, err := engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
-	if err != nil || rpcPool == nil {
-		slog.Error("rpc_fail")
-		os.Exit(1)
+	var rpcPool engine.RPCClient
+	if cfg.IsTestnet {
+		// Use enhanced RPC pool for testnet with strict rate limiting
+		rpcPool, err = engine.NewEnhancedRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.IsTestnet, cfg.MaxSyncBatch, cfg.RPCTimeout)
+		if err != nil || rpcPool == nil {
+			slog.Error("enhanced_rpc_fail")
+			os.Exit(1)
+		}
+		slog.Info("Using enhanced RPC pool for testnet", "max_sync_batch", cfg.MaxSyncBatch)
+	} else {
+		// Use standard RPC pool for local/anvil
+		rpcPool, err = engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
+		if err != nil || rpcPool == nil {
+			slog.Error("rpc_fail")
+			os.Exit(1)
+		}
+		if standardPool, ok := rpcPool.(*engine.RPCClientPool); ok {
+			standardPool.SetRateLimit(cfg.RPCRateLimit, cfg.RPCRateLimit*2)
+		}
 	}
-	rpcPool.SetRateLimit(cfg.RPCRateLimit, cfg.RPCRateLimit*2)
-	defer rpcPool.Close()
+	defer func() {
+		if closer, ok := rpcPool.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -137,18 +280,18 @@ func main() {
 		if err != nil {
 			slog.Error("❌ Emulator init failed", "err", err)
 		} else {
-			emu.OnSelfHealing = func(r string) { 
-				selfHealingEvents.Add(1) 
+			emu.OnSelfHealing = func(r string) {
+				selfHealingEvents.Add(1)
 				wsHub.Broadcast(web.WSEvent{
-					Type: "log", 
+					Type: "log",
 					Data: map[string]interface{}{
 						"message": fmt.Sprintf("🛠️  Self-Healing: %s fixed", r),
-						"level": "warn",
+						"level":   "warn",
 					},
 				})
 			}
 			wg.Add(1)
-			go func() { defer wg.Done(); emu.Start(ctx, nil) }()
+			go func() { defer wg.Done(); _ = emu.Start(ctx, nil) }()
 		}
 	}
 
@@ -163,16 +306,23 @@ func main() {
 	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) { handleGetTransfers(w, r, db) })
 
 	// 初始化 Ed25519 签名中间件
-	signer, _ := engine.NewSigningMiddleware(engine.GetORInitSeed(), "zw-web3-indexer-v1")
+	signer, err := engine.NewSigningMiddleware(engine.GetORInitSeed(), "zw-web3-indexer-v1")
+	if err != nil {
+		slog.Error("signer_init_fail", "err", err)
+	}
 	signedHandler := signer.Handler(mux)
 
 	// 应用访问者审计中间件 (SRE 增强)
 	auditedHandler := VisitorStatsMiddleware(db, signedHandler)
 
-	server := &http.Server{Addr: "0.0.0.0:8080", Handler: auditedHandler}
-	go server.ListenAndServe()
+	server := &http.Server{
+		Addr:              "0.0.0.0:8080",
+		Handler:           auditedHandler,
+		ReadHeaderTimeout: 30 * time.Second,
+	}
+	go func() { _ = server.ListenAndServe() }()
 
-	startBlock, err := sm.GetStartBlock(ctx)
+	startBlock, err := sm.GetStartBlock(ctx, forceFrom)
 	if err != nil || startBlock == nil {
 		startBlock = big.NewInt(0)
 	}
@@ -196,13 +346,13 @@ func main() {
 
 	slog.Warn("🛑 Shutdown signal received...")
 	cancel()
-	server.Shutdown(context.Background())
+	_ = server.Shutdown(context.Background())
 	wg.Wait()
 	slog.Info("✅ Shutdown complete")
 }
 
 // 补全 continuousTailFollow
-func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool *engine.RPCClientPool, startBlock *big.Int) {
+func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool engine.RPCClient, startBlock *big.Int) {
 	lastScheduled := new(big.Int).Sub(startBlock, big.NewInt(1))
 	ticker := time.NewTicker(2 * time.Second)
 	for {
