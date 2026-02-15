@@ -151,9 +151,30 @@ func (lm *LazyManager) StartInitialIndexing() {
 }
 
 // StartHeartbeat starts the heartbeat mechanism to keep chain head updated
-func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface) {
+func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface, chainID int64) {
+	// 定义更新逻辑，以便复用
+	updateFunc := func() {
+		latestChainBlock, err := lm.rpcPool.GetLatestBlockNumber(ctx)
+		if err != nil {
+			slog.Error("failed_to_get_latest_block_for_heartbeat", "err", err)
+			return
+		}
+		
+		_, err = db.ExecContext(ctx, 
+			"INSERT INTO sync_checkpoints (chain_id, last_synced_block, updated_at) VALUES ($1, $2, NOW()) "+
+				"ON CONFLICT (chain_id) DO UPDATE SET last_synced_block = $2, updated_at = NOW()",
+			chainID,
+			latestChainBlock.String())
+		if err != nil {
+			slog.Error("failed_to_update_chain_head_checkpoint", "err", err)
+		}
+	}
+
 	go func() {
-		ticker := time.NewTicker(15 * time.Second) // Every 15 seconds
+		// 🚀 6.1 优化：启动时立即执行一次预热
+		updateFunc()
+
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		
 		for {
@@ -161,22 +182,7 @@ func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Update the latest chain block number in the database
-				latestChainBlock, err := lm.rpcPool.GetLatestBlockNumber(ctx)
-				if err != nil {
-					slog.Error("failed_to_get_latest_block_for_heartbeat", "err", err)
-					continue
-				}
-				
-				// Update the latest chain block in the database
-				_, err = db.ExecContext(ctx, 
-					"INSERT INTO sync_checkpoints (chain_id, last_synced_block, updated_at) VALUES ($1, $2, NOW()) "+
-						"ON CONFLICT (chain_id) DO UPDATE SET last_synced_block = $2, updated_at = NOW()",
-					1, // Assuming chain ID 1 for Sepolia, should be configurable
-					latestChainBlock.String())
-				if err != nil {
-					slog.Error("failed_to_update_chain_head_checkpoint", "err", err)
-				}
+				updateFunc()
 			}
 		}
 	}()
