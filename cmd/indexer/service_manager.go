@@ -42,6 +42,27 @@ func (sm *ServiceManager) GetStartBlock(ctx context.Context, forceFrom string) (
 
 // StartTailFollow 启动持续追踪
 func (sm *ServiceManager) StartTailFollow(ctx context.Context, startBlock *big.Int) {
+	// 🚀 工业级优化：Gap Check (自动补洞)
+	// 检查数据库中已有的最大区块号，看是否与本次 startBlock 存在断层
+	var maxInDB int64
+	err := sm.db.GetContext(ctx, &maxInDB, "SELECT COALESCE(MAX(number), 0) FROM blocks")
+	if err == nil && maxInDB > 0 {
+		startNum := startBlock.Int64()
+		if startNum > maxInDB+1 {
+			gapSize := startNum - (maxInDB + 1)
+			engine.Logger.Info("🧩 Gap detected! Initiating catch-up sync",
+				"last_in_db", maxInDB,
+				"start_at", startNum,
+				"gap_blocks", gapSize)
+			
+			// 启动后台协程回填 Gap，不阻塞主 Tail 流程
+			go func() {
+				catchupCtx := context.Background()
+				_ = sm.fetcher.Schedule(catchupCtx, big.NewInt(maxInDB+1), big.NewInt(startNum-1))
+			}()
+		}
+	}
+
 	// 启动后台指标上报
 	go sm.startMetricsReporter(ctx)
 	continuousTailFollow(ctx, sm.fetcher, sm.rpcPool, startBlock)

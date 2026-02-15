@@ -78,6 +78,14 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		return fmt.Errorf("hash self-reference detected at block %s", blockNum.String())
 	}
 
+	// 🛡️ 工业级逻辑守卫：零值父哈希防护
+	parentHashHex := block.ParentHash().Hex()
+	if parentHashHex == "" || parentHashHex == "0x0000000000000000000000000000000000000000000000000000000000000000" {
+		Logger.Error("❌ FATAL: Zero parent hash detected!", 
+			slog.String("block", blockNum.String()))
+		return fmt.Errorf("zero parent hash detected at block %s", blockNum.String())
+	}
+
 	_, err = dbTx.NamedExecContext(ctx, `
 		INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, base_fee_per_gas, transaction_count)
 		VALUES (:number, :hash, :parent_hash, :timestamp, :gas_limit, :gas_used, :base_fee_per_gas, :transaction_count)
