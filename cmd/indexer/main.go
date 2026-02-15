@@ -240,6 +240,15 @@ func main() {
 		if err != nil {
 			slog.Error("reset_db_fail", "err", err)
 		}
+	} else {
+		// 🚀 P1 Minor 优化：先验数据初始化 (Preheat Status)
+		// 在演示时让数据显得更专业，启动前先从数据库同步最后一条记录
+		var lastNum int64
+		err := db.Get(&lastNum, "SELECT COALESCE(MAX(number), 0) FROM blocks")
+		if err == nil && lastNum > 0 {
+			engine.GetMetrics().UpdateCurrentSyncHeight(lastNum)
+			slog.Info("🔥 Preheat Status: Initialized metrics from database", "latest_indexed", lastNum)
+		}
 	}
 
 	var rpcPool engine.RPCClient
@@ -298,7 +307,7 @@ func main() {
 	}
 	
 	// Start the heartbeat mechanism to keep chain head updated even when paused
-	lazyManager.StartHeartbeat(ctx, &DBWrapper{db})
+	lazyManager.StartHeartbeat(ctx, &DBWrapper{db}, cfg.ChainID)
 
 	wsHub := web.NewHub()
 	wg.Add(1)
@@ -339,7 +348,7 @@ func main() {
 	mux.HandleFunc("/", web.RenderDashboard)
 	mux.HandleFunc("/security", web.RenderSecurity)
 	mux.HandleFunc("/ws", wsHub.HandleWS)
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) { handleGetStatus(w, r, db, rpcPool, lazyManager) })
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) { handleGetStatus(w, r, db, rpcPool, lazyManager, cfg.ChainID) })
 	mux.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) { handleGetBlocks(w, r, db) })
 	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) { handleGetTransfers(w, r, db) })
 
