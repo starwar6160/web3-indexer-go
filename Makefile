@@ -38,6 +38,7 @@ help:
 	@echo ""
 	@echo "🧪 Quality Assurance:"
 	@echo "  make test         - 运行所有测试（隔离环境，自动清理）"
+	@echo "  make test-api     - [新] 运行 API 逻辑守卫集成测试 (Python/Pytest)"
 	@echo "  make test-quick   - 快速运行测试（复用现有数据库，不清理）"
 	@echo "  make check        - 运行所有质量检查（lint + security + test）"
 	@echo "  make lint         - 运行 golangci-lint 代码质量检查"
@@ -143,6 +144,16 @@ test:
 	# 4. Cleanup after success
 	@make test-cleanup
 	@echo "✅ All tests passed in isolated environment!"
+
+# Integration Test: API Logic Guards (Python-based)
+test-api:
+	@echo "🧪 Running API Logic Integration Tests..."
+	@if ! command -v pytest >/dev/null 2>&1; then \
+		echo "📦 Installing pytest and requests..."; \
+		pip3 install pytest requests; \
+	fi
+	@INDEXER_API_URL="http://localhost:8081/api" pytest tests/test_api_logic.py -v -s || (echo "❌ API Logic Check Failed!"; exit 1)
+	@echo "✅ All API Logic Guards Passed."
 
 # Quick test run - reuses existing database (for rapid iteration during development)
 test-quick:
