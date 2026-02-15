@@ -31,6 +31,7 @@ help:
 	@echo "  make test-api     - 运行逻辑守卫集成测试 (Python)"
 	@echo "  make check        - 运行所有质量检查 (Lint/Security/Test)"
 	@echo "  make docs-sync    - 自动刷新文档索引 (SUMMARY.md)"
+	@echo "  make repair       - [Sepolia] 异步修复数据库中的哈希链断裂 (0x000...)"
 	@echo ""
 	@echo "🔧 基础指令:"
 	@echo "  make build        - 编译本地二进制文件"
@@ -62,3 +63,12 @@ init:
 a1-pre-flight:
 	@echo "🔍 Running Sepolia pre-flight checks..."
 	@./scripts/check-a1-pre-flight.sh
+
+repair:
+	@echo "🛠️  Starting asynchronous hash chain repair..."
+	@if [ -f "venv/bin/python3" ]; then \
+		./venv/bin/python3 scripts/repair_hashes.py; \
+	else \
+		python3 scripts/repair_hashes.py; \
+	fi
+	@echo "✅ Repair process finished."
