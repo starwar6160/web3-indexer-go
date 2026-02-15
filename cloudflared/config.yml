@@ -2,6 +2,8 @@ tunnel: web3-indexer-tunnel
 credentials-file: /home/ubuntu/.cloudflared/c1b94896-e188-4d52-a233-7986375c3790.json
 
 ingress:
+  - hostname: demo1.st6160.click
+    service: http://localhost:8081
   - hostname: demo2.st6160.click
     service: http://localhost:8082
   - hostname: grafana-demo2.st6160.click
