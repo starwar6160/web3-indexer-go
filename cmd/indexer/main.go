@@ -182,6 +182,29 @@ func main() {
 
 		sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency)
 
+		// ✨ Configure token filtering based on TOKEN_FILTER_MODE
+		if cfg.TokenFilterMode == "all" {
+			// Query all Transfer events from all contracts
+			slog.Info("🌍 TOKEN_FILTER_MODE=all", "action", "monitoring_all_transfers", "watched_count", 0)
+			// Explicitly set empty addresses to query all
+			sm.fetcher.SetWatchedAddresses([]string{})
+			sm.processor.SetWatchedAddresses([]string{})
+		} else if cfg.TokenFilterMode == "whitelist" {
+			if len(cfg.WatchedTokenAddresses) > 0 {
+				slog.Info("🎯 TOKEN_FILTER_MODE=whitelist", "action", "monitoring_specific_tokens", "watched_count", len(cfg.WatchedTokenAddresses))
+				sm.fetcher.SetWatchedAddresses(cfg.WatchedTokenAddresses)
+				sm.processor.SetWatchedAddresses(cfg.WatchedTokenAddresses)
+			} else {
+				slog.Warn("⚠️ TOKEN_FILTER_MODE=whitelist but no addresses provided, falling back to 'all' mode")
+				sm.fetcher.SetWatchedAddresses([]string{})
+				sm.processor.SetWatchedAddresses([]string{})
+			}
+		} else {
+			slog.Error("❌ Invalid TOKEN_FILTER_MODE", "mode", cfg.TokenFilterMode, "falling_back_to", "all")
+			sm.fetcher.SetWatchedAddresses([]string{})
+			sm.processor.SetWatchedAddresses([]string{})
+		}
+
 		// ✨ 注入依赖，使 API 变得可用
 		lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
 		apiServer.SetDependencies(db, rpcPool, lazyManager, cfg.ChainID)
@@ -227,8 +250,8 @@ func main() {
 
 		wg.Add(1)
 		slog.Info("⛓️ Engine Components Ignited", "start_block", startBlock.String())
-		recovery.WithRecoveryNamed("sequencer_run", func() { defer wg.Done(); sequencer.Run(ctx) })
-		recovery.WithRecoveryNamed("tail_follow", func() { sm.StartTailFollow(ctx, startBlock) })
+		go recovery.WithRecoveryNamed("sequencer_run", func() { defer wg.Done(); sequencer.Run(ctx) })
+		go recovery.WithRecoveryNamed("tail_follow", func() { sm.StartTailFollow(ctx, startBlock) })
 
 		// 仿真器 (仅 demo)
 		if cfg.DemoMode {
@@ -251,17 +274,27 @@ func main() {
 }
 
 func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool engine.RPCClient, startBlock *big.Int) {
+	slog.Info("🐕 [TailFollow] Starting continuous tail follow", "start_block", startBlock.String())
 	lastScheduled := new(big.Int).Sub(startBlock, big.NewInt(1))
 	ticker := time.NewTicker(2 * time.Second)
+	tickCount := 0
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("🐕 [TailFollow] Context cancelled, stopping")
 			return
 		case <-ticker.C:
+			tickCount++
 			tip, err := rpcPool.GetLatestBlockNumber(ctx)
-			if err == nil && tip.Cmp(lastScheduled) > 0 {
-				if err := fetcher.Schedule(ctx, new(big.Int).Add(lastScheduled, big.NewInt(1)), tip); err != nil {
-					slog.Warn("failed_to_schedule_tail_follow", "err", err)
+			if err != nil {
+				if tickCount%10 == 1 { // 每 20 秒打印一次错误
+					slog.Warn("🐕 [TailFollow] Failed to get tip", "err", err)
+				}
+			} else if tip.Cmp(lastScheduled) > 0 {
+				nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
+				slog.Info("🐕 [TailFollow] Scheduling new range", "from", nextBlock.String(), "to", tip.String())
+				if err := fetcher.Schedule(ctx, nextBlock, tip); err != nil {
+					slog.Error("🐕 [TailFollow] Failed to schedule", "err", err)
 				}
 				lastScheduled.Set(tip)
 			}
