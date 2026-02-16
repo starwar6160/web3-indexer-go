@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"os"
+	"strings"
 )
 
 //go:embed dashboard.html dashboard.js dashboard.css security.html PUBLIC_KEY.asc README.md.asc
@@ -16,7 +17,8 @@ func HandleStatic() http.Handler {
 }
 
 // RenderDashboard 渲染主页
-func RenderDashboard(w http.ResponseWriter, _ *http.Request) {
+func RenderDashboard(w http.ResponseWriter, r *http.Request) {
+	// 1. 读取模板
 	tmplContent, err := StaticAssets.ReadFile("dashboard.html")
 	if err != nil {
 		http.Error(w, "Dashboard template not found", http.StatusNotFound)
@@ -29,15 +31,42 @@ func RenderDashboard(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
+	// 2. 环境识别逻辑 (SRE 工业级注入)
 	title := os.Getenv("APP_TITLE")
 	if title == "" {
 		title = "🚀 Web3 Indexer Dashboard"
 	}
 
+	// 计算数据源名称 (必须与 Grafana 中定义的一致)
+	// 如果是 Sepolia 环境，使用 Web3-sepolia-DB，否则使用 Web3-demo-DB
+	isSepolia := strings.Contains(strings.ToUpper(title), "SEPOLIA") || strings.Contains(strings.ToUpper(title), "TESTNET")
+	envName := "demo"
+	dsName := "Web3-demo-DB"
+	if isSepolia {
+		envName = "sepolia"
+		dsName = "Web3-sepolia-DB"
+	}
+
+	// 获取 Grafana 基础地址 (支持 Tailscale 动态识别)
+	grafanaHost := os.Getenv("GRAFANA_HOST")
+	if grafanaHost == "" {
+		// 默认回退逻辑
+		grafanaHost = r.URL.Hostname()
+		if grafanaHost == "" {
+			grafanaHost = "localhost"
+		}
+	}
+
 	data := struct {
-		Title string
+		Title       string
+		Environment string
+		PostgresDS  string
+		GrafanaHost string
 	}{
-		Title: title,
+		Title:       title,
+		Environment: envName,
+		PostgresDS:  dsName,
+		GrafanaHost: grafanaHost,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -81,13 +81,16 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const title = "{{ .Title }}";
+            const currentEnv = "{{ .Environment }}";
+            const currentDS = "{{ .PostgresDS }}";
+            
             const pulse = document.getElementById('env-pulse');
             const name = document.getElementById('env-name');
             const actions = document.getElementById('env-actions');
             const grafanaIframe = document.getElementById('grafana-iframe');
 
             // 增强的判断逻辑
-            const isSepolia = title.toUpperCase().includes("SEPOLIA") || title.toUpperCase().includes("TESTNET");
+            const isSepolia = currentEnv === "sepolia";
             const isPublic = window.location.hostname.includes("st6160.click");
 
             if (isSepolia) {
@@ -102,21 +105,18 @@
                 if(actions) actions.innerHTML = '<a href="https://demo1.st6160.click" class="switch-btn main">← Back to Sepolia Live (demo1)</a>';
             }
 
-            // 🚀 动态修复 Grafana Iframe 地址
+            // 🚀 动态修复 Grafana Iframe 地址 (由后端提供基因)
             if (grafanaIframe) {
                 let grafanaBase = "";
                 if (isPublic) {
                     grafanaBase = "https://grafana-demo2.st6160.click";
                 } else {
-                    // 关键修复：使用当前访问的主机名 (如 mp1 或 IP)
+                    // 使用后端识别的 Host
                     grafanaBase = window.location.protocol + "//" + window.location.hostname + ":4000";
                 }
-                // 自动识别环境并传递给 Grafana
-                const env = isSepolia ? "sepolia" : "demo";
-                const dsName = isSepolia ? "Web3-sepolia-DB" : "Web3-demo-DB";
-                const dashboardPath = `/d/web3-indexer-multi/web3-indexer-multi?orgId=1&refresh=5s&kiosk&var-Environment=${env}&var-PostgresDS=${dsName}`;
+                const dashboardPath = `/d/web3-indexer-multi/web3-indexer-multi?orgId=1&refresh=5s&kiosk&var-Environment=${currentEnv}&var-PostgresDS=${currentDS}`;
                 grafanaIframe.src = grafanaBase + dashboardPath;
-                console.log("🛠️ Grafana Target:", grafanaIframe.src);
+                console.log("🧬 Environment-Aware Dashboard Loaded:", currentEnv, currentDS);
             }
         });
     </script>
