@@ -16,7 +16,7 @@ services:
       POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
     volumes:
       - indexer_db_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - ../../scripts/db/create_databases.sql:/docker-entrypoint-initdb.d/01-create-databases.sql:ro
 
   # Grafana
   grafana:
@@ -29,8 +29,8 @@ services:
     restart: always
     network_mode: host
     volumes:
-      - ./grafana-config/grafana.ini:/etc/grafana/grafana.ini
-      - ./grafana-config/provisioning:/etc/grafana/provisioning
+      - ../grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ../grafana/provisioning:/etc/grafana/provisioning
     environment:
       - GF_SERVER_HTTP_PORT=4000
       - GF_SECURITY_ADMIN_PASSWORD=W3b3_Idx_Secur3_2026_Sec
@@ -40,6 +40,7 @@ services:
       - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
 
   # Prometheus
   prometheus:
@@ -55,7 +56,7 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--web.listen-address=:9091'
     volumes:
-      - ./prometheus-config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
 
 
 volumes:
