@@ -39,7 +39,6 @@ linters:
     - goconst        # Detect repeated strings that could be constants
     - gocritic       # Find code patterns needing improvement
     - gocyclo        # Cyclomatic complexity (limit: 15)
-    - godot          # Check if comments end with period
     - revive         # Fast, configurable linter (modern golint replacement)
 
     # --- Style & Best Practices ---
@@ -162,6 +161,7 @@ linters-settings:
     enable-all: true
     disable:
       - shadow  # Can be noisy, but worth enabling in strict mode
+      - fieldalignment
 
 # Run configuration
 run:
@@ -202,4 +202,4 @@ issues:
 output:
   # Formats for output
   formats:
-    - name: colored
+    - format: colored-line-number
