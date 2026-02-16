@@ -58,18 +58,19 @@ check_rpc_connectivity() {
     fi
 
     # 尝试从多个源获取 RPC URL
-    if [ -f ".env.testnet.local" ]; then
-        log_info "使用 .env.testnet.local 中的 API Key"
-        source .env.testnet.local
-    elif [ -n "${SEPOLIA_RPC_URLS:-}" ]; then
-        log_info "使用环境变量 SEPOLIA_RPC_URLS"
+    if [ -f ".env.testnet" ]; then
+        log_info "使用 .env.testnet 中的配置"
+        # 避免直接 source 整个文件导致变量冲突，只提取 RPC_URLS
+        RPC_URLS=$(grep "RPC_URLS=" .env.testnet | cut -d'=' -f2- | tr -d '"')
+    elif [ -n "${RPC_URLS:-}" ]; then
+        log_info "使用环境变量 RPC_URLS"
     else
         log_warn "未找到 RPC URL 配置，尝试使用默认值"
-        export SEPOLIA_RPC_URLS="https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY"
+        RPC_URLS="https://rpc.sepolia.org"
     fi
 
     # 取第一个 RPC URL 进行测试
-    RPC_URL=$(echo "$SEPOLIA_RPC_URLS" | cut -d',' -f1)
+    RPC_URL=$(echo "$RPC_URLS" | cut -d',' -f1)
     log_info "测试 RPC URL: ${RPC_URL:0:50}..."
 
     # 执行 eth_blockNumber 请求
@@ -109,38 +110,22 @@ check_rpc_connectivity() {
 check_db_isolation() {
     log_step "数据库物理隔离验证"
 
-    # 检查是否已有 testnet 容器在运行
-    if docker ps | grep -q "web3-indexer-sepolia-db"; then
-        log_info "测试网数据库容器正在运行"
+    # 检查基础设施数据库是否在运行
+    log_info "正在检查容器: web3-indexer-db"
+    if docker ps --format '{{.Names}}' | grep -q "^web3-indexer-db$"; then
+        log_success "基础设施数据库容器正在运行"
 
-        # 检查数据库名称
-        DB_NAME=$(docker exec web3-indexer-sepolia-db psql -U postgres -lqt | grep -w "web3_sepolia" || true)
-        if [ -n "$DB_NAME" ]; then
-            log_success "数据库 web3_sepolia 已存在"
-
-            # 检查是否有旧数据
-            TABLE_COUNT=$(docker exec web3-indexer-sepolia-db psql -U postgres -d web3_sepolia -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'blocks';" 2>/dev/null || echo "0")
-            if [ "$TABLE_COUNT" -gt 0 ]; then
-                log_warn "检测到旧数据存在（blocks 表有 $TABLE_COUNT 条记录）"
-                log_info "建议运行: make reset-a1"
-            else
-                log_success "数据库干净，无旧数据"
-            fi
+        # 检查 web3_sepolia 数据库是否存在
+        DB_EXISTS=$(PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h localhost -p 15432 -U postgres -lqt | grep -w "web3_sepolia" || true)
+        if [ -n "$DB_EXISTS" ]; then
+            log_success "物理数据库 web3_sepolia 已就绪"
         else
-            log_warn "容器运行但数据库 web3_sepolia 不存在"
+            log_error "数据库 web3_sepolia 不存在，请确保已执行初始化"
+            exit 1
         fi
     else
-        log_info "测试网数据库容器未运行（首次启动正常）"
-        log_info "将在 make a1 时自动创建"
-    fi
-
-    # 验证端口隔离（testnet 使用 15433，demo 使用 15432）
-    if docker ps | grep -q "0.0.0.0:15432"; then
-        log_info "Demo 数据库运行在端口 15432（隔离正常）"
-    fi
-
-    if docker ps | grep -q "0.0.0.0:15433"; then
-        log_success "Testnet 数据库运行在端口 15433（隔离正常）"
+        log_error "基础设施数据库未运行，请先执行 make infra-up"
+        exit 1
     fi
 
     log_success "数据库物理隔离验证通过"

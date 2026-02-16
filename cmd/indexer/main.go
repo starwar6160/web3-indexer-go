@@ -147,10 +147,31 @@ func main() {
 	}
 	rpcPool.SetRateLimit(float64(cfg.RPCRateLimit), cfg.RPCRateLimit*2)
 
-	// 校验网络
-	ethClient, _ := ethclient.Dial(cfg.RPCURLs[0])
-	networkpkg.VerifyNetwork(ethClient, cfg.ChainID)
-	ethClient.Close()
+	// ✅ 工业级启动预检：强制校验 Network ID
+	// 防止"挂 Sepolia 标签跑主网数据"的低级错误
+	slog.Info("🛡️ Performing startup network verification...")
+	
+	// 增加重试逻辑，防止因网络抖动导致启动失败
+	var verifyErr error
+	for i := 0; i < 3; i++ {
+		ethClient, err := ethclient.Dial(cfg.RPCURLs[0])
+		if err == nil {
+			verifyErr = networkpkg.VerifyNetwork(ethClient, cfg.ChainID)
+			ethClient.Close()
+			if verifyErr == nil {
+				break
+			}
+		} else {
+			verifyErr = err
+		}
+		slog.Warn("🛡️ Network verification failed, retrying...", "attempt", i+1, "error", verifyErr)
+		time.Sleep(2 * time.Second)
+	}
+
+	if verifyErr != nil {
+		slog.Error("❌ [FATAL] Startup network verification failed permanently", "error", verifyErr)
+		os.Exit(1)
+	}
 
 	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency)
 	

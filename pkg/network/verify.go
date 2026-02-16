@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -36,18 +37,18 @@ func NetworkName(chainID int64) string {
 	}
 }
 
-// VerifyNetwork 强校验 RPC 节点的 Chain ID
-// 如果与预期不符，直接 panic 终止启动
-func VerifyNetwork(client *ethclient.Client, expectedChainID int64) {
-	ctx := context.Background()
+// VerifyNetwork 校验 RPC 节点的 Chain ID
+// 如果与预期不符或获取失败，返回 error
+func VerifyNetwork(client *ethclient.Client, expectedChainID int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// 获取 RPC 节点的真实 Chain ID
 	actualChainID, err := client.ChainID(ctx)
 	if err != nil {
-		slog.Error("❌ [FATAL] 无法获取 RPC 节点的 ChainID",
-			"error", err,
-			"action", "program_terminated")
-		panic(fmt.Sprintf("无法获取 RPC 节点的 ChainID: %v", err))
+		slog.Error("❌ 无法获取 RPC 节点的 ChainID",
+			"error", err)
+		return fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
 	expectedName := NetworkName(expectedChainID)
@@ -66,20 +67,13 @@ func VerifyNetwork(client *ethclient.Client, expectedChainID int64) {
 			"expected", fmt.Sprintf("%s (ID: %d)", expectedName, expectedChainID),
 			"actual", fmt.Sprintf("%s (ID: %d)", actualName, actualChainID.Int64()),
 			"impact", "数据库污染风险",
-			"action", "程序已强制终止",
 		)
-		panic(fmt.Sprintf(
-			"🛑 [SECURITY ALERT] 网络配置冲突！\n"+
-				"你的配置声明为 %s (Chain ID: %d)\n"+
-				"但 RPC 节点连接的是 %s (Chain ID: %d)\n"+
-				"程序已强制终止以防止数据库污染。",
-			expectedName, expectedChainID,
-			actualName, actualChainID.Int64(),
-		))
+		return fmt.Errorf("network mismatch: expected %d, got %d", expectedChainID, actualChainID.Int64())
 	}
 
 	slog.Info("✅ 网络校验通过，环境匹配",
 		"network", expectedName,
 		"chain_id", expectedChainID,
 	)
+	return nil
 }
