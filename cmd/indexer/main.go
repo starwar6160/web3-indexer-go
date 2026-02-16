@@ -121,20 +121,29 @@ func main() {
 	}
 
 	apiServer := NewServer(nil, wsHub, apiPort, cfg.AppTitle)
-	recovery.WithRecoveryNamed("api_server", func() {
+	
+	// 🚀 关键修复：异步启动 API Server，不再阻塞下方 Engine 初始化
+	recovery.WithRecovery(func() {
 		slog.Info("🚀 Indexer API Server starting (Early Bird Mode)", "port", apiPort)
 		if err := apiServer.Start(); err != nil && err != http.ErrServerClosed {
 			slog.Error("api_start_fail", "err", err)
 		}
-	})
+	}, "api_server")
 
-	// --- 接下来执行异步初始化 ---
+	// --- 接下来执行初始化 (不再被阻塞) ---
 	recovery.WithRecoveryNamed("async_init", func() {
-		db, err := sqlx.Connect("pgx", cfg.DatabaseURL)
+		slog.Info("⏳ Async engine initialization started...")
+		
+		// 1. 数据库连接 (增加超时保护)
+		dbCtx, dbCancel := context.WithTimeout(ctx, 15*time.Second)
+		db, err := sqlx.ConnectContext(dbCtx, "pgx", cfg.DatabaseURL)
+		dbCancel()
+		
 		if err != nil {
-			slog.Error("db_fail", "err", err)
+			slog.Error("❌ Database connection failed (Fatal for Engine)", "err", err, "url", "hidden")
 			return
 		}
+		slog.Info("✅ Database connected successfully")
 
 		var rpcPool engine.RPCClient
 		if cfg.IsTestnet {
@@ -177,6 +186,13 @@ func main() {
 		lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
 		apiServer.SetDependencies(db, rpcPool, lazyManager, cfg.ChainID)
 
+		slog.Info("🚀 System initialized", 
+			"chain_id", cfg.ChainID, 
+			"rpc_url", cfg.RPCURLs[0],
+			"db_url", "connected",
+			"demo_mode", cfg.DemoMode,
+		)
+
 		sm.processor.EventHook = func(eventType string, data interface{}) {
 			wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
 		}
@@ -187,15 +203,20 @@ func main() {
 			return
 		}
 
-		// 补全父块锚点
+		// 补全父块锚点 (优化：增加 10s 超时保护)
 		if startBlock.Cmp(big.NewInt(0)) > 0 {
 			parentBlockNum := new(big.Int).Sub(startBlock, big.NewInt(1))
-			parentBlock, err := rpcPool.BlockByNumber(ctx, parentBlockNum)
+			anchorCtx, anchorCancel := context.WithTimeout(ctx, 10*time.Second)
+			parentBlock, err := rpcPool.BlockByNumber(anchorCtx, parentBlockNum)
+			anchorCancel()
+			
 			if err == nil && parentBlock != nil {
 				if _, err := db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
 					parentBlockNum.String(), parentBlock.Hash().Hex(), parentBlock.ParentHash().Hex(), parentBlock.Time()); err != nil {
 					slog.Warn("failed_to_insert_parent_block", "err", err)
 				}
+			} else {
+				slog.Warn("⚠️ Could not fetch parent block anchor, proceeding anyway", "err", err)
 			}
 		}
 
@@ -205,6 +226,7 @@ func main() {
 		sequencer := engine.NewSequencerWithFetcher(sm.processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, fatalErrCh, nil, engine.GetMetrics())
 
 		wg.Add(1)
+		slog.Info("⛓️ Engine Components Ignited", "start_block", startBlock.String())
 		recovery.WithRecoveryNamed("sequencer_run", func() { defer wg.Done(); sequencer.Run(ctx) })
 		recovery.WithRecoveryNamed("tail_follow", func() { sm.StartTailFollow(ctx, startBlock) })
 

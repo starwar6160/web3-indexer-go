@@ -19,14 +19,17 @@ infra-up:
 
 test-a1: infra-up
 	@echo "🚀 [LOCAL] 正在以 Sepolia 配置直接启动..."
+	@docker stop web3-sepolia-staging 2>/dev/null || true
 	@set -a; . configs/env/.env.testnet; set +a; \
 	PORT=8091 \
+	DEMO_MODE=false \
 	APP_TITLE="🚀 SEP-LOCAL (8091)" \
 	DATABASE_URL="postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_sepolia?sslmode=disable" \
 	go run cmd/indexer/*.go
 
 test-a2: infra-up
 	@echo "🚀 [LOCAL] 正在以 Anvil 配置直接启动..."
+	@docker stop web3-anvil-staging 2>/dev/null || true
 	@set -a; . configs/env/.env.demo2; set +a; \
 	PORT=8092 \
 	RPC_URLS="http://127.0.0.1:8545" \
