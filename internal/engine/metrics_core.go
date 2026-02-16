@@ -53,6 +53,10 @@ type Metrics struct {
 	E2ELatency          prometheus.Gauge // 新增：秒级 E2E 延迟
 	RealtimeTPS         prometheus.Gauge // 新增：实时 TPS
 
+	// 📊 代币转账统计（按代币符号）
+	TokenTransferVolume *prometheus.CounterVec
+	TokenTransferCount  *prometheus.CounterVec
+
 	// 实时性能指标 (用于 Dashboard)
 	totalTxProcessed     uint64
 	totalBlocksProcessed uint64
@@ -204,5 +208,22 @@ func NewMetrics() *Metrics {
 			Name: "indexer_realtime_tps",
 			Help: "Real-time transactions per second",
 		}),
+
+		// 📊 代币转账统计指标
+		TokenTransferVolume: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "indexer_token_transfer_volume_total",
+			Help: "Total volume of token transfers by token symbol (USDC, DAI, WETH, UNI)",
+		}, []string{"symbol"}),
+		TokenTransferCount: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "indexer_token_transfer_count_total",
+			Help: "Total number of token transfers by token symbol",
+		}, []string{"symbol"}),
 	}
 }
+
+// RecordTokenTransfer 记录单笔代币转账（用于代币统计）
+func (m *Metrics) RecordTokenTransfer(symbol string, amount float64) {
+	m.TokenTransferVolume.WithLabelValues(symbol).Add(amount)
+	m.TokenTransferCount.WithLabelValues(symbol).Inc()
+}
+

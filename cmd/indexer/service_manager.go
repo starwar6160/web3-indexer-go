@@ -20,8 +20,9 @@ type ServiceManager struct {
 	chainID    int64
 }
 
-func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int) *ServiceManager {
-	fetcher := engine.NewFetcher(rpcPool, 10) // 默认并发 10
+func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int, rps, burst, concurrency int) *ServiceManager {
+	// ✨ 使用工业级限流器创建 Fetcher
+	fetcher := engine.NewFetcherWithLimiter(rpcPool, concurrency, rps, burst)
 	processor := engine.NewProcessor(db, rpcPool, retryQueueSize, chainID)
 	reconciler := engine.NewReconciler(db, rpcPool, engine.GetMetrics())
 
@@ -36,8 +37,8 @@ func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, ret
 }
 
 // GetStartBlock 封装自愈逻辑
-func (sm *ServiceManager) GetStartBlock(ctx context.Context, forceFrom string) (*big.Int, error) {
-	return getStartBlockFromCheckpoint(ctx, sm.db, sm.rpcPool, sm.chainID, forceFrom)
+func (sm *ServiceManager) GetStartBlock(ctx context.Context, forceFrom string, resetDB bool) (*big.Int, error) {
+	return getStartBlockFromCheckpoint(ctx, sm.db, sm.rpcPool, sm.chainID, forceFrom, resetDB)
 }
 
 // StartTailFollow 启动持续追踪

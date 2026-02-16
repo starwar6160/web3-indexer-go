@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"log/slog"
 	"math/big"
 	"strings"
 	"web3-indexer-go/internal/models"
@@ -8,6 +9,23 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
+
+// getTokenSymbol 从代币地址映射到符号
+func getTokenSymbol(tokenAddr common.Address) string {
+	// Sepolia 热门代币地址映射
+	tokenMap := map[string]string{
+		"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "USDC",
+		"0xff34b3d4aee8ddcd6f9afffb6fe49bd371b8a357": "DAI",
+		"0x7b79995e5f793a07bc00c21412e50ecae098e7f9": "WETH",
+		"0xa3382dffca847b84592c05ab05937a1a38623bc": "UNI",
+	}
+
+	hexAddr := strings.ToLower(tokenAddr.Hex())
+	if symbol, ok := tokenMap[hexAddr]; ok {
+		return symbol
+	}
+	return "Other" // 其他代币归类为 "Other"
+}
 
 // ExtractTransfer 从区块日志中提取 ERC20 Transfer 事件
 func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
@@ -21,7 +39,7 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 	// 使用 uint256 处理金额，保证金融级精度
 	amount := models.NewUint256FromBigInt(new(big.Int).SetBytes(vLog.Data))
 
-	return &models.Transfer{
+	transfer := &models.Transfer{
 		BlockNumber:  models.BigInt{Int: new(big.Int).SetUint64(vLog.BlockNumber)},
 		TxHash:       vLog.TxHash.Hex(),
 		LogIndex:     uint(vLog.Index),
@@ -30,4 +48,19 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 		Amount:       amount,
 		TokenAddress: strings.ToLower(vLog.Address.Hex()),
 	}
+
+	// 📊 记录代币转账统计（用于 Prometheus + Grafana）
+	tokenSymbol := getTokenSymbol(vLog.Address)
+	amountFloat := float64(amount.Int.Uint64()) / 1e18 // 假设 18 位小数，转换为标准单位
+	p.metrics.RecordTokenTransfer(tokenSymbol, amountFloat)
+
+	// 调试日志（可选）
+	slog.Debug("transfer_extracted",
+		slog.String("token", tokenSymbol),
+		slog.String("amount", amount.String()),
+		slog.String("from", transfer.From),
+		slog.String("to", transfer.To),
+	)
+
+	return transfer
 }

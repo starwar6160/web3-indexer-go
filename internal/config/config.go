@@ -31,6 +31,12 @@ type Config struct {
 	IsTestnet        bool          // 是否为测试网模式
 	MaxSyncBatch     int           // 最大同步批次大小（用于控制请求频率）
 	EnableEnergySaving bool        // 是否开启节能模式（懒惰模式）
+
+	// 代币过滤配置
+	WatchedTokenAddresses []string // 监控的 ERC20 合约地址
+	TokenFilterMode       string   // "whitelist" 或 "all"
+	Port                  string
+	AppTitle              string
 }
 
 func Load() *Config {
@@ -69,36 +75,50 @@ func Load() *Config {
 	}
 
 	// Handle START_BLOCK with special "latest" keyword
-	startBlockStr := getEnv("START_BLOCK", "10000000")
+	startBlockStr := getEnv("START_BLOCK", "0")
 	var startBlock int64
-	
+
 	if startBlockStr == "latest" {
 		startBlock = -1 // Special value to indicate "latest" - will be resolved at runtime
 	} else {
-		startBlock = getEnvAsInt64("START_BLOCK", 10000000)
+		startBlock = getEnvAsInt64("START_BLOCK", 0)
+	}
+
+	// 解析监控的代币地址
+	watchedTokensStr := getEnv("WATCHED_TOKEN_ADDRESSES", "")
+	var watchedTokens []string
+	if watchedTokensStr != "" {
+		watchedTokens = strings.Split(watchedTokensStr, ",")
+		for i, addr := range watchedTokens {
+			watchedTokens[i] = strings.TrimSpace(addr)
+		}
 	}
 
 	cfg := &Config{
-		DatabaseURL:      getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
-		RPCURLs:          rpcUrls,
-		WSSURL:           getEnv("WSS_URL", ""),
-		ChainID:          getEnvAsInt64("CHAIN_ID", 1),
-		StartBlock:       startBlock,
-		StartBlockStr:    startBlockStr,
-		LogLevel:         getEnv("LOG_LEVEL", "info"),
-		LogFormat:        getEnv("LOG_FORMAT", "json"),
-		RPCTimeout:       time.Duration(rpcTimeoutSeconds) * time.Second,
-		RPCRateLimit:     rpcRateLimit,
-		FetchConcurrency: fetchConcurrency,
-		FetchBatchSize:   fetchBatchSize,
-		MaxGasPrice:      maxGasPrice,
-		GasSafetyMargin:  gasSafetyMargin,
-		CheckpointBatch:  checkpointBatch,
-		RetryQueueSize:   retryQueueSize,
-		DemoMode:         demoMode,
-		IsTestnet:        isTestnet,
-		MaxSyncBatch:     maxSyncBatch,
-		EnableEnergySaving: energySaving,
+		DatabaseURL:           getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
+		RPCURLs:               rpcUrls,
+		WSSURL:                getEnv("WSS_URL", ""),
+		ChainID:               getEnvAsInt64("CHAIN_ID", 1),
+		StartBlock:            startBlock,
+		StartBlockStr:         startBlockStr,
+		LogLevel:              getEnv("LOG_LEVEL", "info"),
+		LogFormat:             getEnv("LOG_FORMAT", "json"),
+		RPCTimeout:            time.Duration(rpcTimeoutSeconds) * time.Second,
+		RPCRateLimit:          rpcRateLimit,
+		FetchConcurrency:      fetchConcurrency,
+		FetchBatchSize:        fetchBatchSize,
+		MaxGasPrice:           maxGasPrice,
+		GasSafetyMargin:       gasSafetyMargin,
+		CheckpointBatch:       checkpointBatch,
+		RetryQueueSize:        retryQueueSize,
+		DemoMode:              demoMode,
+		IsTestnet:             isTestnet,
+		MaxSyncBatch:          maxSyncBatch,
+		EnableEnergySaving:    energySaving,
+		WatchedTokenAddresses: watchedTokens,
+		TokenFilterMode:       getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
+		Port:                  getEnv("PORT", "8080"),
+		AppTitle:              getEnv("APP_TITLE", "🚀 Web3 Indexer Dashboard"),
 	}
 
 	// 🚨 优先级锁定：优先信任显式传入的 RPC_URLS 环境变量
