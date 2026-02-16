@@ -24,7 +24,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	validTransfers := []models.Transfer{}
 
 	for _, data := range blocks {
-		if data.Err != nil {
+		if data.Err != nil || data.Block == nil {
 			continue
 		}
 
@@ -150,7 +150,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	// 6. 实时事件推送 (在事务成功后)
 	if p.EventHook != nil {
 		for _, data := range blocks {
-			if data.Err != nil {
+			if data.Err != nil || data.Block == nil {
 				continue
 			}
 			block := data.Block
@@ -176,12 +176,16 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 
 	// Update metrics for the last processed block in the batch
 	if p.metrics != nil && len(blocks) > 0 {
-		lastBlock := blocks[len(blocks)-1].Block
-		if lastBlock != nil {
-			blockNum := lastBlock.Number()
-			if blockNum.IsInt64() {
-				p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
-			}
+		lastData := blocks[len(blocks)-1]
+		var bNum *big.Int
+		if lastData.Block != nil {
+			bNum = lastData.Block.Number()
+		} else if lastData.Number != nil {
+			bNum = lastData.Number
+		}
+
+		if bNum != nil && bNum.IsInt64() {
+			p.metrics.UpdateCurrentSyncHeight(bNum.Int64())
 		}
 	}
 
