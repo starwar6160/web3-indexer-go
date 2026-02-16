@@ -12,6 +12,7 @@ include makefiles/docker.mk
 include makefiles/dev.mk
 include makefiles/test.mk
 include makefiles/docs.mk
+include makefiles/db.mk
 
 .PHONY: help build init clean status
 
@@ -32,6 +33,16 @@ help:
 	@echo "  make check        - 运行所有质量检查 (Lint/Security/Test)"
 	@echo "  make docs-sync    - 自动刷新文档索引 (SUMMARY.md)"
 	@echo "  make repair       - [Sepolia] 异步修复数据库中的哈希链断裂 (0x000...)"
+	@echo ""
+	@echo "💾 数据库管理 (makefiles/db.mk):"
+	@echo "  make db-list      - 查看所有 Web3 数据库统计"
+	@echo "  make db-clean-debug     - 清空 Debug 数据库（保留结构）"
+	@echo "  make db-reset-debug     - 重置 Debug 数据库（删除并重建）"
+	@echo "  make db-clean-demo2     - 清空 Demo2 数据库（保留结构）"
+	@echo "  make db-reset-demo2     - 重置 Demo2 数据库（删除并重建）"
+	@echo "  make db-sync-schema     - 同步 Schema（Demo1 → Debug）"
+	@echo "  make db-backup-demo1    - 备份 Demo1 数据"
+	@echo "  make db-restore-demo1   - 恢复 Demo1 数据（从最新备份）"
 	@echo ""
 	@echo "🔧 基础指令:"
 	@echo "  make build        - 编译本地二进制文件"

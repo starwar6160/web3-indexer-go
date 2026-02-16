@@ -2,15 +2,13 @@ services:
   # Web3 Indexer App Service for Sepolia (Production/Testnet Mode)
   # Now fully integrated with Host-mode Infrastructure
   sepolia-indexer:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: web3-indexer-go:stable
     container_name: web3-testnet-app
     network_mode: host
     environment:
       # Connect to the infrastructure Postgres on 15432
-      - DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_indexer?sslmode=disable
-      - RPC_URLS=${SEPOLIA_RPC_URLS}
+      - DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_sepolia?sslmode=disable
+      - RPC_URLS=${RPC_URLS}
       - CHAIN_ID=11155111
       - START_BLOCK=${START_BLOCK:-latest}
       - PORT=8081  # Listen on host port 8081
@@ -21,6 +19,12 @@ services:
       - MAX_SYNC_BATCH=5
       - RPC_RATE_LIMIT=1
       - FETCH_CONCURRENCY=2
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: always
 
   # Note: Database is now handled by docker-compose.infra.yml in host mode on port 15432

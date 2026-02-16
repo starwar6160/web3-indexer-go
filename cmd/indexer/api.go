@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"web3-indexer-go/internal/engine"
+	"web3-indexer-go/internal/web"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // REST Models
@@ -36,6 +38,103 @@ type Transfer struct {
 	ToAddress    string `db:"to_address" json:"to_address"`
 	Amount       string `db:"amount" json:"amount"`
 	TokenAddress string `db:"token_address" json:"token_address"`
+}
+
+// Server 包装 HTTP 服务
+type Server struct {
+	db          *sqlx.DB
+	wsHub       *web.Hub
+	port        string
+	title       string
+	rpcPool     engine.RPCClient
+	lazyManager *engine.LazyManager
+	chainID     int64
+	mu          sync.RWMutex
+}
+
+func NewServer(db *sqlx.DB, wsHub *web.Hub, port, title string) *Server {
+	return &Server{
+		db:    db,
+		wsHub: wsHub,
+		port:  port,
+		title: title,
+	}
+}
+
+// SetDependencies 动态注入运行期依赖
+func (s *Server) SetDependencies(db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.db = db
+	s.rpcPool = rpcPool
+	s.lazyManager = lazyManager
+	s.chainID = chainID
+	slog.Info("💉 API Server dependencies injected")
+}
+
+func (s *Server) Start() error {
+	mux := http.NewServeMux()
+
+	// 静态资源
+	mux.Handle("/static/", web.HandleStatic())
+
+	// API 路由 (使用闭包延迟访问依赖)
+	mux.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		db := s.db
+		s.mu.RUnlock()
+		if db == nil {
+			http.Error(w, "System Initializing...", 503)
+			return
+		}
+		handleGetBlocks(w, r, db)
+	})
+
+	mux.HandleFunc("/api/transfers", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		db := s.db
+		s.mu.RUnlock()
+		if db == nil {
+			http.Error(w, "System Initializing...", 503)
+			return
+		}
+		handleGetTransfers(w, r, db)
+	})
+
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		db := s.db
+		rpcPool := s.rpcPool
+		lazyManager := s.lazyManager
+		chainID := s.chainID
+		s.mu.RUnlock()
+
+		if db == nil || rpcPool == nil {
+			// 返回最小化的初始化状态
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"state": "initializing",
+				"title": s.title,
+				"msg":   "Database or RPC not ready yet",
+			})
+			return
+		}
+		handleGetStatus(w, r, db, rpcPool, lazyManager, chainID)
+	})
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		s.wsHub.HandleWS(w, r)
+	})
+
+	// 首页
+	mux.HandleFunc("/", web.RenderDashboard)
+	mux.HandleFunc("/security", web.RenderSecurity)
+
+	// Prometheus 指标
+	mux.Handle("/metrics", promhttp.Handler())
+
+	slog.Info("🌐 Server listening", "port", s.port)
+	return http.ListenAndServe(":"+s.port, VisitorStatsMiddleware(nil, mux))
 }
 
 func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
@@ -179,8 +278,10 @@ func VisitorStatsMiddleware(db *sqlx.DB, next http.Handler) http.Handler {
 		isBrowser := strings.Contains(ua, "Mozilla")
 
 		if isBrowser && !isBot && r.Method == http.MethodGet {
-			// 4. 异步持久化
-			go logVisitor(db, ip, ua, r.URL.Path)
+			// 4. 异步持久化 (仅当 DB 已就绪)
+			if db != nil {
+				go logVisitor(db, ip, ua, r.URL.Path)
+			}
 		}
 
 		next.ServeHTTP(w, r)
@@ -328,6 +429,13 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		adminIP = "Protected-Internal-Node"
 	}
 
+	// 计算 TPS（追赶模式下显示为 0）
+	tps := calculateTPS(totalTransfers, totalBlocks)
+	isCatchingUp := syncLag > 10 // 追赶模式阈值：10 个块
+	if isCatchingUp {
+		tps = 0.0 // 追赶模式下不显示实时 TPS，避免误导
+	}
+
 	status := map[string]interface{}{
 		"state":                 "active",
 		"latest_block":          latestBlockStr,
@@ -336,7 +444,8 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		"total_blocks":          totalBlocks,
 		"total_transfers":       totalTransfers,
 		"total_visitors":        totalVisitors,
-		"tps":                   calculateTPS(totalTransfers, totalBlocks), // 实时 TPS
+		"tps":                   tps, // 追赶模式下显示为 0
+		"is_catching_up":        isCatchingUp, // 新增：是否在追赶模式
 		"bps":                   currentBPS.Load(),
 		"is_healthy":            rpcPool.GetHealthyNodeCount() > 0,
 		"self_healing_count":    selfHealingEvents.Load(),
