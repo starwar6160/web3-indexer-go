@@ -108,7 +108,11 @@ async function fetchStatus() {
         const indexerState = (data?.state || 'unknown').toUpperCase();
 
         if (!isWSConnected) {
-            updateSystemState(indexerState, 'status-connecting');
+            if (indexerState === 'ACTIVE') {
+                updateSystemState('● ACTIVE', 'status-live');
+            } else {
+                updateSystemState(indexerState, 'status-connecting');
+            }
         }
 
         // 更新 UI 指标
