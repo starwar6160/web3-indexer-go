@@ -5,7 +5,39 @@ datasources:
     type: postgres
     uid: sepolia_db_001
     url: localhost:15432
-    database: web3_indexer
+    database: web3_sepolia
+    user: postgres
+    secureJsonData:
+      password: W3b3_Idx_Secur3_2026_Sec
+    jsonData:
+      sslmode: 'disable'
+      maxOpenConns: 50
+      maxIdleConns: 50
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
+
+  - name: Web3-Demo-DB
+    type: postgres
+    uid: demo_db_001
+    url: localhost:15432
+    database: web3_demo
+    user: postgres
+    secureJsonData:
+      password: W3b3_Idx_Secur3_2026_Sec
+    jsonData:
+      sslmode: 'disable'
+      maxOpenConns: 50
+      maxIdleConns: 50
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
+
+  - name: Web3-Debug-DB
+    type: postgres
+    uid: debug_db_001
+    url: localhost:15432
+    database: web3_debug
     user: postgres
     secureJsonData:
       password: W3b3_Idx_Secur3_2026_Sec
