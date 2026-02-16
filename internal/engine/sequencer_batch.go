@@ -7,8 +7,8 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
-	"time"
 	"github.com/ethereum/go-ethereum/common"
+	"time"
 )
 
 func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
@@ -100,7 +100,7 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 			nextBlock := new(big.Int).Add(data.RangeEnd, big.NewInt(1))
 			s.expectedBlock.Set(nextBlock)
 			s.lastProgressAt = time.Now()
-			Logger.Debug("sequencer_range_teleport", 
+			Logger.Debug("sequencer_range_teleport",
 				slog.String("from", blockNum.String()),
 				slog.String("to", data.RangeEnd.String()))
 			s.processBufferContinuationsLocked(ctx)

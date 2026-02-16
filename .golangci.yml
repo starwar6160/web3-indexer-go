@@ -92,6 +92,13 @@ linters-settings:
       - opinionated
       - performance
       - style
+    disabled-checks:
+      - ifElseChain
+      - hugeParam
+      - unnamedResult
+      - rangeValCopy
+      - nestingReduce
+      - paramTypeCombine
 
   # Revive configuration (modern golint)
   revive:

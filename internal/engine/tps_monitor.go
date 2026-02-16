@@ -10,7 +10,7 @@ import (
 // TPSMonitor 计算基于区块时间戳的真实链上 TPS
 type TPSMonitor struct {
 	lastBlockTime uint64
-	lastTPS        float64
+	lastTPS       float64
 }
 
 // NewTPSMonitor 创建 TPS 监控器

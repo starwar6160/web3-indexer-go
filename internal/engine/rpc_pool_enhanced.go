@@ -589,18 +589,16 @@ func (p *EnhancedRPCClientPool) checkHealth() {
 			} else {
 				healthyNodes++
 			}
-		} else {
+		} else if time.Since(node.lastError) > 30*time.Second {
 			// Try to recover unhealthy nodes after 30 seconds
-			if time.Since(node.lastError) > 30*time.Second {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_, err := node.client.BlockNumber(ctx)
-				cancel()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, err := node.client.BlockNumber(ctx)
+			cancel()
 
-				if err == nil {
-					node.isHealthy = true
-					log.Printf("Enhanced RPC node %s recovered", node.url)
-					healthyNodes++
-				}
+			if err == nil {
+				node.isHealthy = true
+				log.Printf("Enhanced RPC node %s recovered", node.url)
+				healthyNodes++
 			}
 		}
 	}

@@ -21,7 +21,7 @@ func TestProcessor_NewProcessor(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	
+
 	processor := NewProcessor(sqlxDB, nil, 500, 1)
 
 	assert.NotNil(t, processor)
@@ -36,7 +36,7 @@ func TestProcessor_ProcessBlock_HappyPath(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	
+
 	processor := NewProcessor(sqlxDB, nil, 500, 1)
 	processor.SetBatchCheckpoint(1)
 
@@ -62,14 +62,14 @@ func TestProcessor_ProcessBlock_HappyPath(t *testing.T) {
 	// Mock block insert
 	mock.ExpectExec("INSERT INTO blocks").
 		WithArgs(
-			"43",                           // number
-			block.Hash().Hex(),             // hash
+			"43",               // number
+			block.Hash().Hex(), // hash
 			"0x4242424242424242424242424242424242424242424242424242424242424242", // parent_hash
-			uint64(1234567890),             // timestamp
-			uint64(30000000),              // gas_limit
-			uint64(8421505),               // gas_used
-			"1000000000",                  // base_fee_per_gas
-			0,                             // transaction_count
+			uint64(1234567890), // timestamp
+			uint64(30000000),   // gas_limit
+			uint64(8421505),    // gas_used
+			"1000000000",       // base_fee_per_gas
+			0,                  // transaction_count
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -99,7 +99,7 @@ func TestProcessor_ProcessBlock_ReorgDetection(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	
+
 	processor := NewProcessor(sqlxDB, nil, 500, 1)
 
 	// Setup mock expectations

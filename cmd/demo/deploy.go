@@ -45,8 +45,8 @@ func main() {
 	// Verify connection
 	chainID, err := client.ChainID(ctx)
 	if err != nil {
-		client.Close()
-		log.Fatalf("Failed to get chain ID: %v", err)
+		log.Printf("Failed to get chain ID: %v", err)
+		return
 	}
 	fmt.Printf("✅ Connected to Anvil (Chain ID: %d)\n", chainID)
 
@@ -55,13 +55,15 @@ func main() {
 	// Account 0: 0x9bb57efaff34f3558f314e6fe06eeb63ce9f3909
 	privateKey, err := crypto.HexToECDSA("4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d")
 	if err != nil {
-		log.Fatalf("Failed to parse private key: %v", err)
+		log.Printf("Failed to parse private key: %v", err)
+		return
 	}
 
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		log.Fatal("Failed to cast public key to ECDSA")
+		log.Printf("Failed to cast public key to ECDSA")
+		return
 	}
 
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)

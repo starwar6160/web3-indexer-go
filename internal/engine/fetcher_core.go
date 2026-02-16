@@ -78,6 +78,9 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher {
 	// ✨ 使用工业级限流器（自动降级保护）
 	rateLimiter := limiter.NewRateLimiter(rps)
+	if burst > 0 {
+		rateLimiter.Limiter().SetBurst(burst)
+	}
 
 	slog.Info("🛡️ Rate limiter initialized",
 		"max_rps", rateLimiter.MaxRPS(),

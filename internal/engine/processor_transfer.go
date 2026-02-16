@@ -17,7 +17,7 @@ func getTokenSymbol(tokenAddr common.Address) string {
 		"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "USDC",
 		"0xff34b3d4aee8ddcd6f9afffb6fe49bd371b8a357": "DAI",
 		"0x7b79995e5f793a07bc00c21412e50ecae098e7f9": "WETH",
-		"0xa3382dffca847b84592c05ab05937a1a38623bc": "UNI",
+		"0xa3382dffca847b84592c05ab05937a1a38623bc":  "UNI",
 	}
 
 	hexAddr := strings.ToLower(tokenAddr.Hex())
@@ -42,7 +42,7 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 	transfer := &models.Transfer{
 		BlockNumber:  models.BigInt{Int: new(big.Int).SetUint64(vLog.BlockNumber)},
 		TxHash:       vLog.TxHash.Hex(),
-		LogIndex:     uint(vLog.Index),
+		LogIndex:     vLog.Index,
 		From:         strings.ToLower(from.Hex()),
 		To:           strings.ToLower(to.Hex()),
 		Amount:       amount,

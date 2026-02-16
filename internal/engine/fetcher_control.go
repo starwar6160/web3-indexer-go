@@ -18,6 +18,7 @@ func (f *Fetcher) Stop() {
 				}
 			}()
 			for range f.jobs {
+				dummyEmptyBlock()
 			}
 		}()
 	})

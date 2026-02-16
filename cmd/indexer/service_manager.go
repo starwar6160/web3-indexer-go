@@ -55,7 +55,7 @@ func (sm *ServiceManager) StartTailFollow(ctx context.Context, startBlock *big.I
 				"last_in_db", maxInDB,
 				"start_at", startNum,
 				"gap_blocks", gapSize)
-			
+
 			// 启动后台协程回填 Gap，不阻塞主 Tail 流程
 			go func() {
 				catchupCtx := context.Background()

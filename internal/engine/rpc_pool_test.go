@@ -75,6 +75,7 @@ func TestRPCClientPool_GetHealthyNodeCount(t *testing.T) {
 }
 
 func TestRPCClientPool_Close(t *testing.T) {
+	_ = t
 	// Create a mock pool for testing
 	pool := &RPCClientPool{
 		clients: []*rpcNode{

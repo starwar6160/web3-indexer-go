@@ -46,12 +46,12 @@ type Metrics struct {
 
 	// System metrics
 	CheckpointUpdates  prometheus.Counter
-	StartTime           prometheus.Gauge
-	CurrentSyncHeight   prometheus.Gauge
-	CurrentChainHeight  prometheus.Gauge // 新增：链头高度
-	SyncLag             prometheus.Gauge // 新增：同步滞后
-	E2ELatency          prometheus.Gauge // 新增：秒级 E2E 延迟
-	RealtimeTPS         prometheus.Gauge // 新增：实时 TPS
+	StartTime          prometheus.Gauge
+	CurrentSyncHeight  prometheus.Gauge
+	CurrentChainHeight prometheus.Gauge // 新增：链头高度
+	SyncLag            prometheus.Gauge // 新增：同步滞后
+	E2ELatency         prometheus.Gauge // 新增：秒级 E2E 延迟
+	RealtimeTPS        prometheus.Gauge // 新增：实时 TPS
 
 	// 📊 代币转账统计（按代币符号）
 	TokenTransferVolume *prometheus.CounterVec
@@ -226,4 +226,3 @@ func (m *Metrics) RecordTokenTransfer(symbol string, amount float64) {
 	m.TokenTransferVolume.WithLabelValues(symbol).Add(amount)
 	m.TokenTransferCount.WithLabelValues(symbol).Inc()
 }
-

@@ -128,7 +128,7 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	if err != nil {
 		return nil, nil, err
 	}
-	
+
 	filterQuery := ethereum.FilterQuery{
 		FromBlock: bn,
 		ToBlock:   bn,
@@ -141,6 +141,6 @@ func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.B
 	if err != nil {
 		return types.NewBlockWithHeader(header), []types.Log{}, nil
 	}
-	
+
 	return types.NewBlockWithHeader(header), logs, nil
 }
