@@ -85,3 +85,8 @@ gateway-reload: gateway-config
 	@docker exec web3-indexer-gateway nginx -s reload
 	@echo "✅ Gateway config updated and reloaded."
 
+.PHONY: ci
+ci:
+	@echo "🚀 开始本地 CI 仿真验证..."
+	docker build -f Dockerfile.ci -t web3-indexer-ci:local .
+	docker run --rm -u $$(id -u):$$(id -g) -v $(PWD):/app web3-indexer-ci:local
