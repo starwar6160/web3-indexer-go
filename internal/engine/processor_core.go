@@ -75,6 +75,11 @@ func (p *Processor) StartRetryWorker(ctx context.Context, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				Logger.Error("processor_retry_worker_panic", "err", r)
+			}
+		}()
 		Logger.Info("processor_retry_worker_started")
 		for {
 			select {

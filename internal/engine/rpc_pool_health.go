@@ -13,6 +13,11 @@ func (p *RPCClientPool) StartHealthCheck(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	go func() {
 		defer ticker.Stop()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("HealthCheck goroutine panic: %v", r)
+			}
+		}()
 		for {
 			select {
 			case <-ctx.Done():

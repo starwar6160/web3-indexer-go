@@ -17,10 +17,12 @@ import (
 	"web3-indexer-go/internal/config"
 	"web3-indexer-go/internal/emulator"
 	"web3-indexer-go/internal/engine"
+	"web3-indexer-go/internal/recovery"
 	"web3-indexer-go/internal/web"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	networkpkg "web3-indexer-go/pkg/network"
+
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -112,22 +114,22 @@ func main() {
 	// 🚀 SRE 核心：先开 Web 服务器，再连数据库和 RPC
 	wsHub := web.NewHub()
 	go wsHub.Run(ctx)
-	
+
 	apiPort := cfg.Port
 	if os.Getenv("PORT") != "" {
 		apiPort = os.Getenv("PORT")
 	}
-	
+
 	apiServer := NewServer(nil, wsHub, apiPort, cfg.AppTitle)
-	go func() {
+	recovery.WithRecoveryNamed("api_server", func() {
 		slog.Info("🚀 Indexer API Server starting (Early Bird Mode)", "port", apiPort)
 		if err := apiServer.Start(); err != nil && err != http.ErrServerClosed {
 			slog.Error("api_start_fail", "err", err)
 		}
-	}()
+	})
 
 	// --- 接下来执行异步初始化 ---
-	go func() {
+	recovery.WithRecoveryNamed("async_init", func() {
 		db, err := sqlx.Connect("pgx", cfg.DatabaseURL)
 		if err != nil {
 			slog.Error("db_fail", "err", err)
@@ -170,7 +172,7 @@ func main() {
 		}
 
 		sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency)
-		
+
 		// ✨ 注入依赖，使 API 变得可用
 		lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
 		apiServer.SetDependencies(db, rpcPool, lazyManager, cfg.ChainID)
@@ -180,7 +182,7 @@ func main() {
 		}
 
 		startBlock, _ := sm.GetStartBlock(ctx, forceFrom, *resetDB)
-		
+
 		// 补全父块锚点
 		if startBlock.Cmp(big.NewInt(0)) > 0 {
 			parentBlockNum := new(big.Int).Sub(startBlock, big.NewInt(1))
@@ -195,10 +197,10 @@ func main() {
 		sm.fetcher.Start(ctx, &wg)
 		fatalErrCh := make(chan error, 1)
 		sequencer := engine.NewSequencerWithFetcher(sm.processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, fatalErrCh, nil, engine.GetMetrics())
-		
+
 		wg.Add(1)
-		go func() { defer wg.Done(); sequencer.Run(ctx) }()
-		go sm.StartTailFollow(ctx, startBlock)
+		recovery.WithRecoveryNamed("sequencer_run", func() { defer wg.Done(); sequencer.Run(ctx) })
+		recovery.WithRecoveryNamed("tail_follow", func() { sm.StartTailFollow(ctx, startBlock) })
 
 		// 仿真器 (仅 demo)
 		if cfg.DemoMode {
@@ -207,11 +209,11 @@ func main() {
 				emu, _ := emulator.NewEmulator(cfg.RPCURLs[0], emuCfg.PrivateKey)
 				if emu != nil {
 					wg.Add(1)
-					go func() { defer wg.Done(); _ = emu.Start(ctx, nil) }()
+					recovery.WithRecoveryNamed("emulator_start", func() { defer wg.Done(); _ = emu.Start(ctx, nil) })
 				}
 			}
 		}
-	}()
+	})
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

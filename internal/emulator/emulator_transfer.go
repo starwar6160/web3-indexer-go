@@ -121,6 +121,11 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 	)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				e.logger.Error("emulator_receipt_wait_panic", "err", r)
+			}
+		}()
 		receipt, err := e.waitForReceipt(ctx, signedTx.Hash())
 		if err == nil {
 			e.Metrics.Confirmed.Add(1)

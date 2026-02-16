@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"log"
+
 	"golang.org/x/time/rate"
 )
 
@@ -10,6 +12,11 @@ func (f *Fetcher) Stop() {
 		close(f.stopCh)
 		// 清空 jobs channel 防止阻塞
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("fetcher_stop_drain_panic: %v", r)
+				}
+			}()
 			for range f.jobs {
 			}
 		}()

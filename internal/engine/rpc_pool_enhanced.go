@@ -6,8 +6,8 @@ import (
 	"log"
 	"math"
 	"math/big"
-	"sync"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -69,7 +69,7 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 
 	pool := &EnhancedRPCClientPool{
 		clients:           make([]*rpcNode, 0, len(urls)),
-		globalRateLimiter: rate.NewLimiter(rate.Limit(globalRPS), int(globalRPS*2)), 
+		globalRateLimiter: rate.NewLimiter(rate.Limit(globalRPS), int(globalRPS*2)),
 		nodeRateLimiters:  make(map[string]*rate.Limiter),
 		metrics:           GetMetrics(),
 		isTestnetMode:     isTestnet && !isLocal, // Disable testnet restrictions for local
@@ -222,7 +222,7 @@ func (p *EnhancedRPCClientPool) handleRPCError(node *rpcNode, err error) {
 		// 5 minute cooldown for 429s
 		node.retryAfter = time.Now().Add(5 * time.Minute)
 		p.mu.Unlock()
-		
+
 		// Report red light to Prometheus
 		if p.metrics != nil {
 			p.metrics.UpdateRPCHealthyNodes("enhanced", p.GetHealthyNodeCount())
@@ -552,6 +552,11 @@ func (p *EnhancedRPCClientPool) StartHealthCheck(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	go func() {
 		defer ticker.Stop()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("EnhancedHealthCheck goroutine panic: %v", r)
+			}
+		}()
 		for {
 			select {
 			case <-ctx.Done():

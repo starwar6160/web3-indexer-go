@@ -38,13 +38,13 @@ func (lm *LazyManager) Trigger() {
 	defer lm.mu.Unlock()
 
 	now := time.Now()
-	
+
 	// Check if we're still in cooldown period
 	if now.Sub(lm.lastStartTime) < lm.cooldown && lm.isActive {
 		// Still in active period, do nothing
 		return
 	}
-	
+
 	// Check if we're past the cooldown period
 	if !lm.isActive && now.Sub(lm.lastStartTime) > lm.cooldown {
 		lm.activateIndexing()
@@ -61,15 +61,15 @@ func (lm *LazyManager) Trigger() {
 func (lm *LazyManager) activateIndexing() {
 	lm.isActive = true
 	lm.lastStartTime = time.Now()
-	slog.Info("🚀 访客触发：开始限时索引（正在追赶中...）", 
+	slog.Info("🚀 访客触发：开始限时索引（正在追赶中...）",
 		slog.Duration("active_period", lm.activePeriod),
 		slog.Duration("cooldown_period", lm.cooldown))
-	
+
 	// Resume the fetcher if it was paused
 	if lm.fetcher.IsPaused() {
 		lm.fetcher.Resume()
 	}
-	
+
 	// Setup timer to stop indexing after active period
 	lm.setupStopTimer()
 }
@@ -79,7 +79,7 @@ func (lm *LazyManager) setupStopTimer() {
 	if lm.stopTimer != nil {
 		lm.stopTimer.Stop()
 	}
-	
+
 	lm.stopTimer = time.AfterFunc(lm.activePeriod, func() {
 		lm.deactivateIndexing()
 	})
@@ -89,14 +89,14 @@ func (lm *LazyManager) setupStopTimer() {
 func (lm *LazyManager) deactivateIndexing() {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
-	
+
 	if !lm.isActive {
 		return
 	}
-	
+
 	lm.isActive = false
 	slog.Info("💤 任务完成：进入懒惰模式，暂停索引以节省额度")
-	
+
 	// Pause the fetcher to stop indexing
 	lm.fetcher.Pause()
 }
@@ -146,7 +146,7 @@ func (lm *LazyManager) GetStatus() map[string]interface{} {
 func (lm *LazyManager) StartInitialIndexing() {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
-	
+
 	lm.activateIndexing()
 }
 
@@ -159,8 +159,8 @@ func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface, chain
 			slog.Error("failed_to_get_latest_block_for_heartbeat", "err", err)
 			return
 		}
-		
-		_, err = db.ExecContext(ctx, 
+
+		_, err = db.ExecContext(ctx,
 			"INSERT INTO sync_checkpoints (chain_id, last_synced_block, updated_at) VALUES ($1, $2, NOW()) "+
 				"ON CONFLICT (chain_id) DO UPDATE SET last_synced_block = $2, updated_at = NOW()",
 			chainID,
@@ -171,12 +171,17 @@ func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface, chain
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("lazy_manager_goroutine_panic", "err", r)
+			}
+		}()
 		// 🚀 6.1 优化：启动时立即执行一次预热
 		updateFunc()
 
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -192,14 +197,14 @@ func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface, chain
 func (lm *LazyManager) DeactivateIndexingForced() {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
-	
+
 	if !lm.isActive {
 		return
 	}
-	
+
 	lm.isActive = false
 	slog.Info("💤 FORCED PAUSE: Entering lazy mode to save quota")
-	
+
 	// Pause the fetcher to stop indexing
 	lm.fetcher.Pause()
 }
