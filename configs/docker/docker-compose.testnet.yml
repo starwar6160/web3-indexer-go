@@ -23,6 +23,8 @@ services:
       - MAX_SYNC_BATCH=5
       - RPC_RATE_LIMIT=1
       - FETCH_CONCURRENCY=2
+      - TOKEN_FILTER_MODE=${TOKEN_FILTER_MODE:-all}
+      - WATCHED_TOKEN_ADDRESSES=${WATCHED_TOKEN_ADDRESSES:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/api/status"]
       interval: 10s
