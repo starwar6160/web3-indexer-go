@@ -12,11 +12,11 @@ import (
 
 // 预定义的网络 ID（常量）
 const (
-	MainnetChainID  = 1
-	SepoliaChainID  = 11155111
-	AnvilChainID    = 31337
-	GoerliChainID   = 5
-	HoleskyChainID  = 17000
+	MainnetChainID = 1
+	SepoliaChainID = 11155111
+	AnvilChainID   = 31337
+	GoerliChainID  = 5
+	HoleskyChainID = 17000
 )
 
 // NetworkName 返回 Chain ID 对应的网络名称

@@ -32,7 +32,7 @@ func RenderDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// 2. 环境识别逻辑 (使用物理 ChainID 判定)
 	chainIDStr := os.Getenv("CHAIN_ID")
-	
+
 	// 默认值
 	envName := "demo"
 	dsName := "Web3-demo-DB"

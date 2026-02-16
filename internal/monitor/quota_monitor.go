@@ -10,15 +10,15 @@ import (
 )
 
 const (
-	MaxDailyQuota      = 300000 // 商业节点每日免费额度上限（CU）
-	AlertThreshold     = 0.80   // 80% 预警阈值
-	CriticalThreshold  = 0.90   // 90% 临界阈值
+	MaxDailyQuota     = 300000 // 商业节点每日免费额度上限（CU）
+	AlertThreshold    = 0.80   // 80% 预警阈值
+	CriticalThreshold = 0.90   // 90% 临界阈值
 )
 
 // QuotaMonitor RPC 额度监控器
 type QuotaMonitor struct {
-	dailyCalls  uint64      // 当天 RPC 调用次数
-	resetTime   time.Time   // 下次重置时间（UTC 0 点）
+	dailyCalls  uint64    // 当天 RPC 调用次数
+	resetTime   time.Time // 下次重置时间（UTC 0 点）
 	usageGauge  prometheus.Gauge
 	statusGauge prometheus.Gauge
 }

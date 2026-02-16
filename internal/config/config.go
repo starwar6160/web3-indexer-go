@@ -11,26 +11,26 @@ import (
 )
 
 type Config struct {
-	DatabaseURL      string
-	RPCURLs          []string // 支持多个RPC URL
-	WSSURL           string
-	ChainID          int64
-	StartBlock       int64
-	StartBlockStr    string      // String representation to handle "latest"
-	LogLevel         string
-	LogFormat        string
-	RPCTimeout       time.Duration // RPC超时配置
-	RPCRateLimit     int           // 每秒允许的RPC请求数 (RPS)
-	FetchConcurrency int           // 并发抓取数
-	FetchBatchSize   int           // 批量处理大小
-	MaxGasPrice      int64         // 模拟器允许的最大 Gas Price (单位: Gwei)
-	GasSafetyMargin  int           // Gas Limit 的安全裕度百分比 (默认 20)
-	CheckpointBatch  int           // 多少个区块更新一次数据库检查点 (默认 100)
-	RetryQueueSize   int           // 失败任务重试队列的大小 (默认 500)
-	DemoMode         bool          // 是否开启演示模式
-	IsTestnet        bool          // 是否为测试网模式
-	MaxSyncBatch     int           // 最大同步批次大小（用于控制请求频率）
-	EnableEnergySaving bool        // 是否开启节能模式（懒惰模式）
+	DatabaseURL        string
+	RPCURLs            []string // 支持多个RPC URL
+	WSSURL             string
+	ChainID            int64
+	StartBlock         int64
+	StartBlockStr      string // String representation to handle "latest"
+	LogLevel           string
+	LogFormat          string
+	RPCTimeout         time.Duration // RPC超时配置
+	RPCRateLimit       int           // 每秒允许的RPC请求数 (RPS)
+	FetchConcurrency   int           // 并发抓取数
+	FetchBatchSize     int           // 批量处理大小
+	MaxGasPrice        int64         // 模拟器允许的最大 Gas Price (单位: Gwei)
+	GasSafetyMargin    int           // Gas Limit 的安全裕度百分比 (默认 20)
+	CheckpointBatch    int           // 多少个区块更新一次数据库检查点 (默认 100)
+	RetryQueueSize     int           // 失败任务重试队列的大小 (默认 500)
+	DemoMode           bool          // 是否开启演示模式
+	IsTestnet          bool          // 是否为测试网模式
+	MaxSyncBatch       int           // 最大同步批次大小（用于控制请求频率）
+	EnableEnergySaving bool          // 是否开启节能模式（懒惰模式）
 
 	// 代币过滤配置
 	WatchedTokenAddresses []string // 监控的 ERC20 合约地址
@@ -66,9 +66,9 @@ func Load() *Config {
 	// Check if we're connecting to a testnet
 	isTestnet := false
 	for _, url := range rpcUrls {
-		if strings.Contains(strings.ToLower(url), "sepolia") || 
-		   strings.Contains(strings.ToLower(url), "holesky") ||
-		   strings.Contains(strings.ToLower(url), "goerli") {
+		if strings.Contains(strings.ToLower(url), "sepolia") ||
+			strings.Contains(strings.ToLower(url), "holesky") ||
+			strings.Contains(strings.ToLower(url), "goerli") {
 			isTestnet = true
 			break
 		}

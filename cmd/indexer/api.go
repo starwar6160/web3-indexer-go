@@ -288,7 +288,6 @@ func VisitorStatsMiddleware(db *sqlx.DB, next http.Handler) http.Handler {
 	})
 }
 
-
 func logVisitor(db *sqlx.DB, ip, ua, path string) {
 	metadata := map[string]interface{}{
 		"path":       path,
@@ -329,7 +328,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 
 	// 1. 尝试实时获取链头
 	latestChainBlock, err := rpcPool.GetLatestBlockNumber(r.Context())
-	
+
 	// 2. 缓存降级逻辑：如果 RPC 失败（如限流），从数据库读取 Heartbeat 记录
 	latestBlockStr := "0"
 	var latestChainInt64 int64
@@ -394,12 +393,14 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 
 	// 计算 E2E Latency（秒）
 	var e2eLatencySeconds float64
-	var e2eLatencyDisplay string 
+	var e2eLatencyDisplay string
 	if latestChainInt64 > 0 && latestIndexedBlockInt64 > 0 {
 		// 估算逻辑
 		syncLag := latestChainInt64 - latestIndexedBlockInt64
-		if syncLag < 0 { syncLag = 0 }
-		
+		if syncLag < 0 {
+			syncLag = 0
+		}
+
 		rawLatency := float64(syncLag) * 12 // Sepolia 平均出块时间
 
 		if syncLag > 100 {
@@ -409,9 +410,9 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		} else {
 			// 实时/小延迟模式：计算处理延迟
 			var processedAt time.Time
-			err = db.GetContext(r.Context(), &processedAt, 
+			err = db.GetContext(r.Context(), &processedAt,
 				"SELECT processed_at FROM blocks WHERE number = $1", latestIndexedBlock)
-			
+
 			if err == nil && !processedAt.IsZero() {
 				actualLatency := time.Since(processedAt).Seconds()
 				e2eLatencySeconds = actualLatency
@@ -437,28 +438,28 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 
 	status := map[string]interface{}{
-		"state":                 "active",
-		"latest_block":          latestBlockStr,
-		"latest_indexed":        latestIndexedBlock,
-		"sync_lag":              syncLag,
-		"total_blocks":          totalBlocks,
-		"total_transfers":       totalTransfers,
-		"total_visitors":        totalVisitors,
-		"tps":                   tps, // 追赶模式下显示为 0
-		"is_catching_up":        isCatchingUp, // 新增：是否在追赶模式
-		"bps":                   currentBPS.Load(),
-		"is_healthy":            rpcPool.GetHealthyNodeCount() > 0,
-		"self_healing_count":    selfHealingEvents.Load(),
-		"admin_ip":              adminIP,
+		"state":              "active",
+		"latest_block":       latestBlockStr,
+		"latest_indexed":     latestIndexedBlock,
+		"sync_lag":           syncLag,
+		"total_blocks":       totalBlocks,
+		"total_transfers":    totalTransfers,
+		"total_visitors":     totalVisitors,
+		"tps":                tps,          // 追赶模式下显示为 0
+		"is_catching_up":     isCatchingUp, // 新增：是否在追赶模式
+		"bps":                currentBPS.Load(),
+		"is_healthy":         rpcPool.GetHealthyNodeCount() > 0,
+		"self_healing_count": selfHealingEvents.Load(),
+		"admin_ip":           adminIP,
 		"rpc_nodes": map[string]int{
 			"healthy": rpcPool.GetHealthyNodeCount(),
 			"total":   rpcPool.GetTotalNodeCount(),
 		},
 		// E2E Latency（带上限检测和友好显示）
-		"e2e_latency_seconds":  e2eLatencySeconds,
-		"e2e_latency_display":  e2eLatencyDisplay,
+		"e2e_latency_seconds": e2eLatencySeconds,
+		"e2e_latency_display": e2eLatencyDisplay,
 	}
-	
+
 	// Add lazy indexer status if available
 	if lazyManager != nil {
 		lazyStatus := lazyManager.GetStatus()

@@ -72,7 +72,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 	// 🛡️ 工业级逻辑守卫：哈希自指检测
 	if block.Hash().Hex() == block.ParentHash().Hex() {
-		Logger.Error("❌ FATAL: Block hash equals parent hash!", 
+		Logger.Error("❌ FATAL: Block hash equals parent hash!",
 			slog.String("block", blockNum.String()),
 			slog.String("hash", block.Hash().Hex()))
 		return fmt.Errorf("hash self-reference detected at block %s", blockNum.String())
@@ -81,7 +81,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 🛡️ 工业级逻辑守卫：零值父哈希防护 (针对非 Genesis 块)
 	parentHashHex := block.ParentHash().Hex()
 	if blockNum.Cmp(big.NewInt(0)) > 0 && (parentHashHex == "" || parentHashHex == "0x0000000000000000000000000000000000000000000000000000000000000000") {
-		Logger.Warn("⚠️ Zero parent hash detected for non-genesis block", 
+		Logger.Warn("⚠️ Zero parent hash detected for non-genesis block",
 			slog.String("block", blockNum.String()))
 		// 允许继续，但在日志中记录，这通常发生在链的极早期或者测试网模拟中
 	}
@@ -210,7 +210,6 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	)
 	syntheticIdx := uint(10000) // high base to avoid conflict with real log_index
 	for _, tx := range data.Block.Transactions() {
-		toAddr := "[Contract Creation]"
 		if tx.To() != nil {
 			txToLow := strings.ToLower(tx.To().Hex())
 			isMatched := false
@@ -227,7 +226,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			}
 
 			if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
-				toAddr = txToLow
+				toAddr := txToLow
 				Logger.Info("🎯 发现匹配交易",
 					slog.String("stage", "PROCESSOR"),
 					slog.String("tx_hash", tx.Hash().Hex()),
@@ -282,11 +281,11 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 	// 4. 更新 Checkpoint（按批次更新以提升性能）
 	p.blocksSinceLastCheckpoint++
-	
+
 	// 如果是范围抓取的最后一个块，或者达到了批次上限
 	checkpointTarget := blockNum
 	shouldUpdateCheckpoint := p.blocksSinceLastCheckpoint >= p.checkpointBatch
-	
+
 	if data.RangeEnd != nil && data.RangeEnd.Cmp(blockNum) >= 0 {
 		checkpointTarget = data.RangeEnd
 		shouldUpdateCheckpoint = true
@@ -310,7 +309,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	if p.EventHook != nil {
 		// 计算端到端延迟 (毫秒)
 		latency := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
-		if latency < 0 { latency = 0 }
+		if latency < 0 {
+			latency = 0
+		}
 
 		p.EventHook("block", map[string]interface{}{
 			"number":      block.NumberU64(),

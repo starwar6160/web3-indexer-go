@@ -48,7 +48,7 @@ func NewWSSListener(wssURL string) (*WSSListener, error) {
 		newBlocks:     make(chan *big.Int, 10),
 		stopCh:        make(chan struct{}),
 		connected:     true,
-		maxReconnects: 0,             // 默认无限重试
+		maxReconnects: 0, // 默认无限重试
 		baseBackoff:   1 * time.Second,
 		maxBackoff:    60 * time.Second,
 	}, nil
@@ -91,7 +91,6 @@ func (w *WSSListener) listenNewHeads(ctx context.Context) {
 			w.handleReconnect(ctx)
 			continue
 		}
-		defer sub.Unsubscribe()
 
 		log.Printf("✅ WSS listener connected to %s (attempt %d)", w.wssURL, w.reconnectCount+1)
 		w.setConnected(true)
@@ -100,8 +99,10 @@ func (w *WSSListener) listenNewHeads(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				sub.Unsubscribe()
 				return
 			case <-w.stopCh:
+				sub.Unsubscribe()
 				return
 			case header := <-headers:
 				if header != nil {
@@ -109,14 +110,15 @@ func (w *WSSListener) listenNewHeads(ctx context.Context) {
 					case w.newBlocks <- header.Number:
 						log.Printf("📦 New block detected via WSS: %s", header.Number.String())
 					case <-w.stopCh:
+						sub.Unsubscribe()
 						return
 					}
 				}
 			case err := <-sub.Err():
 				log.Printf("⚠️ WSS subscription error: %v", err)
 				w.setConnected(false)
-
 				// 退出内层循环，触发重连
+				sub.Unsubscribe()
 				goto reconnect
 			}
 		}

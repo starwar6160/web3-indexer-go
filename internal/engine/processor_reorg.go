@@ -42,7 +42,7 @@ func (p *Processor) FindCommonAncestor(ctx context.Context, blockNum *big.Int) (
 		}
 
 		// 检查哈希是否匹配
-		if strings.ToLower(localBlock.Hash) == strings.ToLower(rpcBlock.Hash().Hex()) {
+		if strings.EqualFold(localBlock.Hash, rpcBlock.Hash().Hex()) {
 			// 找到共同祖先！
 			Logger.Info("common_ancestor_found",
 				slog.String("block", currentNum.String()),
