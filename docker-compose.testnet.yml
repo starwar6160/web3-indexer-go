@@ -4,6 +4,10 @@ services:
   sepolia-indexer:
     image: web3-indexer-go:stable
     container_name: web3-testnet-app
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     network_mode: host
     environment:
       # Connect to the infrastructure Postgres on 15432

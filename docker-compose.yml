@@ -3,6 +3,10 @@ services:
   indexer:
     image: web3-indexer-go:stable
     container_name: ${COMPOSE_PROJECT_NAME}-app
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     network_mode: host  # 👈 核心修改：使用 Host 模式，彻底打通 Tailscale 和宿主机端口
     environment:
       # 直接连接宿主机的基础设施数据库 (15432)
