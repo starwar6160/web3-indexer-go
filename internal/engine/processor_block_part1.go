@@ -36,7 +36,11 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	}
 
 	// 无论成功失败，确保 Rollback (Commit 后 Rollback 无效)
-	defer dbTx.Rollback()
+	defer func() {
+		if err := dbTx.Rollback(); err != nil && err != sql.ErrTxDone {
+			Logger.Warn("block_rollback_failed", "err", err)
+		}
+	}()
 
 	// 1. Reorg 检测 (Parent Hash Check)
 	var lastBlock models.Block
@@ -308,6 +312,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 6. 实时事件推送 (在事务成功后)
 	if p.EventHook != nil {
 		// 计算端到端延迟 (毫秒)
+		// #nosec G115 - Block time fits in int64
 		latency := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
 		if latency < 0 {
 			latency = 0
@@ -349,6 +354,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			slog.Debug("metrics_updated", "height", blockNum.Int64())
 
 			// 计算并更新高精度 E2E Latency
+			// #nosec G115
 			blockTime := time.Unix(int64(block.Time()), 0)
 			latency := time.Since(blockTime).Seconds()
 			if latency < 0 {

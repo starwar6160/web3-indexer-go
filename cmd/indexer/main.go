@@ -181,15 +181,21 @@ func main() {
 			wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
 		}
 
-		startBlock, _ := sm.GetStartBlock(ctx, forceFrom, *resetDB)
+		startBlock, err := sm.GetStartBlock(ctx, forceFrom, *resetDB)
+		if err != nil {
+			slog.Error("failed_to_get_start_block", "err", err)
+			return
+		}
 
 		// 补全父块锚点
 		if startBlock.Cmp(big.NewInt(0)) > 0 {
 			parentBlockNum := new(big.Int).Sub(startBlock, big.NewInt(1))
 			parentBlock, err := rpcPool.BlockByNumber(ctx, parentBlockNum)
 			if err == nil && parentBlock != nil {
-				_, _ = db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-					parentBlockNum.String(), parentBlock.Hash().Hex(), parentBlock.ParentHash().Hex(), parentBlock.Time())
+				if _, err := db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+					parentBlockNum.String(), parentBlock.Hash().Hex(), parentBlock.ParentHash().Hex(), parentBlock.Time()); err != nil {
+					slog.Warn("failed_to_insert_parent_block", "err", err)
+				}
 			}
 		}
 
@@ -206,8 +212,8 @@ func main() {
 		if cfg.DemoMode {
 			emuCfg := emulator.LoadConfig()
 			if emuCfg.Enabled {
-				emu, _ := emulator.NewEmulator(cfg.RPCURLs[0], emuCfg.PrivateKey)
-				if emu != nil {
+				emu, err := emulator.NewEmulator(cfg.RPCURLs[0], emuCfg.PrivateKey)
+				if err == nil && emu != nil {
 					wg.Add(1)
 					recovery.WithRecoveryNamed("emulator_start", func() { defer wg.Done(); _ = emu.Start(ctx, nil) })
 				}
@@ -232,7 +238,9 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 		case <-ticker.C:
 			tip, err := rpcPool.GetLatestBlockNumber(ctx)
 			if err == nil && tip.Cmp(lastScheduled) > 0 {
-				_ = fetcher.Schedule(ctx, new(big.Int).Add(lastScheduled, big.NewInt(1)), tip)
+				if err := fetcher.Schedule(ctx, new(big.Int).Add(lastScheduled, big.NewInt(1)), tip); err != nil {
+					slog.Warn("failed_to_schedule_tail_follow", "err", err)
+				}
 				lastScheduled.Set(tip)
 			}
 		}

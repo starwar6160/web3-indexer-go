@@ -16,29 +16,35 @@ func (h *HealthServer) Ready(w http.ResponseWriter, r *http.Request) {
 	dbCheck := h.checkDatabase(ctx)
 	rpcCheck := h.checkRPC(ctx)
 
-	if dbCheck.Status == "healthy" && rpcCheck.Status == "healthy" {
+	if dbCheck.Status == healthyStatus && rpcCheck.Status == healthyStatus {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "ready",
-		})
+		}); err != nil {
+			Logger.Error("failed_to_encode_ready_response", "err", err)
+		}
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "not_ready",
 			"checks": map[string]Check{
 				"database": dbCheck,
 				"rpc":      rpcCheck,
 			},
-		})
+		}); err != nil {
+			Logger.Error("failed_to_encode_not_ready_response", "err", err)
+		}
 	}
 }
 
 // Live 存活检查（进程是否存活）
 func (h *HealthServer) Live(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status": "alive",
-	})
+	}); err != nil {
+		Logger.Error("failed_to_encode_live_response", "err", err)
+	}
 }
 
 // SetSequencer 动态设置 sequencer（用于 main 初始化后注入）

@@ -50,7 +50,9 @@ func (a *AdminServer) StartDemo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		Logger.Error("failed_to_encode_start_demo_response", "err", err)
+	}
 
 	Logger.Info("demo_started_via_api",
 		"remote_addr", r.RemoteAddr,
@@ -77,7 +79,9 @@ func (a *AdminServer) Stop(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		Logger.Error("failed_to_encode_stop_response", "err", err)
+	}
 
 	Logger.Info("indexer_stopped_via_api",
 		"remote_addr", r.RemoteAddr,
@@ -112,7 +116,9 @@ func (a *AdminServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(status)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		Logger.Error("failed_to_encode_status_response", "err", err)
+	}
 }
 
 // GetConfig 获取配置信息
@@ -140,7 +146,9 @@ func (a *AdminServer) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(config)
+	if err := json.NewEncoder(w).Encode(config); err != nil {
+		Logger.Error("failed_to_encode_config_response", "err", err)
+	}
 }
 
 // getRPCQuotaUsage 获取RPC配额使用估算

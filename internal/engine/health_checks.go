@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const healthyStatus = "healthy"
+
 // checkDatabase 检查数据库连接
 func (h *HealthServer) checkDatabase(ctx context.Context) Check {
 	start := time.Now()
@@ -22,7 +24,7 @@ func (h *HealthServer) checkDatabase(ctx context.Context) Check {
 	}
 
 	return Check{
-		Status:  "healthy",
+		Status:  healthyStatus,
 		Latency: latency.String(),
 	}
 }
@@ -46,7 +48,6 @@ func (h *HealthServer) checkRPC(ctx context.Context) Check {
 		}
 	}
 
-	const healthyStatus = "healthy"
 	status := healthyStatus
 	if healthyCount < totalCount {
 		status = "degraded"
@@ -80,7 +81,7 @@ func (h *HealthServer) checkSequencer(_ context.Context) Check {
 	}
 
 	return Check{
-		Status:  "healthy",
+		Status:  healthyStatus,
 		Message: fmt.Sprintf("expected_block: %s, buffer_size: %d", expectedBlock.String(), bufferSize),
 	}
 }
@@ -103,7 +104,7 @@ func (h *HealthServer) checkFetcher(_ context.Context) Check {
 	}
 
 	return Check{
-		Status:  "healthy",
+		Status:  healthyStatus,
 		Message: "fetcher running",
 	}
 }

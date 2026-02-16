@@ -43,9 +43,10 @@ func TestMirror_SchemaAlignment(t *testing.T) {
 
 	// 1. 构造一个包含所有边缘字段的 Block
 	mockBlock := models.Block{
-		Number:           models.NewBigInt(888888),
-		Hash:             "0x" + strings.Repeat("a", 64),
-		ParentHash:       "0x" + strings.Repeat("0", 64),
+		Number:     models.NewBigInt(888888),
+		Hash:       "0x" + strings.Repeat("a", 64),
+		ParentHash: "0x" + strings.Repeat("0", 64),
+		// #nosec G115 - Time is always positive and fits in uint64
 		Timestamp:        uint64(time.Now().Unix()),
 		GasLimit:         30000000,
 		GasUsed:          15000000,
@@ -75,7 +76,8 @@ func TestGauntlet_EVMPrecision(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. 预插入父区块以满足外键约束
-	_, _ = db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, transaction_count) VALUES (999, '0x999', '0x0', 123, 30000000, 1000000, 1)")
+	_, err := db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, transaction_count) VALUES (999, '0x999', '0x0', 123, 30000000, 1000000, 1)")
+	require.NoError(t, err)
 
 	// 2. 构造 MaxUint256
 	maxVal := uint256.MustFromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
@@ -91,7 +93,7 @@ func TestGauntlet_EVMPrecision(t *testing.T) {
 	}
 
 	// 3. 尝试存储
-	err := inserter.InsertTransfersBatch(ctx, []models.Transfer{transfer})
+	err = inserter.InsertTransfersBatch(ctx, []models.Transfer{transfer})
 	assert.NoError(t, err, "NUMERIC(78,0) 必须能承载 MaxUint256")
 
 	// 4. 极限回读校验：确保精度没有被 Postgres 截断

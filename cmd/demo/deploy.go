@@ -72,20 +72,23 @@ func main() {
 	// Get nonce
 	nonce, err := client.PendingNonceAt(ctx, fromAddress)
 	if err != nil {
-		log.Fatalf("Failed to get nonce: %v", err)
+		fmt.Printf("Failed to get nonce: %v\n", err)
+		return
 	}
 
 	// Get gas price
 	gasPrice, err := client.SuggestGasPrice(ctx)
 	if err != nil {
-		log.Fatalf("Failed to get gas price: %v", err)
+		fmt.Printf("Failed to get gas price: %v\n", err)
+		return
 	}
 
 	// Deploy contract
 	fmt.Println("🚀 Deploying ERC20 contract...")
 	contractAddress, txHash, err := deployContract(ctx, client, privateKey, nonce, gasPrice, chainID)
 	if err != nil {
-		log.Fatalf("Failed to deploy contract: %v", err)
+		fmt.Printf("Failed to deploy contract: %v\n", err)
+		return
 	}
 
 	fmt.Printf("✅ Contract deployed at: %s\n", contractAddress.Hex())
@@ -100,8 +103,10 @@ func main() {
 
 	recipientAddress := common.HexToAddress("0x70997970C51812e339D9B73b0245ad59e5E05a77") // Anvil account 2
 
-	for i := 0; i < 10; i++ {
-		tx, err := sendTransfer(ctx, client, privateKey, nonce+uint64(i), gasPrice, chainID, contractAddress, recipientAddress)
+	for i := uint64(0); i < 10; i++ {
+		// Use big.Int for nonce to avoid G115
+		txNonce := nonce + i
+		tx, err := sendTransfer(ctx, client, privateKey, txNonce, gasPrice, chainID, contractAddress, recipientAddress)
 		if err != nil {
 			log.Printf("❌ Failed to send transaction %d: %v", i+1, err)
 			continue

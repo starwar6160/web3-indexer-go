@@ -51,27 +51,49 @@ func TestMain(m *testing.M) {
 		Started: true,
 	})
 	if err != nil {
-		_ = pgContainer.Terminate(ctx)
+		if terr := pgContainer.Terminate(ctx); terr != nil {
+			log.Printf("failed to terminate pg container: %v", terr)
+		}
 		log.Fatalf("failed to start anvil container: %s", err)
 	}
 
 	// 3. 提取连接字符串
-	pgHost, _ := pgContainer.Host(ctx)
-	pgPort, _ := pgContainer.MappedPort(ctx, "5432")
+	pgHost, err := pgContainer.Host(ctx)
+	if err != nil {
+		log.Fatalf("failed to get pg host: %v", err)
+	}
+	pgPort, err := pgContainer.MappedPort(ctx, "5432")
+	if err != nil {
+		log.Fatalf("failed to get pg port: %v", err)
+	}
 	testPostgresURL = fmt.Sprintf("postgres://postgres:password@%s:%s/web3_indexer_test?sslmode=disable", pgHost, pgPort.Port())
 
-	anvilHost, _ := anvilContainer.Host(ctx)
-	anvilPort, _ := anvilContainer.MappedPort(ctx, "8545")
+	anvilHost, err := anvilContainer.Host(ctx)
+	if err != nil {
+		log.Fatalf("failed to get anvil host: %v", err)
+	}
+	anvilPort, err := anvilContainer.MappedPort(ctx, "8545")
+	if err != nil {
+		log.Fatalf("failed to get anvil port: %v", err)
+	}
 	testAnvilRPC = fmt.Sprintf("http://%s:%s", anvilHost, anvilPort.Port())
 
 	// 4. 注入环境变量供测试读取 (必须在 setupDatabase 之前，因为 setupDatabase 内部也可能依赖)
-	_ = os.Setenv("DATABASE_URL", testPostgresURL)
-	_ = os.Setenv("RPC_URLS", testAnvilRPC)
+	if err := os.Setenv("DATABASE_URL", testPostgresURL); err != nil {
+		log.Fatalf("failed to set env: %v", err)
+	}
+	if err := os.Setenv("RPC_URLS", testAnvilRPC); err != nil {
+		log.Fatalf("failed to set env: %v", err)
+	}
 
 	// 5. 初始化数据库 Schema
 	if err := setupDatabase(testPostgresURL); err != nil {
-		_ = pgContainer.Terminate(ctx)
-		_ = anvilContainer.Terminate(ctx)
+		if terr := pgContainer.Terminate(ctx); terr != nil {
+			log.Printf("failed to terminate pg container: %v", terr)
+		}
+		if terr := anvilContainer.Terminate(ctx); terr != nil {
+			log.Printf("failed to terminate anvil container: %v", terr)
+		}
 		log.Fatalf("failed to setup test database: %s", err)
 	}
 
@@ -79,8 +101,12 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// 7. 优雅清理
-	_ = pgContainer.Terminate(ctx)
-	_ = anvilContainer.Terminate(ctx)
+	if terr := pgContainer.Terminate(ctx); terr != nil {
+		log.Printf("failed to terminate pg container: %v", terr)
+	}
+	if terr := anvilContainer.Terminate(ctx); terr != nil {
+		log.Printf("failed to terminate anvil container: %v", terr)
+	}
 
 	os.Exit(code)
 }

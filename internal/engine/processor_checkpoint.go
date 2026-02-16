@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math/big"
 
@@ -61,7 +62,11 @@ func (p *Processor) UpdateCheckpoint(ctx context.Context, chainID int64, blockNu
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			Logger.Warn("checkpoint_rollback_failed", "err", err)
+		}
+	}()
 
 	if err := p.updateCheckpointInTx(ctx, tx, chainID, blockNumber); err != nil {
 		return fmt.Errorf("failed to update checkpoint: %w", err)

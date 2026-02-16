@@ -3,6 +3,7 @@ package web
 import (
 	"embed"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"os"
 )
@@ -71,7 +72,9 @@ func RenderDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, data)
+	if err := tmpl.Execute(w, data); err != nil {
+		slog.Error("failed_to_execute_template", "err", err)
+	}
 }
 
 // RenderSecurity 渲染安全验证页
@@ -82,5 +85,7 @@ func RenderSecurity(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		slog.Error("failed_to_write_security_page", "err", err)
+	}
 }

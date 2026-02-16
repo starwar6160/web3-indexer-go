@@ -54,7 +54,10 @@ func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 1. 获取链上最新块
-	latestChainBlock, _ := h.rpcPool.GetLatestBlockNumber(ctx)
+	latestChainBlock, err := h.rpcPool.GetLatestBlockNumber(ctx)
+	if err != nil {
+		Logger.Error("failed_to_get_latest_block_in_health_status", "err", err)
+	}
 
 	// 2. 获取索引器进度
 	var expectedBlock string
@@ -70,9 +73,14 @@ func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
 		syncLag = latestChainBlock.Int64() - h.sequencer.GetExpectedBlock().Int64()
 	}
 
+	latestBlockStr := "0"
+	if latestChainBlock != nil {
+		latestBlockStr = latestChainBlock.String()
+	}
+
 	status := map[string]interface{}{
 		"is_healthy":         h.rpcPool.GetHealthyNodeCount() > 0,
-		"latest_chain_block": latestChainBlock.String(),
+		"latest_chain_block": latestBlockStr,
 		"indexed_block":      expectedBlock,
 		"sync_lag":           syncLag,
 		"buffer_size":        bufferSize,
@@ -85,7 +93,9 @@ func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(status)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		Logger.Error("failed_to_encode_health_status", "err", err)
+	}
 }
 
 // Healthz 完整健康检查
@@ -103,38 +113,40 @@ func (h *HealthServer) Healthz(w http.ResponseWriter, r *http.Request) {
 	// 1. 数据库连接检查
 	dbCheck := h.checkDatabase(ctx)
 	status.Checks["database"] = dbCheck
-	if dbCheck.Status != "healthy" {
+	if dbCheck.Status != healthyStatus {
 		allHealthy = false
 	}
 
 	// 2. RPC 连接检查
 	rpcCheck := h.checkRPC(ctx)
 	status.Checks["rpc"] = rpcCheck
-	if rpcCheck.Status != "healthy" {
+	if rpcCheck.Status != healthyStatus {
 		allHealthy = false
 	}
 
 	// 3. Sequencer 状态检查
 	sequencerCheck := h.checkSequencer(ctx)
 	status.Checks["sequencer"] = sequencerCheck
-	if sequencerCheck.Status != "healthy" {
+	if sequencerCheck.Status != healthyStatus {
 		allHealthy = false
 	}
 
 	// 4. Fetcher 状态检查
 	fetcherCheck := h.checkFetcher(ctx)
 	status.Checks["fetcher"] = fetcherCheck
-	if fetcherCheck.Status != "healthy" {
+	if fetcherCheck.Status != healthyStatus {
 		allHealthy = false
 	}
 
 	if allHealthy {
-		status.Status = "healthy"
+		status.Status = healthyStatus
 		w.WriteHeader(http.StatusOK)
 	} else {
 		status.Status = "unhealthy"
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	json.NewEncoder(w).Encode(status)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		Logger.Error("failed_to_encode_healthz_response", "err", err)
+	}
 }

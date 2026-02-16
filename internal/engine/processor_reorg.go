@@ -78,7 +78,11 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin reorg transaction: %w", err)
 	}
-	defer dbTx.Rollback()
+	defer func() {
+		if err := dbTx.Rollback(); err != nil && err != sql.ErrTxDone {
+			Logger.Warn("reorg_rollback_failed", "err", err)
+		}
+	}()
 
 	// 批量删除所有分叉区块（cascade 会自动删除 transfers）
 	if len(toDelete) > 0 {

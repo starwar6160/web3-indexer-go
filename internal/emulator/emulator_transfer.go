@@ -65,7 +65,8 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 		estimatedGas = 100000
 	} else {
 		// 应用动态安全裕度
-		estimatedGas = estimatedGas + (estimatedGas * uint64(e.gasSafetyMargin) / 100)
+		// #nosec G115
+		estimatedGas += (estimatedGas * uint64(e.gasSafetyMargin) / 100)
 	}
 
 	tx := types.NewTransaction(nonce, e.contract, big.NewInt(0), estimatedGas, gasPrice, data)

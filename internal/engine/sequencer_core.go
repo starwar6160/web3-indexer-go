@@ -110,7 +110,11 @@ func (s *Sequencer) Run(ctx context.Context) {
 							slog.String("from", expectedStr),
 							slog.String("to", gapEnd.String()),
 						)
-						go func() { _ = s.fetcher.Schedule(ctx, expectedCopy, gapEnd) }()
+						go func() {
+							if serr := s.fetcher.Schedule(ctx, expectedCopy, gapEnd); serr != nil {
+								Logger.Warn("gap_refetch_schedule_failed", "err", serr)
+							}
+						}()
 						s.gapFillCount++
 					}
 				} else {

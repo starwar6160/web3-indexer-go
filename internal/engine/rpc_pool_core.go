@@ -99,6 +99,7 @@ func NewRPCClientPoolWithTimeout(urls []string, timeout time.Duration) (*RPCClie
 		return pool, nil
 	}
 
+	// #nosec G115 - Number of RPC nodes is very small
 	pool.size = int32(len(pool.clients))
 	healthyCount := 0
 	for _, node := range pool.clients {

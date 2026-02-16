@@ -135,8 +135,11 @@ func (b *BulkInserter) fallbackInsertBlocks(ctx context.Context, exec execer, bl
 		numbers[i] = b.Number.String()
 		hashes[i] = b.Hash
 		parentHashes[i] = b.ParentHash
+		// #nosec G115 - Ethereum timestamps and gas limits fit in int64
 		timestamps[i] = int64(b.Timestamp)
+		// #nosec G115
 		gasLimits[i] = int64(b.GasLimit)
+		// #nosec G115
 		gasUseds[i] = int64(b.GasUsed)
 		if b.BaseFeePerGas != nil {
 			s := b.BaseFeePerGas.String()

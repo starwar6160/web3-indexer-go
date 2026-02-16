@@ -68,6 +68,7 @@ func (w *WSSListener) calculateBackoff() time.Duration {
 	}
 
 	// 添加抖动 ±25%（防止惊群效应）
+	// #nosec G404 - math/rand is acceptable for jitter
 	jitter := 1.0 + (mrand.Float64()*0.5 - 0.25)
 	backoff := time.Duration(exponentialBackoff * jitter)
 

@@ -77,7 +77,8 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 		estimatedGas = 1500000
 	} else {
 		// 应用动态安全裕度
-		estimatedGas = estimatedGas + (estimatedGas * uint64(e.gasSafetyMargin) / 100)
+		// #nosec G115
+		estimatedGas += (estimatedGas * uint64(e.gasSafetyMargin) / 100)
 	}
 
 	tx := types.NewContractCreation(nonce, big.NewInt(0), estimatedGas, gasPrice, bytecode)

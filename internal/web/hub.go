@@ -169,7 +169,9 @@ func (c *Client) writePump() {
 			if err != nil {
 				return
 			}
-			_, _ = w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				c.hub.logger.Warn("ws_write_error", slog.String("err", err.Error()))
+			}
 
 			if err := w.Close(); err != nil {
 				return

@@ -32,7 +32,10 @@ func NewSigningMiddleware(seedHex, keyID string) (*SigningMiddleware, error) {
 	}
 
 	priv := ed25519.NewKeyFromSeed(seed)
-	pub := priv.Public().(ed25519.PublicKey)
+	pub, ok := priv.Public().(ed25519.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast public key to ed25519.PublicKey")
+	}
 
 	return &SigningMiddleware{
 		PrivateKey: priv,

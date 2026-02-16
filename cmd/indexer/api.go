@@ -112,11 +112,13 @@ func (s *Server) Start() error {
 		if db == nil || rpcPool == nil {
 			// 返回最小化的初始化状态
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
 				"state": "initializing",
 				"title": s.title,
 				"msg":   "Database or RPC not ready yet",
-			})
+			}); err != nil {
+				slog.Error("failed_to_encode_init_status", "err", err)
+			}
 			return
 		}
 		handleGetStatus(w, r, db, rpcPool, lazyManager, chainID)
@@ -134,7 +136,15 @@ func (s *Server) Start() error {
 	mux.Handle("/metrics", promhttp.Handler())
 
 	slog.Info("🌐 Server listening", "port", s.port)
-	return http.ListenAndServe(":"+s.port, VisitorStatsMiddleware(nil, mux))
+	srv := &http.Server{
+		Addr:              ":" + s.port,
+		Handler:           VisitorStatsMiddleware(nil, mux),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
 
 func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {

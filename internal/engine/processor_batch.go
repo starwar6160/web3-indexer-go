@@ -100,8 +100,9 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 					}
 
 					syntheticTransfer := models.Transfer{
-						BlockNumber:  models.BigInt{Int: blockNum},
-						TxHash:       tx.Hash().Hex(),
+						BlockNumber: models.BigInt{Int: blockNum},
+						TxHash:      tx.Hash().Hex(),
+						// #nosec G115 - syntheticIdx is a local loop counter
 						LogIndex:     uint(syntheticIdx),
 						From:         strings.ToLower(fromAddr),
 						To:           strings.ToLower(syntheticTo),
@@ -123,7 +124,11 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	if err != nil {
 		return fmt.Errorf("failed to begin batch transaction: %w", err)
 	}
-	defer dbTx.Rollback()
+	defer func() {
+		if err := dbTx.Rollback(); err != nil && err != sql.ErrTxDone {
+			Logger.Warn("batch_rollback_failed", "err", err)
+		}
+	}()
 
 	inserter := NewBulkInserter(p.db)
 

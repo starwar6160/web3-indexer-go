@@ -40,11 +40,15 @@ type Config struct {
 }
 
 func Load() *Config {
-	_ = godotenv.Load() // Config file is optional, ignore error
+	if err := godotenv.Load(); err != nil {
+		log.Printf("Note: .env file not loaded: %v", err)
+	}
+
+	const trueVal = "true"
 
 	// 明确模式
-	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == "true" || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == "true"
-	energySaving := strings.ToLower(os.Getenv("ENABLE_ENERGY_SAVING")) == "true"
+	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == trueVal || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == trueVal
+	energySaving := strings.ToLower(os.Getenv("ENABLE_ENERGY_SAVING")) == trueVal
 
 	// 解析RPC URL列表
 	rpcUrlsStr := getEnv("RPC_URLS", "https://eth.llamarpc.com")

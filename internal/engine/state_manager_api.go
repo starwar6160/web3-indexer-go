@@ -54,6 +54,8 @@ func (sm *StateManager) Stop() {
 
 	// 偌止索引器
 	if sm.indexer.IsRunning() {
-		_ = sm.indexer.Stop()
+		if err := sm.indexer.Stop(); err != nil {
+			Logger.Warn("indexer_stop_failed", "err", err)
+		}
 	}
 }

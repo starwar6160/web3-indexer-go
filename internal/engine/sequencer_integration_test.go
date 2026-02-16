@@ -307,8 +307,9 @@ func createTestBlockForSequencer(blockNumber *big.Int) *types.Block {
 		Number:   blockNumber,
 		GasLimit: 30000000,
 		GasUsed:  15000000,
-		Time:     uint64(time.Now().Unix()),
-		Root:     common.Hash{},
+		// #nosec G115
+		Time: uint64(time.Now().Unix()),
+		Root: common.Hash{},
 	}
 	body := &types.Body{
 		Transactions: nil,

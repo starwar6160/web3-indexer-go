@@ -19,8 +19,8 @@ const (
 	HoleskyChainID = 17000
 )
 
-// NetworkName 返回 Chain ID 对应的网络名称
-func NetworkName(chainID int64) string {
+// Name 返回 Chain ID 对应的网络名称
+func Name(chainID int64) string {
 	switch chainID {
 	case MainnetChainID:
 		return "Ethereum Mainnet"
@@ -51,8 +51,8 @@ func VerifyNetwork(client *ethclient.Client, expectedChainID int64) error {
 		return fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	expectedName := NetworkName(expectedChainID)
-	actualName := NetworkName(actualChainID.Int64())
+	expectedName := Name(expectedChainID)
+	actualName := Name(actualChainID.Int64())
 
 	slog.Info("📡 网络校验中...",
 		"expected_chain_id", expectedChainID,
