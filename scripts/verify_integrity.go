@@ -1,14 +1,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jmoiron/sqlx"
 )
 
 func main() {
@@ -48,14 +47,12 @@ func main() {
 		previous := blocks[i+1]
 
 		if current.ParentHash != previous.Hash {
-			fmt.Printf("🚨 HASH CHAIN BROKEN: Block #%d parent_hash does not match #%d hash!
-", current.Number, previous.Number)
+			fmt.Printf("🚨 HASH CHAIN BROKEN: Block #%d parent_hash does not match #%d hash!\n", current.Number, previous.Number)
 			errors++
 		}
 
 		if current.Number != previous.Number+1 {
-			fmt.Printf("🚨 SEQUENCE GAP DETECTED: Missing blocks between #%d and #%d
-", current.Number, previous.Number)
+			fmt.Printf("🚨 SEQUENCE GAP DETECTED: Missing blocks between #%d and #%d\n", current.Number, previous.Number)
 			errors++
 		}
 	}
@@ -73,13 +70,11 @@ func main() {
 		status = fmt.Sprintf("FAIL (%d errors)", errors)
 	}
 
-	logMsg := fmt.Sprintf("[%s] Integrity Check: %s | Checked %d blocks | Head: #%d
-", 
+	logMsg := fmt.Sprintf("[%s] Integrity Check: %s | Checked %d blocks | Head: #%d\n",
 		timestamp, status, len(blocks), blocks[0].Number)
-	
+
 	f.WriteString(logMsg)
-	fmt.Printf("✅ Audit Complete. Status: %s. Report saved to %s
-", status, reportFile)
+	fmt.Printf("✅ Audit Complete. Status: %s. Report saved to %s\n", status, reportFile)
 
 	if errors > 0 {
 		os.Exit(1)

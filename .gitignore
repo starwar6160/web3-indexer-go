@@ -96,3 +96,4 @@ bin/
 .air_b1.pid
 logs/*.log
 venv/
+tests/__pycache__/
