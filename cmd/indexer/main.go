@@ -120,108 +120,104 @@ func main() {
 	
 	apiServer := NewServer(nil, wsHub, apiPort, cfg.AppTitle)
 	go func() {
-		slog.Info("🚀 API Server starting (Early Bird Mode)", "port", apiPort)
+		slog.Info("🚀 Indexer API Server starting (Early Bird Mode)", "port", apiPort)
 		if err := apiServer.Start(); err != nil && err != http.ErrServerClosed {
 			slog.Error("api_start_fail", "err", err)
 		}
 	}()
 
-	// --- 接下来执行初始化 ---
-	
-	db, err := sqlx.Connect("pgx", cfg.DatabaseURL)
-	if err != nil {
-		slog.Error("db_fail", "err", err)
-		os.Exit(1)
-	}
-	defer db.Close()
+	// --- 接下来执行异步初始化 ---
+	go func() {
+		db, err := sqlx.Connect("pgx", cfg.DatabaseURL)
+		if err != nil {
+			slog.Error("db_fail", "err", err)
+			return
+		}
 
-	var rpcPool engine.RPCClient
-	if cfg.IsTestnet {
-		rpcPool, err = engine.NewEnhancedRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.IsTestnet, cfg.MaxSyncBatch, cfg.RPCTimeout)
-	} else {
-		rpcPool, err = engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
-	}
-	if err != nil {
-		slog.Error("rpc_init_fail", "err", err)
-		os.Exit(1)
-	}
-	rpcPool.SetRateLimit(float64(cfg.RPCRateLimit), cfg.RPCRateLimit*2)
-
-	// ✅ 工业级启动预检：强制校验 Network ID
-	// 防止"挂 Sepolia 标签跑主网数据"的低级错误
-	slog.Info("🛡️ Performing startup network verification...")
-	
-	// 增加重试逻辑，防止因网络抖动导致启动失败
-	var verifyErr error
-	for i := 0; i < 3; i++ {
-		ethClient, err := ethclient.Dial(cfg.RPCURLs[0])
-		if err == nil {
-			verifyErr = networkpkg.VerifyNetwork(ethClient, cfg.ChainID)
-			ethClient.Close()
-			if verifyErr == nil {
-				break
-			}
+		var rpcPool engine.RPCClient
+		if cfg.IsTestnet {
+			rpcPool, err = engine.NewEnhancedRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.IsTestnet, cfg.MaxSyncBatch, cfg.RPCTimeout)
 		} else {
-			verifyErr = err
+			rpcPool, err = engine.NewRPCClientPoolWithTimeout(cfg.RPCURLs, cfg.RPCTimeout)
 		}
-		slog.Warn("🛡️ Network verification failed, retrying...", "attempt", i+1, "error", verifyErr)
-		time.Sleep(2 * time.Second)
-	}
-
-	if verifyErr != nil {
-		slog.Error("❌ [FATAL] Startup network verification failed permanently", "error", verifyErr)
-		os.Exit(1)
-	}
-
-	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency)
-	
-	// ✨ 注入依赖，使 API 变得可用
-	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
-	apiServer.SetDependencies(db, rpcPool, lazyManager, cfg.ChainID)
-
-	sm.processor.EventHook = func(eventType string, data interface{}) {
-		wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
-	}
-
-	startBlock, _ := sm.GetStartBlock(ctx, forceFrom, *resetDB)
-	
-	// 补全父块锚点
-	if startBlock.Cmp(big.NewInt(0)) > 0 {
-		parentBlockNum := new(big.Int).Sub(startBlock, big.NewInt(1))
-		parentBlock, err := rpcPool.BlockByNumber(ctx, parentBlockNum)
-		if err == nil && parentBlock != nil {
-			_, _ = db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-				parentBlockNum.String(), parentBlock.Hash().Hex(), parentBlock.ParentHash().Hex(), parentBlock.Time())
+		if err != nil {
+			slog.Error("rpc_init_fail", "err", err)
+			return
 		}
-	}
+		rpcPool.SetRateLimit(float64(cfg.RPCRateLimit), cfg.RPCRateLimit*2)
 
-	var wg sync.WaitGroup
-	sm.fetcher.Start(ctx, &wg)
-	fatalErrCh := make(chan error, 1)
-	sequencer := engine.NewSequencerWithFetcher(sm.processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, fatalErrCh, nil, engine.GetMetrics())
-	
-	wg.Add(1)
-	go func() { defer wg.Done(); sequencer.Run(ctx) }()
-	go sm.StartTailFollow(ctx, startBlock)
+		// ✅ 工业级启动预检：强制校验 Network ID
+		slog.Info("🛡️ Performing startup network verification...")
+		var verifyErr error
+		for i := 0; i < 3; i++ {
+			ethClient, err := ethclient.Dial(cfg.RPCURLs[0])
+			if err == nil {
+				verifyErr = networkpkg.VerifyNetwork(ethClient, cfg.ChainID)
+				ethClient.Close()
+				if verifyErr == nil {
+					break
+				}
+			} else {
+				verifyErr = err
+			}
+			slog.Warn("🛡️ Network verification failed, retrying...", "attempt", i+1, "error", verifyErr)
+			time.Sleep(2 * time.Second)
+		}
 
-	// 仿真器 (仅 demo)
-	if cfg.DemoMode {
-		emuCfg := emulator.LoadConfig()
-		if emuCfg.Enabled {
-			emu, _ := emulator.NewEmulator(cfg.RPCURLs[0], emuCfg.PrivateKey)
-			if emu != nil {
-				wg.Add(1)
-				go func() { defer wg.Done(); _ = emu.Start(ctx, nil) }()
+		if verifyErr != nil {
+			slog.Error("❌ [FATAL] Startup network verification failed permanently", "error", verifyErr)
+			return
+		}
+
+		sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency)
+		
+		// ✨ 注入依赖，使 API 变得可用
+		lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
+		apiServer.SetDependencies(db, rpcPool, lazyManager, cfg.ChainID)
+
+		sm.processor.EventHook = func(eventType string, data interface{}) {
+			wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
+		}
+
+		startBlock, _ := sm.GetStartBlock(ctx, forceFrom, *resetDB)
+		
+		// 补全父块锚点
+		if startBlock.Cmp(big.NewInt(0)) > 0 {
+			parentBlockNum := new(big.Int).Sub(startBlock, big.NewInt(1))
+			parentBlock, err := rpcPool.BlockByNumber(ctx, parentBlockNum)
+			if err == nil && parentBlock != nil {
+				_, _ = db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+					parentBlockNum.String(), parentBlock.Hash().Hex(), parentBlock.ParentHash().Hex(), parentBlock.Time())
 			}
 		}
-	}
+
+		var wg sync.WaitGroup
+		sm.fetcher.Start(ctx, &wg)
+		fatalErrCh := make(chan error, 1)
+		sequencer := engine.NewSequencerWithFetcher(sm.processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, fatalErrCh, nil, engine.GetMetrics())
+		
+		wg.Add(1)
+		go func() { defer wg.Done(); sequencer.Run(ctx) }()
+		go sm.StartTailFollow(ctx, startBlock)
+
+		// 仿真器 (仅 demo)
+		if cfg.DemoMode {
+			emuCfg := emulator.LoadConfig()
+			if emuCfg.Enabled {
+				emu, _ := emulator.NewEmulator(cfg.RPCURLs[0], emuCfg.PrivateKey)
+				if emu != nil {
+					wg.Add(1)
+					go func() { defer wg.Done(); _ = emu.Start(ctx, nil) }()
+				}
+			}
+		}
+	}()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	slog.Info("🏁 System Operational.")
 	<-sigCh
 	cancel()
-	wg.Wait()
 }
 
 func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool engine.RPCClient, startBlock *big.Int) {
