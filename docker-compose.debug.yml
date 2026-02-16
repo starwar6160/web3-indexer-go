@@ -1,0 +1,50 @@
+services:
+  # Web3 Indexer Debug Instance (Port 8083)
+  # 用于本地调试，复用现有的 web3-testnet-db 数据库
+  debug-indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: web3-debug-app
+    networks:
+      - web3-testnet_web3-network
+    ports:
+      - "8083:8080"  # 映射到主机 8083 端口
+    environment:
+      # RPC URLs（优先使用商业节点）
+      - RPC_URLS=${RPC_URLS:-https://rpc.sepolia.org,https://sepolia.publicnode.com,https://ethereum-sepolia.blockpi.network/v1/rpc/public}
+      # 连接到宿主机基础设施数据库 (隔离的 debug 库)
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_debug?sslmode=disable}
+      - CHAIN_ID=${CHAIN_ID:-11155111}
+      - START_BLOCK=${START_BLOCK:-latest}
+      - PORT=8080  # 容器内部端口
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - IS_TESTNET=${IS_TESTNET:-true}
+      - APP_TITLE=${APP_TITLE:-🔧 WEB3 INDEXER - DEBUG (Token Filtering)}
+      # 代币过滤配置（核心功能）
+      - TOKEN_FILTER_MODE=${TOKEN_FILTER_MODE:-whitelist}
+      - WATCHED_TOKEN_ADDRESSES=${WATCHED_TOKEN_ADDRESSES:-}
+      # 限流参数（演示友好）
+      - MAX_SYNC_BATCH=${MAX_SYNC_BATCH:-3}
+      - RPC_RATE_LIMIT=${RPC_RATE_LIMIT:-3}
+      - FETCH_CONCURRENCY=${FETCH_CONCURRENCY:-1}
+      - ENABLE_ENERGY_SAVING=${ENABLE_ENERGY_SAVING:-false}
+    restart: always
+
+networks:
+  web3-testnet_web3-network:
+    external: true
+
+  # Note: 复用现有的 web3-testnet-db 数据库
+  #
+  # 启动方式：
+  # 1. 使用商业节点（推荐）：
+  #    docker-compose -f docker-compose.debug.yml --env-file .env.debug.commercial up -d --build
+  #
+  # 2. 使用公共节点（测试）：
+  #    docker-compose -f docker-compose.debug.yml up -d --build
+  #
+  # 3. 使用自定义 RPC：
+  #    export DEBUG_RPC_URLS="https://your-custom-rpc-url"
+  #    docker-compose -f docker-compose.debug.yml up -d --build

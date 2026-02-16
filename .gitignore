@@ -92,3 +92,7 @@ wg_keys/
 venv/
 bin/
 .windsurf/
+.env.a1
+.air_b1.pid
+logs/*.log
+venv/
