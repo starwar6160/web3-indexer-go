@@ -6,9 +6,12 @@ IMAGE_NAME=web3-indexer-go
 STAGING_TAG=latest
 STABLE_TAG=stable
 
+INFRA_COMPOSE=configs/docker/docker-compose.infra.yml
+TESTNET_COMPOSE=configs/docker/docker-compose.testnet.yml
+
 infra-up:
-	@echo "📦 Starting infrastructure (DB, Grafana, Prometheus, Gateway)..."
-	@docker compose -f docker-compose.infra.yml up -d
+	@echo "📦 Starting infrastructure (DB, Grafana, Prometheus)..."
+	@docker compose -f $(INFRA_COMPOSE) up -d
 
 # --- 1. 开发与测试阶段 (Staging) ---
 
@@ -17,8 +20,8 @@ test-a1: infra-up
 	docker build -t $(IMAGE_NAME):$(STAGING_TAG) .
 	docker stop web3-sepolia-staging || true
 	docker rm web3-sepolia-staging || true
-	# 使用 .env.testnet 中的商业 RPC
-	@set -a; . ./.env.testnet; set +a; \
+	# 使用 configs/env/.env.testnet 中的商业 RPC
+	@set -a; . configs/env/.env.testnet; set +a; \
 	docker run -d --name web3-sepolia-staging \
 		--network host \
 		--restart always \
@@ -47,44 +50,31 @@ test-a2: infra-up
 		$(IMAGE_NAME):$(STAGING_TAG)
 	@echo "✅ Staging Anvil live on http://localhost:8092"
 
-test-debug: infra-up
-	@echo "🛠️  构建并部署到测试环境 (Debug Staging)..."
-	docker build -t $(IMAGE_NAME):$(STAGING_TAG) .
-	docker stop web3-debug-staging || true
-	docker rm web3-debug-staging || true
-	docker run -d --name web3-debug-staging \
-		--network host \
-		--restart always \
-		-e PORT=8093 \
-		-e APP_TITLE="🧪 DEBUG-STAGING (8093)" \
-		$(IMAGE_NAME):$(STAGING_TAG)
-	@echo "✅ Staging Debug live on http://localhost:8093"
-
 # --- 2. 生产晋升阶段 (Production) ---
 
 a1: a1-pre-flight infra-up
 	@echo "🚀 晋升测试版镜像到稳定版 8081 (Sepolia Stable)..."
 	docker tag $(IMAGE_NAME):$(STAGING_TAG) $(IMAGE_NAME):$(STABLE_TAG)
-	@set -a; . ./.env.testnet; set +a; \
-	docker compose -f docker-compose.testnet.yml up -d --no-build
-	@echo "✅ Sepolia Stable updated. Downtime < 2s (handled by Nginx Gateway)"
+	@set -a; . configs/env/.env.testnet; set +a; \
+	docker compose -f $(TESTNET_COMPOSE) up -d --no-build
+	@echo "✅ Sepolia Stable updated."
 
 a2: infra-up
 	@echo "🚀 晋升测试版镜像到稳定版 8082 (Anvil Stable)..."
 	docker tag $(IMAGE_NAME):$(STAGING_TAG) $(IMAGE_NAME):$(STABLE_TAG)
-	@set -a; . ./.env.demo2; set +a; \
-	COMPOSE_PROJECT_NAME=web3-demo2 docker compose up -d --no-build
-	@echo "✅ Anvil Stable updated. Downtime < 2s (handled by Nginx Gateway)"
+	@set -a; . configs/env/.env.demo2; set +a; \
+	COMPOSE_PROJECT_NAME=web3-demo2 docker compose -f configs/docker/docker-compose.yml up -d --no-build
+	@echo "✅ Anvil Stable updated."
 
 stop-all:
 	@echo "🛑 Stopping all containers..."
 	docker stop web3-sepolia-staging web3-anvil-staging web3-debug-staging || true
 	docker rm web3-sepolia-staging web3-anvil-staging web3-debug-staging || true
-	-@docker compose -f docker-compose.testnet.yml down 2>/dev/null || true
-	-@COMPOSE_PROJECT_NAME=web3-demo2 docker compose down 2>/dev/null || true
-	-@docker compose -f docker-compose.infra.yml down 2>/dev/null || true
+	-@docker compose -f $(TESTNET_COMPOSE) down 2>/dev/null || true
+	-@COMPOSE_PROJECT_NAME=web3-demo2 docker compose -f configs/docker/docker-compose.yml down 2>/dev/null || true
+	-@docker compose -f $(INFRA_COMPOSE) down 2>/dev/null || true
 	@echo "✅ All containers stopped."
 
 clean-testnet:
 	@echo "🧹 Cleaning up testnet environment..."
-	docker compose -f docker-compose.testnet.yml down -v
+	docker compose -f $(TESTNET_COMPOSE) down -v

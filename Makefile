@@ -73,7 +73,7 @@ init:
 # 辅助指令：Sepolia 预检
 a1-pre-flight:
 	@echo "🔍 Running Sepolia pre-flight checks..."
-	@./scripts/check-a1-pre-flight.sh
+	@./scripts/infra/check-a1-pre-flight.sh
 
 # --- 网关管理指令 ---
 gateway-config:

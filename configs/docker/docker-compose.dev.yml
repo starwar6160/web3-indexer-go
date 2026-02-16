@@ -1,0 +1,43 @@
+version: '3.8'
+
+# Development override for docker-compose.yml
+# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # Database with persistent data for development
+  db:
+    environment:
+      POSTGRES_INITDB_ARGS: "-c log_statement=all"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts:/docker-entrypoint-initdb.d
+
+  # Anvil with more verbose logging
+  anvil:
+    command:
+      - anvil
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8545"
+      - --chain-id
+      - "31337"
+      - --accounts
+      - "10"
+      - --balance
+      - "10000000000000000000000"
+      - --block-time
+      - "2"
+      - --verbose
+
+  # Indexer with debug logging
+  indexer:
+    environment:
+      LOG_LEVEL: debug
+      LOG_FORMAT: json
+    volumes:
+      - ./:/app
+    command: ["./indexer"]
+
+volumes:
+  postgres_data:

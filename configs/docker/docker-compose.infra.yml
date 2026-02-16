@@ -1,0 +1,62 @@
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: web3-indexer-db
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: always
+    network_mode: host
+    command: ["postgres", "-p", "15432"]
+    environment:
+      POSTGRES_DB: web3_indexer
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
+    volumes:
+      - indexer_db_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+
+  # Grafana
+  grafana:
+    image: grafana/grafana-oss:11.5.0
+    container_name: web3-indexer-grafana
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: always
+    network_mode: host
+    volumes:
+      - ./grafana-config/grafana.ini:/etc/grafana/grafana.ini
+      - ./grafana-config/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SERVER_HTTP_PORT=4000
+      - GF_SECURITY_ADMIN_PASSWORD=W3b3_Idx_Secur3_2026_Sec
+      - GF_SERVER_ROOT_URL=https://grafana-demo2.st6160.click/
+      - GF_SERVER_DOMAIN=grafana-demo2.st6160.click
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: web3-indexer-prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: always
+    network_mode: host
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.listen-address=:9091'
+    volumes:
+      - ./prometheus-config/prometheus.yml:/etc/prometheus/prometheus.yml
+
+
+volumes:
+  indexer_db_data:
