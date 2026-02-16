@@ -89,4 +89,10 @@ gateway-reload: gateway-config
 ci:
 	@echo "🚀 开始本地 CI 仿真验证..."
 	docker build -f Dockerfile.ci -t web3-indexer-ci:local .
-	docker run --rm -u $$(id -u):$$(id -g) -v $(PWD):/app web3-indexer-ci:local
+	docker run --rm -u $$(id -u):$$(id -g) \
+		-e GOCACHE=/tmp/go-cache \
+		-e GOMODCACHE=/tmp/go-mod-cache \
+		-e GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache \
+		-e TRIVY_CACHE_DIR=/tmp/trivy-cache \
+		-v $(PWD):/app \
+		web3-indexer-ci:local
