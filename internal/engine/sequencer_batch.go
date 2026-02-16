@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
+	"time"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -90,6 +91,21 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 	blockNum := data.Number
 	if blockNum == nil && data.Block != nil {
 		blockNum = data.Block.Number()
+	}
+
+	// Handle pure Range progress signal (empty blocks)
+	if data.Block == nil && data.RangeEnd != nil && data.Err == nil {
+		if data.RangeEnd.Cmp(s.expectedBlock) >= 0 {
+			// Teleport progress forward
+			nextBlock := new(big.Int).Add(data.RangeEnd, big.NewInt(1))
+			s.expectedBlock.Set(nextBlock)
+			s.lastProgressAt = time.Now()
+			Logger.Debug("sequencer_range_teleport", 
+				slog.String("from", blockNum.String()),
+				slog.String("to", data.RangeEnd.String()))
+			s.processBufferContinuationsLocked(ctx)
+		}
+		return nil
 	}
 
 	if data.Err != nil {

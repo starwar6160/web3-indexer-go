@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
 	"math/big"
 	"strings"
 	"time"
@@ -13,86 +11,136 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.Block, []types.Log, error) {
-	var block *types.Block
-	var err error
-	start := time.Now()
+// fetchRangeWithLogs fetches logs for a range of blocks and processes them.
+// If no logs are found, it fetches the header of the latest block in range to update progress.
+func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
+	startTime := time.Now()
 
-	// 指数退避重试逻辑 (RPC pool 内部有节点故障转移)
-	for retries := 0; retries < 3; retries++ {
-		block, err = f.pool.BlockByNumber(ctx, bn)
-		if err == nil {
-			break
-		}
-
-		// 根据错误类型选择退避时间
-		// 429 (Too Many Requests) 需要更长的退避
-		var backoff time.Duration
-		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "too many requests") {
-			// 429 错误：1s, 2s, 4s（更长的退避）
-			backoff = time.Duration(1000*(1<<retries)) * time.Millisecond
-		} else {
-			// 其他错误：100ms, 200ms, 400ms
-			backoff = time.Duration(100*(1<<retries)) * time.Millisecond
-		}
-
-		LogRPCRetry("BlockByNumber", retries+1, err)
-		select {
-		case <-time.After(backoff):
-			// 继续重试
-		case <-ctx.Done():
-			return nil, nil, ctx.Err()
-		case <-f.stopCh:
-			return nil, nil, fmt.Errorf("fetcher stopped")
-		}
-	}
-
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// 低成本模式优化：跳过日志获取
-	if f.headerOnlyMode {
-		return block, []types.Log{}, nil
-	}
-
-	// 获取该区块的日志（Transfer事件）
-	// 如果有监听的地址，只获取这些地址的日志；否则获取所有Transfer事件
+	// Step 1: Range Filter
 	filterQuery := ethereum.FilterQuery{
-		FromBlock: bn,
-		ToBlock:   bn,
+		FromBlock: start,
+		ToBlock:   end,
 		Topics:    [][]common.Hash{{TransferEventHash}},
 	}
 
 	if len(f.watchedAddresses) > 0 {
 		filterQuery.Addresses = f.watchedAddresses
-		Logger.Debug("fetcher_filtering_logs",
-			slog.String("block", bn.String()),
-			slog.Int("watched_addresses_count", len(f.watchedAddresses)),
-		)
 	}
 
 	logs, err := f.pool.FilterLogs(ctx, filterQuery)
-
-	Logger.Debug("🌐 RPC：执行 eth_getLogs",
-		slog.String("stage", "FETCHER"),
-		slog.String("block", bn.String()),
-		slog.Int("logs_returned", len(logs)),
-		slog.Int("watched_addresses_count", len(f.watchedAddresses)),
-	)
-
 	if err != nil {
-		// 日志获取失败不阻塞区块处理，但记录详细错误信息
-		Logger.Warn("logs_fetch_failed",
-			slog.String("block_number", bn.String()),
-			slog.String("error", err.Error()),
-			slog.String("action", "continuing_with_empty_logs"),
-		)
-		logs = []types.Log{}
+		// Log error and send results back
+		select {
+		case f.Results <- BlockData{Number: start, RangeEnd: end, Err: err}:
+		case <-ctx.Done():
+		case <-f.stopCh:
+		}
+		return
 	}
 
-	// 记录 fetch 耗时
-	GetMetrics().RecordFetcherJobCompleted(time.Since(start))
+	// Step 2: Group logs by block number
+	logsByBlock := make(map[uint64][]types.Log)
+	for _, vLog := range logs {
+		logsByBlock[vLog.BlockNumber] = append(logsByBlock[vLog.BlockNumber], vLog)
+	}
 
-	return block, logs, nil
+	// Step 3: Fetch Headers for blocks that have logs
+	for bNum, blockLogs := range logsByBlock {
+		bn := new(big.Int).SetUint64(bNum)
+		header, err := f.fetchHeaderWithRetry(ctx, bn)
+		if err != nil {
+			f.sendResult(ctx, BlockData{Number: bn, Err: err})
+			continue
+		}
+		block := types.NewBlockWithHeader(header)
+		f.sendResult(ctx, BlockData{Number: bn, Block: block, Logs: blockLogs})
+	}
+
+	// Step 4: Full Range Reporting (Keep-alive)
+	// We MUST report every block in the range to the Sequencer to prevent gaps.
+	// For blocks without logs, we send a minimal BlockData with just the number.
+	for i := new(big.Int).Set(start); i.Cmp(end) <= 0; i.Add(i, big.NewInt(1)) {
+		bn := new(big.Int).Set(i)
+		if _, exists := logsByBlock[bn.Uint64()]; exists {
+			continue // Already sent in Step 3
+		}
+
+		// Fetch header for the very last block in range to update UI time
+		// For others, we can be lazy and send nil Block to just move the pointer
+		var block *types.Block
+		if bn.Cmp(end) == 0 {
+			header, err := f.fetchHeaderWithRetry(ctx, bn)
+			if err == nil {
+				block = types.NewBlockWithHeader(header)
+			}
+		}
+
+		f.sendResult(ctx, BlockData{
+			Number:   bn,
+			RangeEnd: end, // Pass range end for checkpointing
+			Block:    block,
+			Logs:     []types.Log{},
+		})
+	}
+
+	if f.metrics != nil {
+		f.metrics.RecordFetcherJobCompleted(time.Since(startTime))
+	}
+}
+
+func (f *Fetcher) fetchHeaderWithRetry(ctx context.Context, bn *big.Int) (*types.Header, error) {
+	var header *types.Header
+	var err error
+
+	for retries := 0; retries < 3; retries++ {
+		header, err = f.pool.HeaderByNumber(ctx, bn)
+		if err == nil {
+			return header, nil
+		}
+
+		backoff := time.Duration(100*(1<<uint(retries))) * time.Millisecond
+		if strings.Contains(err.Error(), "429") {
+			backoff = time.Duration(1000*(1<<uint(retries))) * time.Millisecond
+		}
+
+		select {
+		case <-time.After(backoff):
+			continue
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, err
+}
+
+func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
+	select {
+	case f.Results <- data:
+	case <-ctx.Done():
+	case <-f.stopCh:
+	}
+}
+
+// Deprecated: used for single block fetching, replaced by fetchRangeWithLogs
+func (f *Fetcher) fetchBlockWithLogs(ctx context.Context, bn *big.Int) (*types.Block, []types.Log, error) {
+	// For compatibility if still called somewhere
+	header, err := f.fetchHeaderWithRetry(ctx, bn)
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	filterQuery := ethereum.FilterQuery{
+		FromBlock: bn,
+		ToBlock:   bn,
+		Topics:    [][]common.Hash{{TransferEventHash}},
+	}
+	if len(f.watchedAddresses) > 0 {
+		filterQuery.Addresses = f.watchedAddresses
+	}
+	logs, err := f.pool.FilterLogs(ctx, filterQuery)
+	if err != nil {
+		return types.NewBlockWithHeader(header), []types.Log{}, nil
+	}
+	
+	return types.NewBlockWithHeader(header), logs, nil
 }

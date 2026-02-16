@@ -16,6 +16,7 @@ type RPCClient interface {
 	GetLatestBlockNumber(ctx context.Context) (*big.Int, error)
 	GetHealthyNodeCount() int
 	GetTotalNodeCount() int
+	SetRateLimit(rps float64, burst int)
 	Close()
 }
 

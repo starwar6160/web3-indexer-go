@@ -41,6 +41,7 @@ type rpcNode struct {
 	lastError  time.Time
 	failCount  int
 	retryAfter time.Time // 下次允许尝试的时间
+	weight     int       // 节点权重 (e.g., Alchemy=3, Infura=1)
 }
 
 // NewRPCClientPool 创建RPC客户端池

@@ -7,8 +7,11 @@ import (
 	"math"
 	"math/big"
 	"sync"
+	"strings"
 	"sync/atomic"
 	"time"
+
+	"web3-indexer-go/internal/monitor"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -31,6 +34,7 @@ type EnhancedRPCClientPool struct {
 	maxSyncBatch      int
 	currentSyncBatch  int
 	batchMutex        sync.Mutex
+	quotaMonitor      *monitor.QuotaMonitor // RPC 额度监控器
 }
 
 // NewEnhancedRPCClientPool creates an enhanced RPC client pool with testnet-specific configurations
@@ -44,9 +48,20 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 		return nil, fmt.Errorf("no RPC URLs provided")
 	}
 
+	// Determine if we are in a local environment (e.g., Anvil)
+	isLocal := false
+	for _, url := range urls {
+		if strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1") || strings.Contains(url, "anvil") {
+			isLocal = true
+			break
+		}
+	}
+
 	// Determine rate limits based on network type
 	var globalRPS float64
-	if isTestnet {
+	if isLocal {
+		globalRPS = 10000.0 // Virtually unlimited for local nodes
+	} else if isTestnet {
 		globalRPS = 1.0 // Conservative rate for testnet to preserve quotas
 	} else {
 		globalRPS = 20.0 // Higher rate for local/anvil
@@ -54,25 +69,28 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 
 	pool := &EnhancedRPCClientPool{
 		clients:           make([]*rpcNode, 0, len(urls)),
-		globalRateLimiter: rate.NewLimiter(rate.Limit(globalRPS), 2), // Conservative burst size
+		globalRateLimiter: rate.NewLimiter(rate.Limit(globalRPS), int(globalRPS*2)), 
 		nodeRateLimiters:  make(map[string]*rate.Limiter),
 		metrics:           GetMetrics(),
-		isTestnetMode:     isTestnet,
+		isTestnetMode:     isTestnet && !isLocal, // Disable testnet restrictions for local
 		maxSyncBatch:      maxSyncBatch,
 		lastResetTime:     time.Now(),
+		quotaMonitor:      monitor.NewQuotaMonitor(),
 	}
 
 	// Initialize individual node rate limiters
 	for _, url := range urls {
-		// Per-node rate limiter (more conservative for testnet)
+		// Per-node rate limiter
 		var nodeRPS float64
-		if isTestnet {
-			nodeRPS = 1.0 // Even more conservative per-node rate
+		if isLocal {
+			nodeRPS = 5000.0
+		} else if isTestnet {
+			nodeRPS = 1.0
 		} else {
 			nodeRPS = 10.0
 		}
 
-		pool.nodeRateLimiters[url] = rate.NewLimiter(rate.Limit(nodeRPS), 1)
+		pool.nodeRateLimiters[url] = rate.NewLimiter(rate.Limit(nodeRPS), int(nodeRPS))
 
 		// Create the actual RPC client
 		client, err := ethclient.Dial(url)
@@ -85,6 +103,12 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 			url:       url,
 			client:    client,
 			isHealthy: false,
+			weight:    1, // Default weight
+		}
+
+		// First node gets higher weight if in testnet mode
+		if isTestnet && len(pool.clients) == 0 {
+			node.weight = 3
 		}
 
 		// Perform initial health check
@@ -135,7 +159,7 @@ func (p *EnhancedRPCClientPool) Close() {
 	log.Printf("Enhanced RPC Pool closed")
 }
 
-// getNextHealthyNode gets the next healthy node with round-robin selection
+// getNextHealthyNode gets the next healthy node with weighted selection
 func (p *EnhancedRPCClientPool) getNextHealthyNode() *rpcNode {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -145,21 +169,67 @@ func (p *EnhancedRPCClientPool) getNextHealthyNode() *rpcNode {
 		return nil
 	}
 
-	startIdx := int(atomic.AddInt32(&p.index, 1)) % size
-	for i := 0; i < size; i++ {
-		idx := (startIdx + i) % size
-		node := p.clients[idx]
-
-		if node.isHealthy {
-			return node
+	// Calculate total weight of healthy nodes
+	totalWeight := 0
+	var healthyNodes []*rpcNode
+	for _, node := range p.clients {
+		if node.isHealthy || time.Now().After(node.retryAfter) {
+			healthyNodes = append(healthyNodes, node)
+			// Default weight to 1 if not set
+			w := node.weight
+			if w <= 0 {
+				w = 1
+			}
+			totalWeight += w
 		}
+	}
 
-		if time.Now().After(node.retryAfter) {
+	if len(healthyNodes) == 0 {
+		return nil
+	}
+
+	// Simple weighted random or round-robin based on counter
+	count := atomic.AddInt64(&p.requestCount, 1)
+	val := int(count % int64(totalWeight))
+
+	current := 0
+	for _, node := range healthyNodes {
+		w := node.weight
+		if w <= 0 {
+			w = 1
+		}
+		current += w
+		if val < current {
 			return node
 		}
 	}
 
-	return nil
+	return healthyNodes[0]
+}
+
+// handleRPCError handles errors from RPC nodes, specifically looking for 429s
+func (p *EnhancedRPCClientPool) handleRPCError(node *rpcNode, err error) {
+	if err == nil {
+		return
+	}
+
+	errStr := err.Error()
+	if strings.Contains(errStr, "429") || strings.Contains(errStr, "too many requests") || strings.Contains(errStr, "limit exceeded") {
+		log.Printf("🛑 [CIRCUIT BREAKER] %s returned 429, entering 5-minute cooldown", node.url)
+		p.mu.Lock()
+		node.isHealthy = false
+		node.lastError = time.Now()
+		// 5 minute cooldown for 429s
+		node.retryAfter = time.Now().Add(5 * time.Minute)
+		p.mu.Unlock()
+		
+		// Report red light to Prometheus
+		if p.metrics != nil {
+			p.metrics.UpdateRPCHealthyNodes("enhanced", p.GetHealthyNodeCount())
+		}
+	} else {
+		p.markNodeUnhealthy(node)
+	}
 }
 
 // markNodeUnhealthy marks a node as unhealthy with exponential backoff
@@ -182,6 +252,11 @@ func (p *EnhancedRPCClientPool) markNodeUnhealthy(node *rpcNode) {
 // incrementRequestCount increments the global request counter
 func (p *EnhancedRPCClientPool) incrementRequestCount(nodeURL, method string) {
 	atomic.AddInt64(&p.requestCount, 1)
+
+	// 📊 追踪额度使用（每次 RPC 调用前调用）
+	if p.quotaMonitor != nil {
+		p.quotaMonitor.Inc()
+	}
 
 	// Record metric
 	if p.metrics != nil {
@@ -245,7 +320,7 @@ func (p *EnhancedRPCClientPool) BlockByNumber(ctx context.Context, number *big.I
 		p.incrementRequestCount(node.url, "BlockByNumber")
 
 		if err != nil {
-			p.markNodeUnhealthy(node)
+			p.handleRPCError(node, err)
 			continue
 		}
 
@@ -298,7 +373,7 @@ func (p *EnhancedRPCClientPool) HeaderByNumber(ctx context.Context, number *big.
 		p.incrementRequestCount(node.url, "HeaderByNumber")
 
 		if err != nil {
-			p.markNodeUnhealthy(node)
+			p.handleRPCError(node, err)
 			continue
 		}
 
@@ -352,7 +427,7 @@ func (p *EnhancedRPCClientPool) FilterLogs(ctx context.Context, q ethereum.Filte
 		p.incrementRequestCount(node.url, "FilterLogs")
 
 		if err != nil {
-			p.markNodeUnhealthy(node)
+			p.handleRPCError(node, err)
 			continue
 		}
 
@@ -401,7 +476,7 @@ func (p *EnhancedRPCClientPool) GetLatestBlockNumber(ctx context.Context) (*big.
 		p.incrementRequestCount(node.url, "GetLatestBlockNumber")
 
 		if err != nil {
-			p.markNodeUnhealthy(node)
+			p.handleRPCError(node, err)
 			continue
 		}
 
@@ -454,6 +529,22 @@ func (p *EnhancedRPCClientPool) GetTotalNodeCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return len(p.clients)
+}
+
+// SetRateLimit updates the global and per-node rate limits
+func (p *EnhancedRPCClientPool) SetRateLimit(rps float64, burst int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.globalRateLimiter = rate.NewLimiter(rate.Limit(rps), burst)
+
+	// Also update individual node limiters (using rps/num_nodes or just rps)
+	// For simplicity, we give each node the same burst, but global handles the total
+	for url := range p.nodeRateLimiters {
+		p.nodeRateLimiters[url] = rate.NewLimiter(rate.Limit(rps), burst)
+	}
+
+	log.Printf("Enhanced RPC Pool rate limit updated: %.2f RPS, %d Burst", rps, burst)
 }
 
 // StartHealthCheck starts a background goroutine to periodically check the health of RPC nodes.
