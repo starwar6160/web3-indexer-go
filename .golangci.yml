@@ -168,20 +168,9 @@ run:
   # Timeout for analysis
   timeout: 5m
 
-  # Which files to skip
-  skip-files:
-    - ".*\\.pb\\.go$"
-    - ".*\\.gen\\.go$"
-
   # Build tags
   build-tags:
     - integration
-
-  # Which dirs to skip
-  skip-dirs:
-    - vendor
-    - third_party
-    - testdata
 
   # Go version to use
   go: "1.21"
@@ -191,22 +180,26 @@ issues:
   # Maximum issues count per one linter
   max-issues-per-linter: 0
 
+  # Which dirs to exclude from analysis
+  exclude-dirs:
+    - vendor
+    - third_party
+    - testdata
+    - .git
+    - .github
+    - scripts
+    - tools
+
+  # Which files to exclude from analysis
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
+
   # Exclude specific issues for demo project
   exclude-rules: []
 
 # Output configuration
 output:
-  # Format: colored-line-number|json|tab|checkstyle|code-climate
-  format: colored-line-number
-
-  # Print lines of code with linter issues
-  print-issued-lines: true
-
-  # Print linter name in the end of issue text
-  print-linter-name: true
-
-  # Make issues output unique by line
-  uniq-by-line: true
-
-  # Sort results by: filepath, line and column
-  sort-results: true
+  # Formats for output
+  formats:
+    - name: colored
