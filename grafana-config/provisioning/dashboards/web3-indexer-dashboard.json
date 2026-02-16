@@ -33,7 +33,7 @@
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": "${PostgresDS}",
-      "targets": [ { "rawSql": "SELECT MAX(number) FROM blocks", "format": "time_series", "refId": "A" } ],
+      "targets": [ { "rawSql": "SELECT MAX(number) AS value FROM blocks", "format": "table", "refId": "A" } ],
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -48,7 +48,7 @@
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": "${PostgresDS}",
-      "targets": [ { "rawSql": "SELECT COUNT(*) FROM transfers", "format": "time_series", "refId": "A" } ],
+      "targets": [ { "rawSql": "SELECT COUNT(*) AS value FROM transfers", "format": "table", "refId": "A" } ],
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -65,8 +65,8 @@
       "datasource": "${PostgresDS}",
       "targets": [ 
         { 
-          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - processed_at)) as value FROM blocks ORDER BY number DESC LIMIT 1", 
-          "format": "time_series", 
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(processed_at))) AS value FROM blocks", 
+          "format": "table", 
           "refId": "A" 
         } 
       ],
@@ -85,7 +85,7 @@
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "datasource": "${PostgresDS}",
-      "targets": [ { "rawSql": "SELECT COUNT(DISTINCT ip_address) FROM visitor_stats WHERE created_at > NOW() - INTERVAL '24 hours'", "format": "time_series", "refId": "A" } ],
+      "targets": [ { "rawSql": "SELECT COUNT(DISTINCT ip_address) AS value FROM visitor_stats WHERE created_at > CURRENT_DATE", "format": "table", "refId": "A" } ],
       "options": {
         "colorMode": "background",
         "justifyMode": "center",
