@@ -5,7 +5,6 @@ import (
 	"html/template"
 	"net/http"
 	"os"
-	"strings"
 )
 
 //go:embed dashboard.html dashboard.js dashboard.css security.html PUBLIC_KEY.asc README.md.asc
@@ -31,20 +30,22 @@ func RenderDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. 环境识别逻辑 (SRE 工业级注入)
+	// 2. 环境识别逻辑 (使用物理 ChainID 判定)
+	chainIDStr := os.Getenv("CHAIN_ID")
+	
+	// 默认值
+	envName := "demo"
+	dsName := "Web3-demo-DB"
+
+	// 判定是否为 Sepolia (11155111)
+	if chainIDStr == "11155111" {
+		envName = "sepolia"
+		dsName = "Web3-sepolia-DB"
+	}
+
 	title := os.Getenv("APP_TITLE")
 	if title == "" {
 		title = "🚀 Web3 Indexer Dashboard"
-	}
-
-	// 计算数据源名称 (必须与 Grafana 中定义的一致)
-	// 如果是 Sepolia 环境，使用 Web3-sepolia-DB，否则使用 Web3-demo-DB
-	isSepolia := strings.Contains(strings.ToUpper(title), "SEPOLIA") || strings.Contains(strings.ToUpper(title), "TESTNET")
-	envName := "demo"
-	dsName := "Web3-demo-DB"
-	if isSepolia {
-		envName = "sepolia"
-		dsName = "Web3-sepolia-DB"
 	}
 
 	// 获取 Grafana 基础地址 (支持 Tailscale 动态识别)
