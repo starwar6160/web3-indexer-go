@@ -44,6 +44,10 @@ help:
 	@echo "  make db-backup-demo1    - 备份 Demo1 数据"
 	@echo "  make db-restore-demo1   - 恢复 Demo1 数据（从最新备份）"
 	@echo ""
+	@echo "🌐 网关管理:"
+	@echo "  make gateway-config     - 根据脚本自动生成 nginx.conf"
+	@echo "  make gateway-reload     - 重新生成并热重载网关配置"
+	@echo ""
 	@echo "🔧 基础指令:"
 	@echo "  make build        - 编译本地二进制文件"
 	@echo "  make clean        - 清理构建产物"
@@ -74,4 +78,14 @@ init:
 a1-pre-flight:
 	@echo "🔍 Running Sepolia pre-flight checks..."
 	@./scripts/check-a1-pre-flight.sh
+
+# --- 网关管理指令 ---
+gateway-config:
+	@chmod +x scripts/gen-nginx-config.sh
+	@./scripts/gen-nginx-config.sh
+
+gateway-reload: gateway-config
+	@echo "♻️  Reloading Nginx Gateway..."
+	@docker exec web3-indexer-gateway nginx -s reload
+	@echo "✅ Gateway config updated and reloaded."
 
