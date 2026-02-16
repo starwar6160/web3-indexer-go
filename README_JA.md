@@ -2,9 +2,11 @@
 
 [🌐 **English**](./README.md) | [🏮 **中文说明**](./README_ZH.md) | [🗾 **日本語の説明**](./README_JA.md)
 
-**Go**、**PostgreSQL**、および **Docker** で構築された、極めて高い信頼性とコスト効率を誇るイーサリアムイベントインデクサーです。商用 RPC のクォータ（制限）を厳格に守りながら、高性能なデータ同期を実現します。本プロジェクトは横浜のハードウェアラボにて開発・テストされました。
+### 🚀 ライブデモ
+*   **本番環境 (Sepolia)**: [https://demo1.st6160.click/](https://demo1.st6160.click/)
+*   **ローカルラボ (Anvil)**: [https://demo2.st6160.click/](https://demo2.st6160.click/)
 
-ライブデモ: [https://demo2.st6160.click/](https://demo2.st6160.click/)
+**Go**、**PostgreSQL**、および **Docker** で構築された、極めて高い信頼性とコスト効率を誇るイーサリアムイベントインデクサーです。
 
 ## 🚀 技術的な特徴
 

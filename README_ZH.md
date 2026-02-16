@@ -2,9 +2,11 @@
 
 [🌐 **English**](./README.md) | [🏮 **中文说明**](./README_ZH.md) | [🗾 **日本語の説明**](./README_JA.md)
 
-基于 **Go**、**PostgreSQL** 和 **Docker** 构建的高可靠、低成本以太坊事件索引器。专为高性能数据摄取设计，同时严格遵守商用 RPC 的配额限制。本项目在横滨硬件实验室完成开发与压测。
+### 🚀 在线演示
+*   **生产环境 (Sepolia)**: [https://demo1.st6160.click/](https://demo1.st6160.click/)
+*   **本地实验室 (Anvil)**: [https://demo2.st6160.click/](https://demo2.st6160.click/)
 
-在线演示: [https://demo2.st6160.click/](https://demo2.st6160.click/)
+基于 **Go**、**PostgreSQL** 和 **Docker** 构建的高可靠、低成本以太坊事件索引器。
 
 ## 🚀 技术亮点
 

@@ -5,9 +5,11 @@
 
 [🌐 **English**](./README.md) | [🏮 **中文说明**](./README_ZH.md) | [🗾 **日本語の説明**](./README_JA.md)
 
-An ultra-reliable, cost-efficient Ethereum event indexer built with **Go**, **PostgreSQL**, and **Docker**. Engineered for high-performance data ingestion while strictly adhering to commercial RPC quotas. Developed and tested in the Yokohama hardware lab.
+### 🚀 Live Demos
+*   **Production (Sepolia)**: [https://demo1.st6160.click/](https://demo1.st6160.click/)
+*   **Local Lab (Anvil)**: [https://demo2.st6160.click/](https://demo2.st6160.click/)
 
-Live Demo: [https://demo2.st6160.click/](https://demo2.st6160.click/)
+An ultra-reliable, cost-efficient Ethereum event indexer built with **Go**, **PostgreSQL**, and **Docker**.
 
 ## 🚀 Engineering Highlights
 
