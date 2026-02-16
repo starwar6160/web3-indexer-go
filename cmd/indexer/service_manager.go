@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"math/big"
 	"time"
 
@@ -43,6 +44,8 @@ func (sm *ServiceManager) GetStartBlock(ctx context.Context, forceFrom string, r
 
 // StartTailFollow 启动持续追踪
 func (sm *ServiceManager) StartTailFollow(ctx context.Context, startBlock *big.Int) {
+	slog.Info("🎬 [StartTailFollow] Function called", "start_block", startBlock.String())
+
 	// 🚀 工业级优化：Gap Check (自动补洞)
 	// 检查数据库中已有的最大区块号，看是否与本次 startBlock 存在断层
 	var maxInDB int64

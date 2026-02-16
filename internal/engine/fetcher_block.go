@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"log/slog"
 	"math/big"
 	"strings"
 	"time"
@@ -25,6 +26,15 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 
 	if len(f.watchedAddresses) > 0 {
 		filterQuery.Addresses = f.watchedAddresses
+		Logger.Info("🔍 Fetching logs with address filter",
+			slog.String("from", start.String()),
+			slog.String("to", end.String()),
+			slog.Int("watched_count", len(f.watchedAddresses)))
+	} else {
+		Logger.Info("🌍 Fetching logs for ALL Transfer events",
+			slog.String("from", start.String()),
+			slog.String("to", end.String()),
+			slog.String("mode", "unfiltered"))
 	}
 
 	logs, err := f.pool.FilterLogs(ctx, filterQuery)
@@ -37,6 +47,12 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		}
 		return
 	}
+
+	Logger.Info("📊 RPC response received",
+		slog.String("from", start.String()),
+		slog.String("to", end.String()),
+		slog.Int("logs_found", len(logs)),
+		slog.Int("watched_addresses", len(f.watchedAddresses)))
 
 	// Step 2: Group logs by block number
 	logsByBlock := make(map[uint64][]types.Log)
