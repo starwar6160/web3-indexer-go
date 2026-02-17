@@ -167,3 +167,133 @@ h1 { color: #333; font-size: 28px; margin-bottom: 10px; }
     color: #64748b;
     font-size: 10px;
 }
+
+/* --- 🚀 Industrial Sci-Fi Hibernate Overlay --- */
+:root {
+    --sleep-bg-color: rgba(10, 14, 26, 0.95);
+    --sleep-accent-color: #00f3ff;
+    --sleep-text-muted: #8a9ab8;
+    --sleep-font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+}
+
+.sleep-overlay-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(8px);
+    background-color: var(--sleep-bg-color);
+    transition: opacity 0.5s ease;
+}
+
+body.is-sleeping .sleep-overlay-container {
+    display: flex;
+    animation: fade-in 0.5s forwards;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.sleep-grid-bg {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: -1;
+    background-image: 
+        linear-gradient(rgba(0, 243, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 243, 255, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(circle at center, black 30%, transparent 80%);
+    pointer-events: none;
+}
+
+.sleep-content-box {
+    text-align: center;
+    padding: 50px;
+    border-radius: 20px;
+    background: rgba(20, 25, 40, 0.7);
+    border: 1px solid rgba(0, 243, 255, 0.2);
+    box-shadow: 0 0 50px rgba(0, 243, 255, 0.1);
+}
+
+.sleep-icon-pulse {
+    color: var(--sleep-accent-color);
+    margin-bottom: 30px;
+    position: relative;
+    display: inline-block;
+}
+
+.sleep-icon-pulse::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 80px;
+    height: 80px;
+    margin-top: -40px;
+    margin-left: -40px;
+    border-radius: 50%;
+    background: rgba(0, 243, 255, 0.2);
+    animation: sci-fi-pulse 4s ease-out infinite;
+    z-index: -1;
+}
+
+@keyframes sci-fi-pulse {
+    0% { transform: scale(0.5); opacity: 1; }
+    100% { transform: scale(2); opacity: 0; }
+}
+
+.sleep-title {
+    font-family: var(--sleep-font-mono);
+    font-size: 28px;
+    color: #fff;
+    letter-spacing: 4px;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+}
+
+.sleep-status {
+    font-family: var(--sleep-font-mono);
+    font-size: 14px;
+    color: var(--sleep-accent-color);
+    margin-bottom: 25px;
+    background: rgba(0, 243, 255, 0.1);
+    padding: 8px 16px;
+    border-radius: 30px;
+    display: inline-block;
+}
+
+.sleep-desc {
+    color: var(--sleep-text-muted);
+    font-size: 15px;
+    line-height: 1.8;
+    margin-bottom: 35px;
+}
+
+.wake-button {
+    background: transparent;
+    border: 1px solid var(--sleep-accent-color);
+    color: var(--sleep-accent-color);
+    padding: 14px 40px;
+    font-family: var(--sleep-font-mono);
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: 0.3s;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wake-button:hover {
+    background: var(--sleep-accent-color);
+    color: #0a0e1a;
+    box-shadow: 0 0 30px rgba(0, 243, 255, 0.4);
+}

@@ -22,6 +22,7 @@ import (
 
 	networkpkg "web3-indexer-go/pkg/network"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -47,7 +48,7 @@ var (
 func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, forceFrom string, resetDB bool) (*big.Int, error) {
 	// 1. 获取链上实时高度
 	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
-	
+
 	if resetDB {
 		slog.Info("🚨 DATABASE_RESET_REQUESTED", "action", "wiping_tables")
 		_, err := db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
@@ -55,26 +56,6 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 			slog.Error("reset_db_fail", "err", err)
 		}
 		return big.NewInt(10262444), nil
-	}
-
-	// 🚀 工业级自愈逻辑：检测环境对齐 (Environment Realignment)
-	// 如果数据库里的高度大于链上高度，说明 Anvil 重启了，数据库变成了“未来数据”
-	var maxInDB int64
-	_ = db.GetContext(ctx, &maxInDB, "SELECT COALESCE(MAX(number), 0) FROM blocks")
-	
-	if rpcErr == nil && latestChainBlock != nil && maxInDB > latestChainBlock.Int64() {
-		slog.Warn("🚨 TIME_TRAVEL_DETECTED", 
-			"db_height", maxInDB, 
-			"chain_height", latestChainBlock.String(),
-			"action", "pruning_future_timeline")
-		
-		// 环境已重置，执行“剪枝计划”
-		repo := database.NewRepositoryFromDB(db)
-		if err := repo.PruneFutureData(ctx, latestChainBlock.Int64()); err != nil {
-			slog.Error("pruning_failed_falling_back_to_wipe", "err", err)
-			_, _ = db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
-		}
-		return latestChainBlock, nil
 	}
 
 	if forceFrom != "" {
@@ -188,6 +169,12 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		return
 	}
 
+	// 🛡️ Ensure Schema is initialized (resolves token_metadata missing errors)
+	if err := database.InitSchema(ctx, db); err != nil {
+		slog.Error("❌ Database schema initialization failed", "err", err)
+		return
+	}
+
 	rpcPool, err := setupRPC()
 	if err != nil {
 		return
@@ -197,11 +184,55 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		return
 	}
 
-	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency, cfg.EnableSimulator, cfg.NetworkMode)
-	configureTokenFiltering(sm)
+	// 🚀 Dynamic Speed Control: Enforce strict 1.0 TPS serial sync for Sepolia
+	concurrency := cfg.FetchConcurrency
+	tpsLimit := 1000.0 // Default for local Anvil
+	if cfg.IsTestnet {
+		concurrency = 1 // Force serial to prevent TPS bursts
+		tpsLimit = 1.0  // 极度保守：每秒 1 笔交易，绝对保住额度
+		slog.Info("🛡️ Quota protection ACTIVE: Enforcing 1.0 TPS strict serial sync")
+	}
 
-	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 3*time.Minute, 3*time.Minute)
+	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, concurrency, cfg.EnableSimulator, cfg.NetworkMode)
+	configureTokenFiltering(sm)
+	sm.fetcher.SetThroughputLimit(tpsLimit)
+
+	// 🚀 Industrial Guard: Align DB with Chain Absolute Truth
+	guard := engine.NewConsistencyGuard(sm.processor.GetRepoAdapter(), rpcPool)
+
+	// 🚀 Real-time reporting of alignment progress
+	guard.OnStatus = func(status string, detail string, progress int) {
+		wsHub.Broadcast(web.WSEvent{
+			Type: "linearity_status",
+			Data: map[string]interface{}{"status": status, "detail": detail, "progress": progress},
+		})
+	}
+
+	if err := guard.PerformLinearityCheck(ctx); err != nil {
+		slog.Error("linearity_check_failed", "err", err)
+	}
+
+	// ✨ On-Demand Lifecycle: Stay active for 5 mins after any heartbeat (Web access)
+	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 5*time.Minute, guard)
+	lazyManager.StartMonitor(ctx)
+
+	// 🚀 Real-time status broadcasting
+	lazyManager.OnStatus = func(status map[string]interface{}) {
+		wsHub.Broadcast(web.WSEvent{Type: "lazy_status", Data: status})
+	}
+
 	apiServer.SetDependencies(db, rpcPool, lazyManager, cfg.ChainID)
+
+	// 🚀 Single Source of Truth for Activity: All WS connections wake up the engine
+	wsHub.OnActivity = func() {
+		lazyManager.Trigger()
+	}
+
+	// 🎨 On-Demand Coloring: When UI scrolls to a token, fetch its metadata
+	wsHub.OnNeedMeta = func(addr string) {
+		slog.Debug("🎨 [On-Demand] UI requested metadata", "address", addr)
+		_ = sm.processor.GetSymbol(common.HexToAddress(addr))
+	}
 
 	sm.processor.EventHook = func(eventType string, data interface{}) {
 		if apiServer.signer != nil {

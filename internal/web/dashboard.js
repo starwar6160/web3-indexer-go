@@ -1,3 +1,41 @@
+let idleTimer;
+const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+
+function resetIdleTimer() {
+    if (document.visibilityState === 'visible') {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'HEARTBEAT', data: { status: 'active' } }));
+        }
+        hideSleepOverlay();
+    }
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(showSleepOverlay, IDLE_TIMEOUT);
+}
+
+function showSleepOverlay() {
+    document.body.classList.add('is-sleeping');
+    updateSystemState('HIBERNATING', 'status-down');
+}
+
+function hideSleepOverlay() {
+    document.body.classList.remove('is-sleeping');
+}
+
+// 🚀 Interaction Listeners
+['mousemove', 'mousedown', 'scroll', 'keypress', 'click'].forEach(evt => {
+    window.addEventListener(evt, () => {
+        // Throttle heartbeat to once every 10s to avoid spam
+        if (!window.lastHeartbeat || Date.now() - window.lastHeartbeat > 10000) {
+            resetIdleTimer();
+            window.lastHeartbeat = Date.now();
+        }
+    });
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resetIdleTimer();
+});
+
 let ws;
 let isWSConnected = false;
 let reconnectInterval = 1000; // 初始重连 1s
@@ -29,6 +67,8 @@ function connectWS() {
         healthEl.className = 'status-badge status-healthy';
         console.log('✅ WebSocket Connected');
         
+        resetIdleTimer(); // Initial activity
+        
         // 💡 架构升级：重连后自动补齐数据
         fetchData();
         addLog('System connected. Streaming live data...', 'info');
@@ -39,7 +79,36 @@ function connectWS() {
             const raw = JSON.parse(event.data);
             let msg = raw;
             
-            // 🛡️ Signed Payload Detection
+            // 🚀 Handle sleeping state from backend
+            if (raw.type === 'lazy_status' && raw.data.mode === 'sleep') {
+                showSleepOverlay();
+                return;
+            }
+
+            // 🚀 Handle linearity check progress
+            if (raw.type === 'linearity_status') {
+                const { status, detail, progress } = raw.data;
+                const statusEl = document.getElementById('sleep-status-text');
+                const detailEl = document.getElementById('sleep-detail');
+                
+                if (statusEl) statusEl.textContent = `SYSTEM ${status}`;
+                if (detailEl) {
+                    let progressText = `> ${detail}`;
+                    if (progress) progressText += ` [${progress}%]`;
+                    detailEl.textContent = progressText;
+                }
+                
+                if (status === 'ALIGNED') {
+                    detailEl.style.color = '#22c55e'; // Green for success
+                    setTimeout(hideSleepOverlay, 1500); 
+                } else if (status === 'REPAIRING') {
+                    detailEl.style.color = '#f43f5e'; // Red for repair
+                    showSleepOverlay();
+                } else {
+                    showSleepOverlay();
+                }
+                return;
+            }
             if (raw.signature && raw.data) {
                 updateSignatureStatus(true, raw.signer_id, raw.signature);
                 msg = { type: raw.type, data: raw.data };
@@ -139,6 +208,13 @@ async function fetchStatus() {
         document.getElementById('adminIP').textContent = data?.admin_ip || 'None';
         document.getElementById('selfHealing').textContent = data?.self_healing_count || '0';
         document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+
+        // 🚀 Sync overlay if backend reports sleep
+        if (data?.lazy_indexer?.mode === 'sleep') {
+            showSleepOverlay();
+        } else if (data?.lazy_indexer?.mode === 'active') {
+            hideSleepOverlay();
+        }
     } catch (e) { 
         console.warn('Status Sync Warning:', e.message);
         if (!isWSConnected) updateSystemState('OFFLINE', 'status-down');
@@ -252,6 +328,29 @@ function renderActivityIcon(type) {
     return icons[type] || '⚡ <span style="color: #64748b;">Activity</span>';
 }
 
+// 🚀 Viewport-triggered Lazy Loading (Intersection Observer)
+const tokenObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            const el = entry.target;
+            const addr = el.dataset.addr;
+            const symbol = el.dataset.symbol;
+
+            // Only request if it's a pending/unknown token
+            if (addr && addr !== '0x0000000000000000000000000000000000000000' && (symbol === '' || symbol.includes('...'))) {
+                console.log('🔍 Token entered viewport, requesting enrichment:', addr);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'NEED_METADATA',
+                        data: { address: addr }
+                    }));
+                }
+                tokenObserver.unobserve(el);
+            }
+        }
+    });
+}, { threshold: 0.1 });
+
 function updateTransfersTable(tx) {
     if (!tx) return;
     const table = document.getElementById('transfersTable');
@@ -265,11 +364,14 @@ function updateTransfersTable(tx) {
     
     // 🎨 Activity & Token Badge 渲染
     const activityDisplay = renderActivityIcon(type);
-    const tokenDisplay = symbol && symbol !== token.substring(0, 10) ? 
-        `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
-        `<span class="address" title="${token}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
     
-    const row = `<tr>
+    // 🚀 增加 data-addr 和 data-symbol 用于 Lazy Loading
+    const tokenDisplay = symbol && symbol !== token.substring(0, 10) ? 
+        `<span class="token-badge token-${symbol.toLowerCase()}" data-addr="${token}" data-symbol="${symbol}">${symbol}</span>` : 
+        `<span class="address token-pending" title="${token}" data-addr="${token}" data-symbol="${symbol}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
+    
+    const rowId = `tx-${tx.tx_hash.substring(0, 10)}-${tx.log_index}`;
+    const row = `<tr id="${rowId}">
         <td class="stat-value">${tx.block_number || '0'}</td>
         <td>${activityDisplay}</td>
         <td class="address">${from.substring(0, 10)}...</td>
@@ -278,6 +380,11 @@ function updateTransfersTable(tx) {
         <td>${tokenDisplay}</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
+    
+    // 开始观察新加入的 Token Badge
+    const newBadge = document.querySelector(`#${rowId} [data-addr]`);
+    if (newBadge) tokenObserver.observe(newBadge);
+
     if (table.rows.length > 10) table.deleteRow(10);
 }
 
@@ -352,8 +459,8 @@ async function fetchData() {
                 // 🎨 Activity & Token Badge 渲染逻辑
                 const activityDisplay = renderActivityIcon(type);
                 const tokenDisplay = symbol && symbol !== token.substring(0, 10) ? 
-                    `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
-                    `<span class="address" title="${token}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
+                    `<span class="token-badge token-${symbol.toLowerCase()}" data-addr="${token}" data-symbol="${symbol}">${symbol}</span>` : 
+                    `<span class="address token-pending" title="${token}" data-addr="${token}" data-symbol="${symbol}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
                 
                 return `<tr>
                     <td class="stat-value">${t.block_number || '0'}</td>
@@ -364,6 +471,9 @@ async function fetchData() {
                     <td>${tokenDisplay}</td>
                 </tr>`;
             }).join('');
+
+            // 对初始加载的数据也启动观察
+            document.querySelectorAll('#transfersTable [data-addr]').forEach(el => tokenObserver.observe(el));
         }
     } catch (e) { console.error('Fetch Error:', e); }
 }

@@ -8,101 +8,72 @@ import (
 	"time"
 )
 
-// LazyManager manages the indexing state and cooldown periods
+// LazyManager manages the indexing state based on activity
 type LazyManager struct {
 	mu            sync.RWMutex
 	isActive      bool
-	lastStartTime time.Time
-	stopTimer     *time.Timer
-	cooldown      time.Duration
-	activePeriod  time.Duration
+	lastHeartbeat time.Time
+	timeout       time.Duration
 	fetcher       *Fetcher
 	rpcPool       RPCClient
+	logger        *slog.Logger
+	guard         *ConsistencyGuard                   // 🛡️ Linearity Guard
+	OnStatus      func(status map[string]interface{}) // 🚀 Callback for status changes
 }
 
-// NewLazyManager creates a new LazyManager instance
-func NewLazyManager(fetcher *Fetcher, rpcPool RPCClient, cooldown time.Duration, activePeriod time.Duration) *LazyManager {
-	return &LazyManager{
+// NewLazyManager creates a new LazyManager instance with a heartbeat timeout
+func NewLazyManager(fetcher *Fetcher, rpcPool RPCClient, timeout time.Duration, guard *ConsistencyGuard) *LazyManager {
+	lm := &LazyManager{
 		isActive:      false,
-		lastStartTime: time.Now().Add(-cooldown), // Initialize with cooldown elapsed
-		cooldown:      cooldown,
-		activePeriod:  activePeriod,
+		lastHeartbeat: time.Now().Add(-timeout), // Initialize as inactive
+		timeout:       timeout,
 		fetcher:       fetcher,
 		rpcPool:       rpcPool,
+		guard:         guard,
+		logger:        slog.Default(),
 	}
+
+	// Initial state: ensure fetcher is paused
+	fetcher.Pause()
+
+	return lm
 }
 
-// Trigger activates indexing if cooldown period has passed
+// Trigger (Heartbeat) activates indexing if currently inactive
 func (lm *LazyManager) Trigger() {
-	// 🛠️ 工业级硬编码禁用：调试期间永远保持活跃，不处理休眠逻辑
-}
-
-// activateIndexing starts the indexing process
-func (lm *LazyManager) activateIndexing() {
-	lm.isActive = true
-	lm.lastStartTime = time.Now()
-	// 始终确保 Fetcher 是运行状态
-	if lm.fetcher.IsPaused() {
-		lm.fetcher.Resume()
-	}
-}
-
-// deactivateIndexing stops the indexing process
-func (lm *LazyManager) deactivateIndexing() {
-	// 🛠️ 禁止进入休眠状态
-}
-
-// IsActive returns whether indexing is currently active
-func (lm *LazyManager) IsActive() bool {
-	return true // 永远活跃
-}
-
-// GetStatus returns the current status of the lazy indexer
-func (lm *LazyManager) GetStatus() map[string]interface{} {
-	status := make(map[string]interface{})
-	status["mode"] = "active"
-	status["display"] = "● 持续索引模式 (Full-speed Mode)"
-	return status
-}
-
-// StartInitialIndexing starts the initial indexing period on startup
-func (lm *LazyManager) StartInitialIndexing() {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 
-	lm.activateIndexing()
-}
+	lm.lastHeartbeat = time.Now()
+	if !lm.isActive {
+		lm.isActive = true
+		lm.logger.Info("🚀 ACTIVITY DETECTED: Waking up indexer", "timeout", lm.timeout)
 
-// StartHeartbeat starts the heartbeat mechanism to keep chain head updated
-func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface, chainID int64) {
-	// 定义更新逻辑，以便复用
-	updateFunc := func() {
-		latestChainBlock, err := lm.rpcPool.GetLatestBlockNumber(ctx)
-		if err != nil {
-			slog.Error("failed_to_get_latest_block_for_heartbeat", "err", err)
-			return
+		// 🛡️ 工业级对齐：唤醒瞬间执行线性检查，防止休眠期间环境已重置
+		if lm.guard != nil {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				// 💡 状态上报逻辑已由 initEngine 中的 OnStatus 闭包处理
+				if err := lm.guard.PerformLinearityCheck(ctx); err != nil {
+					lm.logger.Error("wake_up_linearity_check_failed", "err", err)
+				}
+				lm.fetcher.Resume()
+			}()
+		} else {
+			lm.fetcher.Resume()
 		}
 
-		_, err = db.ExecContext(ctx,
-			"INSERT INTO sync_checkpoints (chain_id, last_synced_block, updated_at) VALUES ($1, $2, NOW()) "+
-				"ON CONFLICT (chain_id) DO UPDATE SET last_synced_block = $2, updated_at = NOW()",
-			chainID,
-			latestChainBlock.String())
-		if err != nil {
-			slog.Error("failed_to_update_chain_head_checkpoint", "err", err)
+		if lm.OnStatus != nil {
+			go lm.OnStatus(lm.getStatusLocked())
 		}
 	}
+}
 
+// StartMonitor starts a background loop to check for inactivity
+func (lm *LazyManager) StartMonitor(ctx context.Context) {
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("lazy_manager_goroutine_panic", "err", r)
-			}
-		}()
-		// 🚀 6.1 优化：启动时立即执行一次预热
-		updateFunc()
-
-		ticker := time.NewTicker(15 * time.Second)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -110,26 +81,41 @@ func (lm *LazyManager) StartHeartbeat(ctx context.Context, db DBInterface, chain
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				updateFunc()
+				lm.mu.Lock()
+				if lm.isActive && time.Since(lm.lastHeartbeat) > lm.timeout {
+					lm.isActive = false
+					lm.logger.Info("💤 INACTIVITY DETECTED: Entering sleep mode to save RPC quota")
+					lm.fetcher.Pause()
+					if lm.OnStatus != nil {
+						go lm.OnStatus(lm.getStatusLocked())
+					}
+				}
+				lm.mu.Unlock()
 			}
 		}
 	}()
 }
 
-// DeactivateIndexingForced forces deactivation of indexing without checking conditions
-func (lm *LazyManager) DeactivateIndexingForced() {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-
-	if !lm.isActive {
-		return
+// getStatusLocked returns status without acquiring lock (internal use)
+func (lm *LazyManager) getStatusLocked() map[string]interface{} {
+	status := make(map[string]interface{})
+	if lm.isActive {
+		remaining := lm.timeout - time.Since(lm.lastHeartbeat)
+		status["mode"] = "active"
+		status["display"] = "● 活跃中 (Active)"
+		status["sleep_in"] = int(remaining.Seconds())
+	} else {
+		status["mode"] = "sleep"
+		status["display"] = "● 睡眠中 (Saving Quota)"
 	}
+	return status
+}
 
-	lm.isActive = false
-	slog.Info("💤 FORCED PAUSE: Entering lazy mode to save quota")
-
-	// Pause the fetcher to stop indexing
-	lm.fetcher.Pause()
+// GetStatus returns the current status of the lazy indexer
+func (lm *LazyManager) GetStatus() map[string]interface{} {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+	return lm.getStatusLocked()
 }
 
 // DBInterface defines the minimal database interface needed for LazyManager

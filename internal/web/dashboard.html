@@ -325,7 +325,31 @@
                 </tbody>
             </table>
         </div>
+    </div> <!-- Close container -->
+
+    <!-- 🚀 Industrial Sci-Fi Hibernate Overlay -->
+    <div class="sleep-overlay-container">
+        <div class="sleep-grid-bg"></div>
+        <div class="sleep-content-box">
+            <div class="sleep-icon-pulse">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            </div>
+            <h2 class="sleep-title">Engine Hibernating</h2>
+            <p class="sleep-status">
+                <span class="status-indicator">●</span> <span id="sleep-status-text">RPC LINK SUSPENDED | 0 CU/h</span>
+            </p>
+            <p id="sleep-detail" style="color: #00f3ff; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-bottom: 20px; min-height: 1.2em;"></p>
+            <p class="sleep-desc">
+                Inactivity detected. System entered low-power mode to preserve Sepolia quota.<br>
+                Move mouse or click below to re-activate core.
+            </p>
+            <button class="wake-button" onclick="resetIdleTimer()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+                WAKE UP ENGINE
+            </button>
+        </div>
     </div>
+
     <script src="/static/dashboard.js?v=202602171635"></script>
     <link rel="stylesheet" href="/static/dashboard.css?v=202602171635">
 </body>

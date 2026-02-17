@@ -46,6 +46,8 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	logger     *slog.Logger
+	OnActivity func()            // 🚀 Activity callback for On-Demand logic
+	OnNeedMeta func(addr string) // 🎨 Metadata request callback
 }
 
 func NewHub() *Hub {
@@ -72,6 +74,9 @@ func (h *Hub) Run(ctx context.Context) {
 			return
 		case client := <-h.register:
 			h.clients[client] = true
+			if h.OnActivity != nil {
+				h.OnActivity() // WebSocket connection is an activity
+			}
 			h.logger.Info("ws_client_connected", slog.Int("total_clients", len(h.clients)))
 
 		case client := <-h.unregister:
@@ -140,11 +145,37 @@ func (c *Client) readPump() {
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		if c.hub.OnActivity != nil {
+			c.hub.OnActivity() // Pong is also an activity
+		}
+		return nil
+	})
 	for {
-		_, _, err := c.conn.ReadMessage()
+		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			break
+		}
+		if c.hub.OnActivity != nil {
+			c.hub.OnActivity() // Incoming message is activity
+		}
+
+		// 🎨 Handle custom messages from client
+		var msg struct {
+			Type string `json:"type"`
+			Data struct {
+				Address string `json:"address"`
+				Status  string `json:"status"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(message, &msg); err == nil {
+			if msg.Type == "NEED_METADATA" && c.hub.OnNeedMeta != nil {
+				c.hub.OnNeedMeta(msg.Data.Address)
+			}
+			if msg.Type == "HEARTBEAT" && c.hub.OnActivity != nil {
+				c.hub.OnActivity()
+			}
 		}
 	}
 }
