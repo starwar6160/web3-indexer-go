@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"web3-indexer-go/internal/config"
+	"web3-indexer-go/internal/database"
 	"web3-indexer-go/internal/engine"
 	"web3-indexer-go/internal/recovery"
 	"web3-indexer-go/internal/web"
@@ -44,6 +45,9 @@ var (
 )
 
 func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, forceFrom string, resetDB bool) (*big.Int, error) {
+	// 1. 获取链上实时高度
+	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
+	
 	if resetDB {
 		slog.Info("🚨 DATABASE_RESET_REQUESTED", "action", "wiping_tables")
 		_, err := db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
@@ -53,10 +57,29 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 		return big.NewInt(10262444), nil
 	}
 
+	// 🚀 工业级自愈逻辑：检测环境对齐 (Environment Realignment)
+	// 如果数据库里的高度大于链上高度，说明 Anvil 重启了，数据库变成了“未来数据”
+	var maxInDB int64
+	_ = db.GetContext(ctx, &maxInDB, "SELECT COALESCE(MAX(number), 0) FROM blocks")
+	
+	if rpcErr == nil && latestChainBlock != nil && maxInDB > latestChainBlock.Int64() {
+		slog.Warn("🚨 TIME_TRAVEL_DETECTED", 
+			"db_height", maxInDB, 
+			"chain_height", latestChainBlock.String(),
+			"action", "pruning_future_timeline")
+		
+		// 环境已重置，执行“剪枝计划”
+		repo := database.NewRepositoryFromDB(db)
+		if err := repo.PruneFutureData(ctx, latestChainBlock.Int64()); err != nil {
+			slog.Error("pruning_failed_falling_back_to_wipe", "err", err)
+			_, _ = db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
+		}
+		return latestChainBlock, nil
+	}
+
 	if forceFrom != "" {
 		if forceFrom == "latest" {
-			latestChainBlock, err := rpcPool.GetLatestBlockNumber(ctx)
-			if err != nil {
+			if rpcErr != nil {
 				return big.NewInt(0), nil
 			}
 			return new(big.Int).Add(latestChainBlock, big.NewInt(1)), nil
@@ -67,8 +90,7 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 	}
 
 	if cfg.StartBlockStr == "latest" {
-		latestChainBlock, err := rpcPool.GetLatestBlockNumber(ctx)
-		if err != nil {
+		if rpcErr != nil {
 			return big.NewInt(0), nil
 		}
 		reorgSafetyOffset := int64(6)
@@ -285,7 +307,8 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int) 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			proSim := engine.NewProSimulator(cfg.RPCURLs[0], true, 2)
+			// 🚀 CHAOS_MODE: Boosted to 10 TPS for high-fidelity simulation
+			proSim := engine.NewProSimulator(cfg.RPCURLs[0], true, 10)
 			proSim.Start()
 		}()
 	}
@@ -294,7 +317,8 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int) 
 func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool engine.RPCClient, startBlock *big.Int) {
 	slog.Info("🐕 [TailFollow] Starting continuous tail follow", "start_block", startBlock.String())
 	lastScheduled := new(big.Int).Sub(startBlock, big.NewInt(1))
-	ticker := time.NewTicker(2 * time.Second)
+	// 🚀 Industrial Grade optimization: Ultra-fast polling for local Anvil labs (500ms)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	tickCount := 0
 	for {
 		select {

@@ -178,7 +178,11 @@ anvil-pro:
 	@echo "🏭 启动 Anvil Pro 实验室..."
 	@bash scripts/start-anvil-pro-lab.sh
 
-.PHONY: stress-test
+.PHONY: stress-test chaos
 stress-test:
 	@echo "🔥 Starting High-Velocity Stress Test on 5600U..."
 	@go run tools/stress/main.go
+
+chaos:
+	@echo "⛈️  Starting Chaos Injector (Storm Mode)..."
+	@go run tools/chaos/main.go

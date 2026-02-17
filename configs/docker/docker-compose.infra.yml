@@ -9,7 +9,7 @@ services:
           memory: 512M
     restart: always
     network_mode: host
-    command: ["postgres", "-p", "15432"]
+    command: ["postgres", "-p", "15432", "-c", "synchronous_commit=off"]
     environment:
       POSTGRES_DB: web3_indexer
       POSTGRES_USER: postgres
