@@ -32,6 +32,7 @@ type Fetcher struct {
 	jobs        chan FetchJob
 	Results     chan BlockData
 	limiter     *rate.Limiter // 速率限制器
+	throughput  *rate.Limiter // 🚀 Throughput limiter for visual/speed control
 	stopCh      chan struct{} // 用于停止调度
 	stopOnce    sync.Once     // 确保只停止一次
 	metrics     *Metrics      // Prometheus metrics
@@ -87,12 +88,16 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher
 		"concurrency", concurrency,
 		"protection", "industrial_grade")
 
+	// 🚀 Hard Throttle: Limit ingestion to 2.0 TPS to protect remaining quota
+	throughput := rate.NewLimiter(rate.Limit(2.0), 1000)
+
 	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
 		jobs:        make(chan FetchJob, concurrency*2),
 		Results:     make(chan BlockData, concurrency*2),
 		limiter:     rateLimiter.Limiter(), // 使用工业级限流器内部的 limiter
+		throughput:  throughput,
 		stopCh:      make(chan struct{}),
 		paused:      false,
 		metrics:     GetMetrics(),
@@ -109,6 +114,16 @@ func (f *Fetcher) SetWatchedAddresses(addresses []string) {
 			f.watchedAddresses = append(f.watchedAddresses, common.HexToAddress(addr))
 		}
 	}
+}
+
+// SetThroughputLimit updates the target processing speed
+func (f *Fetcher) SetThroughputLimit(tps float64) {
+	if tps <= 0 {
+		f.throughput = rate.NewLimiter(rate.Inf, 0)
+		return
+	}
+	// 🚀 允许 1000 的 Burst，这样即便大块也能进入队列，但消耗令牌会产生后续延迟
+	f.throughput = rate.NewLimiter(rate.Limit(tps), 1000)
 }
 
 func (f *Fetcher) Start(ctx context.Context, wg *sync.WaitGroup) {

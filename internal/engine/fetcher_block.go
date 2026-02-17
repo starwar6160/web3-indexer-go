@@ -63,72 +63,29 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		logsByBlock[vLog.BlockNumber] = append(logsByBlock[vLog.BlockNumber], vLog)
 	}
 
-	// Step 3: Fetch Full Blocks (with transactions) for blocks that have logs
-	for bNum, blockLogs := range logsByBlock {
-		bn := new(big.Int).SetUint64(bNum)
-
-		// 🚀 修复：使用 BlockByNumber 获取完整区块（包含交易），而不是只用 Header
-		block, err := f.pool.BlockByNumber(ctx, bn)
-		if err != nil {
-			Logger.Warn("⚠️ [FETCHER] Failed to fetch full block",
-				"block", bn,
-				"err", err)
-			f.sendResult(ctx, BlockData{Number: bn, Err: err})
-			continue
-		}
-
-		// 🚀 防御性检查：确保 block 不为 nil
-		if block == nil {
-			slog.Warn("⚠️ [FETCHER] Received nil block for block with logs",
-				"block", bn,
-				"skip", true)
-			continue
-		}
-
-		Logger.Debug("📡 [FETCHER_RAW_CHECK]",
-			slog.String("block", bn.String()),
-			slog.Int("tx_count", block.Transactions().Len()),
-			slog.Uint64("gas_used", block.GasUsed()))
-
-		f.sendResult(ctx, BlockData{Number: bn, Block: block, Logs: blockLogs})
-	}
-
-	// Step 4: Full Range Reporting (Keep-alive)
-	// We MUST report every block in the range to the Sequencer to prevent gaps.
-	// For blocks without logs, we send a minimal BlockData with just the number.
+	// Step 3 & 4: Sequential Reporting (The Serpentine Ingestion)
+	// We MUST report every block in chronological order to prevent Sequencer bursts.
 	for i := new(big.Int).Set(start); i.Cmp(end) <= 0; i.Add(i, big.NewInt(1)) {
 		bn := new(big.Int).Set(i)
-		if _, exists := logsByBlock[bn.Uint64()]; exists {
-			continue // Already sent in Step 3
-		}
+		blockLogs := logsByBlock[bn.Uint64()]
 
-		// Fetch full block for the very last block in range to update UI time and tx count
-		// For others, we can be lazy and send nil Block to just move the pointer
 		var block *types.Block
-		if bn.Cmp(end) == 0 {
-			// 🚀 修复：使用 BlockByNumber 获取完整区块（包含交易）
-			var err error
+		var err error
+
+		// Only fetch full block if it has logs or it's the range end (to update UI time)
+		if len(blockLogs) > 0 || bn.Cmp(end) == 0 {
 			block, err = f.pool.BlockByNumber(ctx, bn)
 			if err != nil {
-				slog.Warn("⚠️ [FETCHER] Failed to fetch full block for last block",
-					"block", bn,
-					"err", err,
-					"skip", false) // 继续发送，但 block 为 nil
-			}
-
-			// 🚀 防御性：如果 fetch 失败，仍然发送但 block 为 nil
-			if block == nil {
-				slog.Warn("⚠️ [FETCHER] Sending nil block for last block",
-					"block", bn,
-					"skip", false)
+				slog.Warn("⚠️ [FETCHER] Block fetch failed", "block", bn, "err", err)
 			}
 		}
 
 		f.sendResult(ctx, BlockData{
 			Number:   bn,
-			RangeEnd: end, // Pass range end for checkpointing
+			RangeEnd: end,
 			Block:    block,
-			Logs:     []types.Log{},
+			Logs:     blockLogs,
+			Err:      err,
 		})
 	}
 
@@ -163,6 +120,19 @@ func (f *Fetcher) fetchHeaderWithRetry(ctx context.Context, bn *big.Int) (*types
 }
 
 func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
+	// 🚀 工业级节流：基于『交易笔数』进行硬限速
+	// 这确保了如果一个块有 500 笔交易，它会强制分摊时间，绝对保住 2.0 TPS
+	if f.throughput != nil {
+		tokens := len(data.Logs)
+		if tokens == 0 {
+			tokens = 1 // 即使空块也消耗 1 令牌，维持 2.0 BPS 的心跳
+		}
+		
+		if err := f.throughput.WaitN(ctx, tokens); err != nil {
+			return
+		}
+	}
+
 	select {
 	case f.Results <- data:
 	case <-ctx.Done():

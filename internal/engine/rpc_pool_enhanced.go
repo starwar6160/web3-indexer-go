@@ -332,10 +332,11 @@ func (p *EnhancedRPCClientPool) enforceSyncBatchLimit() error {
 	if p.isTestnetMode {
 		p.currentSyncBatch++
 
-		if p.currentSyncBatch > p.maxSyncBatch {
+		// 🚀 工业级优化：提高批次上限并缩短惩罚停顿，使 TPS 更加平滑
+		if p.currentSyncBatch > 10 {
 			// Wait before allowing more requests
-			log.Printf("Sync batch limit reached (%d/%d), pausing for 5 seconds", p.currentSyncBatch, p.maxSyncBatch)
-			time.Sleep(5 * time.Second)
+			log.Printf("Sync batch threshold reached (%d), short pause for 1s to smooth throughput", p.currentSyncBatch)
+			time.Sleep(1 * time.Second)
 			p.currentSyncBatch = 0
 		}
 	}
@@ -664,6 +665,34 @@ func (p *EnhancedRPCClientPool) checkHealth() {
 
 	// Report to Prometheus
 	GetMetrics().UpdateRPCHealthyNodes("enhanced", healthyNodes)
+}
+
+// CallContract fetches contract results with rate limiting
+func (p *EnhancedRPCClientPool) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	if p.isTestnetMode {
+		if err := p.globalRateLimiter.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	for attempts := 0; attempts < int(p.size); attempts++ {
+		node := p.getNextHealthyNode()
+		if node == nil {
+			return nil, fmt.Errorf("no healthy RPC nodes available")
+		}
+
+		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		res, err := node.client.CallContract(reqCtx, msg, blockNumber)
+		cancel()
+
+		p.incrementRequestCount(node.url, "CallContract")
+		if err != nil {
+			p.handleRPCError(node, err)
+			continue
+		}
+		return res, nil
+	}
+	return nil, fmt.Errorf("all RPC nodes failed for CallContract")
 }
 
 // GetClientForMetadata 返回一个用于元数据抓取的客户端（不带限流）
