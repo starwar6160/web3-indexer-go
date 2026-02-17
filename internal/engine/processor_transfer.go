@@ -53,11 +53,14 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 	if p.enricher != nil {
 		tokenAddr := common.HexToAddress(transfer.TokenAddress)
 		transfer.Symbol = p.enricher.GetSymbol(tokenAddr)
-		slog.Debug("enricher_symbol", "address", transfer.TokenAddress, "symbol", transfer.Symbol)
 	} else {
 		// 回退到硬编码映射（用于 Anvil 或没有 enricher 的情况）
 		transfer.Symbol = getTokenSymbol(vLog.Address)
-		slog.Debug("fallback_symbol", "address", transfer.TokenAddress, "symbol", transfer.Symbol)
+	}
+	
+	// 🛡️ 防御性：确保 symbol 不为空
+	if transfer.Symbol == "" || transfer.Symbol == "Other" {
+		transfer.Symbol = transfer.TokenAddress[:10] + "..."
 	}
 
 	// 📊 记录代币转账统计（用于 Prometheus + Grafana）
