@@ -97,7 +97,7 @@ func (b *BulkInserter) InsertTransfersBatch(ctx context.Context, transfers []mod
 		_, err := pgxConn.CopyFrom(
 			ctx,
 			pgx.Identifier{"transfers"},
-			[]string{"block_number", "tx_hash", "log_index", "from_address", "to_address", "amount", "token_address"},
+			[]string{"block_number", "tx_hash", "log_index", "from_address", "to_address", "amount", "token_address", "symbol"}, // ✅ 添加 symbol
 			pgx.CopyFromSlice(len(transfers), func(i int) ([]interface{}, error) {
 				return []interface{}{
 					transfers[i].BlockNumber.String(),
@@ -107,6 +107,7 @@ func (b *BulkInserter) InsertTransfersBatch(ctx context.Context, transfers []mod
 					transfers[i].To,
 					transfers[i].Amount.String(),
 					transfers[i].TokenAddress,
+					transfers[i].Symbol, // ✅ 添加 Symbol
 				}, nil
 			}),
 		)
@@ -166,6 +167,7 @@ func (b *BulkInserter) fallbackInsertTransfers(ctx context.Context, exec execer,
 	tos := make([]string, len(transfers))
 	amounts := make([]string, len(transfers))
 	tokenAddresses := make([]string, len(transfers))
+	symbols := make([]string, len(transfers)) // ✅ 新增：Symbol 数组
 
 	for i, t := range transfers {
 		blockNumbers[i] = t.BlockNumber.String()
@@ -175,14 +177,15 @@ func (b *BulkInserter) fallbackInsertTransfers(ctx context.Context, exec execer,
 		tos[i] = t.To
 		amounts[i] = t.Amount.String()
 		tokenAddresses[i] = t.TokenAddress
+		symbols[i] = t.Symbol // ✅ 新增：Symbol 赋值
 	}
 
 	query := `
-		INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
-		SELECT * FROM UNNEST($1::numeric[], $2::text[], $3::int[], $4::text[], $5::text[], $6::numeric[], $7::text[])
+		INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
+		SELECT * FROM UNNEST($1::numeric[], $2::text[], $3::int[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::text[])
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
-	_, err := exec.ExecContext(ctx, query, blockNumbers, txHashes, logIndices, froms, tos, amounts, tokenAddresses)
+	_, err := exec.ExecContext(ctx, query, blockNumbers, txHashes, logIndices, froms, tos, amounts, tokenAddresses, symbols)
 	return err
 }
 

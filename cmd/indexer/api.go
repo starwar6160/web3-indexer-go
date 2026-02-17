@@ -30,14 +30,15 @@ type Block struct {
 }
 
 type Transfer struct {
-	ID           int    `db:"id" json:"id"`
-	BlockNumber  string `db:"block_number" json:"block_number"`
-	TxHash       string `db:"tx_hash" json:"tx_hash"`
-	LogIndex     int    `db:"log_index" json:"log_index"`
-	FromAddress  string `db:"from_address" json:"from_address"`
-	ToAddress    string `db:"to_address" json:"to_address"`
-	Amount       string `db:"amount" json:"amount"`
-	TokenAddress string `db:"token_address" json:"token_address"`
+	ID           int     `db:"id" json:"id"`
+	BlockNumber  string  `db:"block_number" json:"block_number"`
+	TxHash       string  `db:"tx_hash" json:"tx_hash"`
+	LogIndex     int     `db:"log_index" json:"log_index"`
+	FromAddress  string  `db:"from_address" json:"from_address"`
+	ToAddress    string  `db:"to_address" json:"to_address"`
+	Amount       string  `db:"amount" json:"amount"`
+	TokenAddress string  `db:"token_address" json:"token_address"`
+	Symbol       string  `db:"symbol" json:"symbol"` // ✅ 新增：代币符号
 }
 
 // Server 包装 HTTP 服务
@@ -194,7 +195,7 @@ func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 
 func handleGetTransfers(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 	var transfers []Transfer
-	err := db.SelectContext(r.Context(), &transfers, "SELECT id, block_number, tx_hash, log_index, from_address, to_address, amount, token_address FROM transfers ORDER BY block_number DESC LIMIT 10")
+	err := db.SelectContext(r.Context(), &transfers, "SELECT id, block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol FROM transfers ORDER BY block_number DESC LIMIT 10")
 	if err != nil {
 		slog.Error("failed_to_get_transfers", "err", err)
 		http.Error(w, "Failed to retrieve transfers", 500)
@@ -333,6 +334,7 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64) {
 	// Trigger indexing if cooldown period has passed
 	if lazyManager != nil {
+		slog.Debug("🚀 API access detected, triggering lazy manager")
 		lazyManager.Trigger()
 	}
 
