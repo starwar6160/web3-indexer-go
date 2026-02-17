@@ -236,6 +236,19 @@ function formatAmount(amt, decimals = 18) {
     }
 }
 
+function renderActivityIcon(type) {
+    const icons = {
+        'SWAP':           '🔄 <span style="color: #a855f7;">Swap</span>',
+        'APPROVE':        '🔓 <span style="color: #eab308;">Approve</span>',
+        'MINT':           '💎 <span style="color: #22c55e;">Mint</span>',
+        'TRANSFER':       '💸 <span style="color: #3b82f6;">Transfer</span>',
+        'CONTRACT_EVENT': '📜 <span style="color: #94a3b8;">Contract Log</span>',
+        'ETH_TRANSFER':   '⛽ <span style="color: #6366f1;">ETH Transfer</span>',
+        'DEPLOY':         '🏗️ <span style="color: #f43f5e;">Deployment</span>'
+    };
+    return icons[type] || '⚡ <span style="color: #64748b;">Activity</span>';
+}
+
 function updateTransfersTable(tx) {
     if (!tx) return;
     const table = document.getElementById('transfersTable');
@@ -243,16 +256,19 @@ function updateTransfersTable(tx) {
     const from = tx.from || '0xunknown';
     const to = tx.to || '0xunknown';
     const symbol = tx.symbol || '';
+    const type = tx.type || 'TRANSFER';
     const token = tx.token_address || '0xunknown';
     const displayAmount = formatAmount(tx.amount || tx.value, 18); // 默认 18 位精度
     
-    // 🎨 Token Badge 渲染逻辑
+    // 🎨 Activity & Token Badge 渲染
+    const activityDisplay = renderActivityIcon(type);
     const tokenDisplay = symbol && symbol !== token.substring(0, 10) ? 
         `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
         `<span class="address" title="${token}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
     
     const row = `<tr>
         <td class="stat-value">${tx.block_number || '0'}</td>
+        <td>${activityDisplay}</td>
         <td class="address">${from.substring(0, 10)}...</td>
         <td class="address">${to.substring(0, 10)}...</td>
         <td class="stat-value" style="color: #667eea; font-family: 'Courier New', monospace;" title="${tx.amount || tx.value}">${displayAmount}</td>
@@ -304,16 +320,19 @@ async function fetchData() {
                 const from = t.from_address || '0x...';
                 const to = t.to_address || '0x...';
                 const symbol = t.symbol || '';
+                const type = t.type || 'TRANSFER';
                 const token = t.token_address || '0x...';
                 const displayAmount = formatAmount(t.amount || '0', 18); // 默认 18 位精度
                 
-                // 🎨 Token Badge 渲染逻辑
+                // 🎨 Activity & Token Badge 渲染逻辑
+                const activityDisplay = renderActivityIcon(type);
                 const tokenDisplay = symbol && symbol !== token.substring(0, 10) ? 
                     `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
                     `<span class="address" title="${token}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
                 
                 return `<tr>
                     <td class="stat-value">${t.block_number || '0'}</td>
+                    <td>${activityDisplay}</td>
                     <td class="address">${from.substring(0, 10)}...</td>
                     <td class="address">${to.substring(0, 10)}...</td>
                     <td class="stat-value" style="color: #667eea; font-family: 'Courier New', monospace;" title="${t.amount || '0'}">${displayAmount}</td>

@@ -76,6 +76,13 @@ a1-pre-flight:
 	@./scripts/infra/check-a1-pre-flight.sh
 
 # --- 生产级环境清理与重启 ---
+.PHONY: reset-a1
+reset-a1:
+	@echo "🚨 [ENVIRONMENT RESET] Cleaning Sepolia (8081) environment..."
+	@PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_sepolia \
+	  -c "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;"
+	@echo "✅ Database cleaned. You can now run 'make a1' to restart."
+
 .PHONY: reset-8091-live
 reset-8091-live: stop-dev build
 	@echo "🚨 [ENVIRONMENT RESET] Cleaning Sepolia (8091) environment..."
