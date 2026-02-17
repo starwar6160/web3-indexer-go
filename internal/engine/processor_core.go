@@ -30,9 +30,8 @@ func (r *repositoryAdapter) UpdateTokenDecimals(tokenAddress string, decimals ui
 	return nil
 }
 
-// TransferEventHash is the ERC20 Transfer event signature hash
-// 🚀 工业级修正：0xddf252ad...0afda6
-var TransferEventHash = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f5514cfc0afda6")
+// TransferEventHash defined in signatures.go
+
 
 // ErrReorgDetected is returned when a blockchain reorganization is detected
 var ErrReorgDetected = errors.New("reorg detected: parent hash mismatch")
