@@ -127,81 +127,46 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		)
 	}
 
-	for i, vLog := range data.Logs {
-		Logger.Debug("🔍 正在扫描区块中的 Log...",
-			slog.String("stage", "PROCESSOR"),
-			slog.Int("index", i),
-			slog.String("log_address", vLog.Address.Hex()),
-			slog.String("topic0", vLog.Topics[0].Hex()),
-		)
+	for _, vLog := range data.Logs {
+		// 🚀 工业级放开：只要是标准的 Transfer 事件 (Topic0 匹配)，直接进入处理流程
+		if len(vLog.Topics) > 0 && vLog.Topics[0] == TransferEventHash {
+			Logger.Info("✨ 发现全网 Transfer 事件",
+				slog.String("stage", "PROCESSOR"),
+				slog.String("tx_hash", vLog.TxHash.Hex()),
+				slog.String("contract", vLog.Address.Hex()),
+			)
 
-		// 检查地址匹配逻辑
-		logAddrLow := strings.ToLower(vLog.Address.Hex())
-		isMatched := false
-		for addr := range p.watchedAddresses {
-			if strings.ToLower(addr.Hex()) == logAddrLow {
-				isMatched = true
-				break
-			}
-		}
-
-		if isMatched || len(p.watchedAddresses) == 0 {
-			if len(p.watchedAddresses) > 0 {
-				Logger.Info("🎯 发现匹配合约地址！",
+			transfer := p.ExtractTransfer(vLog)
+			if transfer != nil {
+				Logger.Info("📦 解析成功，准备入库",
 					slog.String("stage", "PROCESSOR"),
-					slog.String("address", logAddrLow),
-				)
-			}
-
-			// 检查 Topic 匹配
-			if vLog.Topics[0] == TransferEventHash {
-				Logger.Info("✨ 发现 Transfer 事件 Topic！",
-					slog.String("stage", "PROCESSOR"),
-					slog.String("tx_hash", vLog.TxHash.Hex()),
+					slog.String("from", transfer.From),
+					slog.String("to", transfer.To),
+					slog.String("amount", transfer.Amount.String()),
 				)
 
-				transfer := p.ExtractTransfer(vLog)
-				if transfer != nil {
-					Logger.Info("📦 解析成功，准备入库",
+				_, err = dbTx.NamedExecContext(ctx, `
+					INSERT INTO transfers
+					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
+					VALUES
+					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
+					ON CONFLICT (block_number, log_index) DO NOTHING
+				`, transfer)
+				if err != nil {
+					Logger.Error("❌ 数据库写入失败",
 						slog.String("stage", "PROCESSOR"),
-						slog.String("from", transfer.From),
-						slog.String("to", transfer.To),
-						slog.String("amount", transfer.Amount.String()),
-					)
-
-					_, err = dbTx.NamedExecContext(ctx, `
-						INSERT INTO transfers
-						(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
-						VALUES
-						(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
-						ON CONFLICT (block_number, log_index) DO NOTHING
-					`, transfer)
-					if err != nil {
-						Logger.Error("❌ 数据库写入失败",
-							slog.String("stage", "PROCESSOR"),
-							slog.String("error", err.Error()),
-							slog.String("tx_hash", transfer.TxHash),
-						)
-						if p.metrics != nil {
-							p.metrics.RecordTransferFailed()
-						}
-						return fmt.Errorf("failed to insert transfer at block %s: %w", blockNum.String(), err)
-					}
-					txWithRealLogs[transfer.TxHash] = true
-					transfers = append(transfers, *transfer)
-					if p.metrics != nil {
-						p.metrics.RecordTransferProcessed()
-					}
-					Logger.Info("✅ Transfer saved to DB",
-						slog.String("stage", "PROCESSOR"),
-						slog.String("block", blockNum.String()),
+						slog.String("error", err.Error()),
 						slog.String("tx_hash", transfer.TxHash),
 					)
-				} else {
-					Logger.Warn("❌ Transfer 解析失败",
-						slog.String("stage", "PROCESSOR"),
-						slog.String("tx_hash", vLog.TxHash.Hex()),
-					)
+					if p.metrics != nil {
+						p.metrics.RecordTransferFailed()
+					}
+					return fmt.Errorf("failed to insert transfer at block %s: %w", blockNum.String(), err)
+				}
+				txWithRealLogs[transfer.TxHash] = true
+				transfers = append(transfers, *transfer)
+				if p.metrics != nil {
+					p.metrics.RecordTransferProcessed()
 				}
 			}
 		}
@@ -216,17 +181,16 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	for _, tx := range data.Block.Transactions() {
 		if tx.To() != nil {
 			txToLow := strings.ToLower(tx.To().Hex())
-			isMatched := false
-			for addr := range p.watchedAddresses {
-				if strings.ToLower(addr.Hex()) == txToLow {
-					isMatched = true
-					break
+			
+			// 🚀 工业级放开：如果没有关注地址，则把每一笔交易都视为“发现匹配交易”
+			isMatched := (len(p.watchedAddresses) == 0)
+			if !isMatched {
+				for addr := range p.watchedAddresses {
+					if strings.ToLower(addr.Hex()) == txToLow {
+						isMatched = true
+						break
+					}
 				}
-			}
-
-			// In DemoMode or if no addresses configured, match all for debug
-			if len(p.watchedAddresses) == 0 {
-				isMatched = true
 			}
 
 			if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
@@ -280,6 +244,56 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 					)
 				}
 			}
+		}
+	}
+
+	// 🚀 Anvil 模式：强制生成 Synthetic Transfer（让空链也有数据）
+	// 诊断：如果这个区块没有任何 Transfer（real + synthetic），则伪造一个
+	if p.chainID == 31337 {
+		Logger.Info("🔍 [ANVIL] Checking if synthetic transfer needed",
+			slog.String("block", blockNum.String()),
+			slog.Int("existing_transfers", len(transfers)),
+		)
+	}
+
+	if len(transfers) == 0 && p.chainID == 31337 {
+		// 生成一个模拟的 ETH 转账
+		mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Anvil Account #0
+		mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"   // Anvil Account #1
+		mockAmount := big.NewInt(int64(blockNum.Int64() % 1000000000)) // 伪随机金额
+
+		anvilTransfer := &models.Transfer{
+			BlockNumber:  models.BigInt{Int: blockNum},
+			TxHash:       common.BytesToHash(append(block.Hash().Bytes(), []byte("ANVIL_MOCK")...)).Hex(),
+			LogIndex:     99999, // 特殊标记
+			From:         strings.ToLower(mockFrom),
+			To:           strings.ToLower(mockTo),
+			Amount:       models.NewUint256FromBigInt(mockAmount),
+			TokenAddress: "0x0000000000000000000000000000000000000000", // ETH
+		}
+
+		_, err = dbTx.NamedExecContext(ctx, `
+			INSERT INTO transfers
+			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
+			VALUES
+			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
+			ON CONFLICT (block_number, log_index) DO NOTHING
+		`, anvilTransfer)
+
+		if err == nil {
+			transfers = append(transfers, *anvilTransfer)
+			Logger.Info("🏭 [ANVIL] Synthetic Transfer generated",
+				slog.String("stage", "PROCESSOR"),
+				slog.String("block", blockNum.String()),
+				slog.String("from", mockFrom),
+				slog.String("to", mockTo),
+				slog.String("amount", mockAmount.String()),
+			)
+		} else {
+			Logger.Error("❌ [ANVIL] Failed to insert synthetic transfer",
+				slog.String("block", blockNum.String()),
+				slog.String("error", err.Error()),
+			)
 		}
 	}
 
@@ -340,6 +354,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 				"value":         t.Amount.String(),
 				"block_number":  t.BlockNumber.String(),
 				"token_address": t.TokenAddress,
+				"symbol":        t.Symbol, // 🎨 添加 Symbol 字段供前端渲染 Token Badge
 				"log_index":     t.LogIndex,
 			})
 		}
