@@ -84,7 +84,9 @@ func InitSchema(ctx context.Context, db *sqlx.DB) error {
 		"ALTER TABLE transfers ADD COLUMN IF NOT EXISTS activity_type VARCHAR(20) DEFAULT 'TRANSFER'",
 	}
 	for _, patch := range patches {
-		_, _ = db.ExecContext(ctx, patch)
+		if _, err := db.ExecContext(ctx, patch); err != nil {
+			slog.Warn("failed_to_apply_patch", "err", err, "patch", patch)
+		}
 	}
 
 	// 补充索引
