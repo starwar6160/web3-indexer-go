@@ -177,3 +177,8 @@ anvil-verify:
 anvil-pro:
 	@echo "🏭 启动 Anvil Pro 实验室..."
 	@bash scripts/start-anvil-pro-lab.sh
+
+.PHONY: stress-test
+stress-test:
+	@echo "🔥 Starting High-Velocity Stress Test on 5600U..."
+	@go run tools/stress/main.go
