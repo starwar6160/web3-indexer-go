@@ -83,6 +83,13 @@ The Web3 Indexer is now **production-ready** with real-time blockchain data sync
 - ✅ System health indicators
 - ✅ Responsive HTML5 UI
 
+### 5. **Industrial-Grade Data Integrity**
+- ✅ **State Regression Defense (Watchdog)**:
+  - **Regression Detection**: Automatically detects when DB is ahead of RPC (e.g., after Anvil reset).
+  - **Auto-Collapse**: Triggers `PruneFutureData` to align DB with current chain head.
+  - **Visual Alerting**: Dashboard displays red warning for "Time-Travel" anomalies.
+  - **Consistency Guard**: Integrated into startup and background maintenance loops.
+
 ---
 
 ## 🔧 Technical Achievements

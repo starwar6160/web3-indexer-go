@@ -171,6 +171,23 @@ last_updated: 2026-02-15
 
 ---
 
+### 8️⃣ 状态回归防御 (Time-Travel Protection)
+**提交**: `d2e1f4a`
+**类型**: `feat(consistency)`
+**文件**: `internal/engine/consistency.go`, `internal/engine/health_core.go`, `internal/web/dashboard.js`
+
+**关键改进**:
+- **穿越判定**: 实时对比 `RPC Height` vs `DB Height`。
+- **自动坍缩 (Auto-Collapse)**: 集成 `PruneFutureData` 逻辑，一键抹除“未来的幽灵数据”。
+- **红色预警**: Dashboard 增加 `time_travel` 标志，UI 触发红色闪烁报警。
+
+**面试话术**:
+> "在 Web3 开发中，本地链（如 Anvil）经常重启，导致数据库高度远超链头。
+>  我实现了'状态回归防御'，系统能自动识别这种'时间穿越'并报警，
+>  同时支持自动剪枝对齐，确保索引器不会因为等待'未来的块'而陷入永久停摆。"
+
+---
+
 ## 📈 关键指标对比
 
 | 指标 | 修复前 | 修复后 | 改善 |
