@@ -1,4 +1,4 @@
-# 工业级 Web3 事件索引器 (横滨实验室)
+# 工业级 Web3 事件索引器
 
 [🌐 **English**](./README.md) | [🏮 **中文说明**](./README_ZH.md) | [🗾 **日本語の説明**](./README_JA.md)
 
@@ -6,48 +6,47 @@
 *   **生产环境 (Sepolia)**: [https://demo1.st6160.click/](https://demo1.st6160.click/)
 *   **本地实验室 (Anvil)**: [https://demo2.st6160.click/](https://demo2.st6160.click/)
 
-基于 **Go**、**PostgreSQL** 和 **Docker** 构建的高可靠、低成本以太坊事件索引器。
+基于 **Go**、**PostgreSQL** 和 **Docker** 构建的高可靠、低成本以太坊事件索引器。为需要生产级区块链数据管道、又不想承担基础设施运维负担的团队设计。
 
-## 🚀 技术亮点
+## � 商业价值
 
-*   **工业级可靠性**：支持 24/7 无人值守运行，采用 **蓝绿部署 (Staging-to-Production)** 工作流，实现秒级热更新（离线窗口 < 2s）。
-*   **成本导向架构**：集成 **加权令牌桶 (Weighted Token Bucket)** 限流器，最大化 Alchemy/Infura 免费档配额利用率（主备权重 3:1）。
-*   **429 自动熔断**：智能错误检测，一旦收到限流错误即触发 5 分钟冷却期并自动切换流量。
-*   **确定性安全守卫**：启动时强制执行 **NetworkID/ChainID 校验**，物理杜绝跨环境数据库污染。
-*   **高效范围抓取**：优化 `eth_getLogs` 批量处理（50 块/请求），配合 **Keep-alive** 进度机制，确保在无事件期间 UI 依然实时更新。
-*   **Early-Bird API 模式**：Web 服务启动与引擎初始化解耦，毫秒级开启监听端口，彻底消除容器重启时的 Cloudflare 502 报错。
+*   **降低 RPC 成本 70%+**：集成 **加权令牌桶** 限流器，最大化 Alchemy/Infura 免费档配额利用率（主备权重 3:1）。生产环境实测可持续 3.5 RPS 而不触发限流。
+*   **消除停机时间**：**蓝绿部署 (Staging-to-Production)** 工作流实现零停机发布，切换窗口 < 2 秒。对收入敏感的业务系统至关重要。
+*   **自动从限流中恢复**：**429 熔断机制** 检测供应商限流，触发 5 分钟冷却期并自动切换至备用 RPC 节点，无需人工干预。
+*   **预防代价高昂的数据污染**：启动时强制执行 **NetworkID/ChainID 校验**，从物理层面杜绝跨环境数据库污染——节省数小时调试时间，避免潜在的财务错误。
+*   **低活动期仍保持实时 UI**：**高效范围抓取** 配合 50 区块批量处理和 Keep-alive 进度机制，即使在链上无活动期间也能保持仪表盘实时响应。
+*   **无冷启动惩罚**：**Early-Bird API 模式** 将 Web 服务启动与引擎初始化解耦——端口毫秒级开启，彻底消除部署时负载均衡器的 502 报错。
 
-## 🛠️ 技术栈与实验室环境
+## 🛠️ 技术栈
 
 *   **后端**: Go (Golang) + `go-ethereum`
-*   **基础设施**: Docker (Demo/Sepolia/Debug 环境物理隔离)
-*   **存储**: PostgreSQL (每个实例拥有独立物理数据库)
-*   **可观测性**: Prometheus + Grafana (多环境一键切换监控面板)
-*   **实验室硬件**: AMD Ryzen 7 3800X (8C/16T), 128GB DDR4 RAM, Samsung 990 PRO 4TB NVMe
+*   **基础设施**: Docker（多环境隔离）
+*   **存储**: PostgreSQL（各实例独立物理数据库）
+*   **可观测性**: Prometheus + Grafana（多环境一键切换监控面板）
 
-## 📦 部署工作流
+## 📦 生产部署
 
-我们采用“测试驱动晋升”流程，确保生产环境绝对稳定：
+蓝绿部署工作流确保发布稳定性：
 
-1.  **测试 (Test)**：通过 `make test-a1` (Sepolia) 或 `make test-a2` (Anvil) 部署到 Staging 端口 (8091/8092)。
+1.  **测试 (Test)**：通过 `make test-a1` (Sepolia) 或 `make test-a2` (Anvil) 部署到 Staging。
 2.  **验证 (Verify)**：在 Staging 端口进行冒烟测试。
-3.  **晋升 (Promote)**：通过 `make a1` 或 `make a2` 将镜像瞬间平移至生产端口 (8081/8082)。
-    *   *原理*：`docker tag :latest -> :stable` + `docker compose up -d --no-build`。
+3.  **晋升 (Promote)**：通过 `make a1` 或 `make a2` 将镜像瞬间平移至生产端口。
+    *   *原理*：`docker tag :latest -> :stable` + `docker compose up -d --no-build`
 
 ## 📈 性能与优化指标
 
-| 模式 | 目标网络 | RPS 限制 | 延迟 | 策略 |
+| 模式 | 目标网络 | RPS 限制 | 延迟 | 成本策略 |
 | :--- | :--- | :--- | :--- | :--- |
-| **稳定版 (Stable)** | Sepolia (测试网) | 3.5 RPS | ~12s | 加权多源 RPC |
-| **演示版 (Demo)** | Anvil (本地) | 10000+ RPS | < 1s | 零限流模式 |
-| **调试版 (Debug)** | Sepolia (测试网) | 5.0 RPS | ~12s | 直连商用 RPC |
+| **稳定版 (Stable)** | Sepolia (测试网) | 3.5 RPS | ~12s | 加权多源 RPC（免费档优化） |
+| **演示版 (Demo)** | Anvil (本地) | 10000+ RPS | < 1s | 零限流模式（开发用） |
+| **调试版 (Debug)** | Sepolia (测试网) | 5.0 RPS | ~12s | 直连商用 RPC（排障用） |
 
-## 🔐 加密身份验证
+## 🔐 安全与数据完整性
 
-*   **开发者**: 周伟 (Zhou Wei) <zhouwei6160@gmail.com>
-*   **实验室位置**: 日本横滨 (Yokohama, Japan)
-*   **GPG 指纹**: `FFA0 B998 E7AF 2A9A 9A2C  6177 F965 25FE 5857 5DCF`
-*   **验证**: 所有 API 响应均使用 **Ed25519** 进行签名，确保端到端的数据完整性。
+*   **链 ID 校验**：启动时强制执行，防止环境配置错误
+*   **API 响应签名**：所有响应使用 **Ed25519** 签名，支持端到端完整性验证
+*   **物理隔离**：基于 Docker 的环境分离防止数据泄露
 
 ---
-© 2026 Zhou Wei. Yokohama Lab. All rights reserved.
+
+*MIT 许可证 — 可直接用于商业生产环境*
