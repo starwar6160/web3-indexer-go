@@ -21,20 +21,23 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 	filterQuery := ethereum.FilterQuery{
 		FromBlock: start,
 		ToBlock:   end,
-		Topics:    [][]common.Hash{{TransferEventHash}},
 	}
 
 	if len(f.watchedAddresses) > 0 {
 		filterQuery.Addresses = f.watchedAddresses
+		// For specific addresses, we still filter by Transfer event to save RPC weight
+		filterQuery.Topics = [][]common.Hash{{TransferEventHash}}
 		Logger.Info("🔍 Fetching logs with address filter",
 			slog.String("from", start.String()),
 			slog.String("to", end.String()),
 			slog.Int("watched_count", len(f.watchedAddresses)))
 	} else {
-		Logger.Info("🌍 Fetching logs for ALL Transfer events",
+		// 🚀 Industrial Grade: Unfiltered mode captures EVERYTHING
+		// No Topics = No Filter = All contract events captured
+		filterQuery.Topics = nil 
+		Logger.Info("🌍 Fetching logs for ALL events (Full Sniffing)",
 			slog.String("from", start.String()),
-			slog.String("to", end.String()),
-			slog.String("mode", "unfiltered"))
+			slog.String("to", end.String()))
 	}
 
 	logs, err := f.pool.FilterLogs(ctx, filterQuery)
