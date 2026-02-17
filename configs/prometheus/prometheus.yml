@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  - job_name: 'web3-indexer'
+    static_configs:
+      - targets: ['127.0.0.1:8081']
+        labels:
+          instance: 'sepolia'
+      - targets: ['127.0.0.1:8082']
+        labels:
+          instance: 'demo'
+      - targets: ['127.0.0.1:8083']
+        labels:
+          instance: 'debug'
+    metrics_path: /metrics
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['127.0.0.1:9091']

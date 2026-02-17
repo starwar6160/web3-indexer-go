@@ -49,8 +49,17 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 		TokenAddress: strings.ToLower(vLog.Address.Hex()),
 	}
 
+	// 🎨 使用 Metadata Enricher 获取代币符号（异步 + 缓存）
+	if p.enricher != nil {
+		tokenAddr := common.HexToAddress(transfer.TokenAddress)
+		transfer.Symbol = p.enricher.GetSymbol(tokenAddr)
+	} else {
+		// 回退到硬编码映射（用于 Anvil 或没有 enricher 的情况）
+		transfer.Symbol = getTokenSymbol(vLog.Address)
+	}
+
 	// 📊 记录代币转账统计（用于 Prometheus + Grafana）
-	tokenSymbol := getTokenSymbol(vLog.Address)
+	tokenSymbol := transfer.Symbol
 	amountFloat := float64(amount.Int.Uint64()) / 1e18 // 假设 18 位小数，转换为标准单位
 	p.metrics.RecordTokenTransfer(tokenSymbol, amountFloat)
 

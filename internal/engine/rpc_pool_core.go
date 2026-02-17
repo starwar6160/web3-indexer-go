@@ -30,6 +30,7 @@ type LowLevelRPCClient interface {
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
 	BlockNumber(ctx context.Context) (uint64, error)
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 	Close()
 }
 

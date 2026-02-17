@@ -14,6 +14,22 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// repositoryAdapter 适配 sqlx.DB 到 DBUpdater 接口
+type repositoryAdapter struct {
+	db *sqlx.DB
+}
+
+func (r *repositoryAdapter) UpdateTokenSymbol(tokenAddress, symbol string) error {
+	query := `UPDATE transfers SET symbol = $1 WHERE token_address = $2 AND (symbol IS NULL OR symbol = '')`
+	_, err := r.db.Exec(query, symbol, tokenAddress)
+	return err
+}
+
+func (r *repositoryAdapter) UpdateTokenDecimals(tokenAddress string, decimals uint8) error {
+	// 预留方法，当前 schema 没有 decimals 字段
+	return nil
+}
+
 // TransferEventHash is the ERC20 Transfer event signature hash
 // 🚀 工业级修正：0xddf252ad...0afda6
 var TransferEventHash = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f5514cfc0afda6")
@@ -49,6 +65,9 @@ type Processor struct {
 	blocksSinceLastCheckpoint int
 
 	chainID int64
+
+	// 🎨 Metadata Enricher (异步元数据解析器)
+	enricher *MetadataEnricher
 }
 
 func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int64) *Processor {
@@ -63,6 +82,23 @@ func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int
 		blocksSinceLastCheckpoint: 0,
 		chainID:                   chainID,
 	}
+
+	// 🎨 初始化元数据丰富器（仅用于生产网络，Anvil 不需要）
+	if chainID != 31337 {
+		// 从 RPC 池中获取一个客户端用于元数据抓取
+		var metadataClient LowLevelRPCClient
+		if enhancedPool, ok := client.(*EnhancedRPCClientPool); ok {
+			metadataClient = enhancedPool.GetClientForMetadata()
+		}
+		
+		if metadataClient != nil {
+			// 使用 Repository 包装 db 以满足 DBUpdater 接口
+			repo := &repositoryAdapter{db: db}
+			p.enricher = NewMetadataEnricher(metadataClient, repo, Logger)
+			Logger.Info("🎨 [Processor] Metadata Enricher initialized", "chain_id", chainID)
+		}
+	}
+
 	return p
 }
 

@@ -127,10 +127,28 @@ func (r *Repository) GetSyncStatus(ctx context.Context, chainID int64) (*big.Int
 // RecordSyncError 记录同步错误
 func (r *Repository) RecordSyncError(ctx context.Context, chainID int64, errorMsg string) error {
 	query := `
-		UPDATE sync_status 
+		UPDATE sync_status
 		SET status = 'error', error_message = $2, last_processed_timestamp = NOW()
 		WHERE chain_id = $1
 	`
 	_, err := r.db.ExecContext(ctx, query, chainID, errorMsg)
 	return err
+}
+
+// UpdateTokenSymbol 更新代币符号（用于 Metadata Enricher 回填）
+func (r *Repository) UpdateTokenSymbol(tokenAddress, symbol string) error {
+	query := `
+		UPDATE transfers
+		SET symbol = $1
+		WHERE token_address = $2 AND (symbol IS NULL OR symbol = '')
+	`
+	_, err := r.db.Exec(query, symbol, tokenAddress)
+	return err
+}
+
+// UpdateTokenDecimals 更新代币精度（用于未来扩展）
+func (r *Repository) UpdateTokenDecimals(tokenAddress string, decimals uint8) error {
+	// 预留方法，当前 schema 没有 decimals 字段
+	// 未来可以添加 token_metadata 表来存储这些信息
+	return nil
 }

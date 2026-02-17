@@ -664,3 +664,23 @@ func (p *EnhancedRPCClientPool) checkHealth() {
 	// Report to Prometheus
 	GetMetrics().UpdateRPCHealthyNodes("enhanced", healthyNodes)
 }
+
+// GetClientForMetadata 返回一个用于元数据抓取的客户端（不带限流）
+func (p *EnhancedRPCClientPool) GetClientForMetadata() LowLevelRPCClient {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if len(p.clients) == 0 {
+		return nil
+	}
+
+	// 返回第一个健康节点的客户端
+	for _, node := range p.clients {
+		if node.isHealthy {
+			return node.client
+		}
+	}
+
+	// 如果都不健康，返回第一个
+	return p.clients[0].client
+}
