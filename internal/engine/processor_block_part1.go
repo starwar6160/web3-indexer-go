@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 	"web3-indexer-go/internal/models"
@@ -148,7 +149,34 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			fromAddr = msg.Hex()
 		}
 
-		// 1. 识别合约部署
+		// 1. 🚀 优先级 A：识别已知实体（如领水）
+		faucetLabel := GetAddressLabel(fromAddr)
+		if faucetLabel != "" {
+			faucetActivity := models.Transfer{
+				BlockNumber:  models.BigInt{Int: blockNum},
+				TxHash:       tx.Hash().Hex(),
+				LogIndex:     syntheticIdx,
+				From:         strings.ToLower(fromAddr),
+				To:           strings.ToLower(func() string {
+					if tx.To() == nil { return "0xcontract_creation" }
+					return tx.To().Hex()
+				}()),
+				Amount:       models.NewUint256FromBigInt(tx.Value()),
+				TokenAddress: "0x0000000000000000000000000000000000000000",
+				Symbol:       faucetLabel,
+				Type:         "FAUCET_CLAIM",
+			}
+			_, _ = dbTx.NamedExecContext(ctx, `
+				INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
+				VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
+				ON CONFLICT DO NOTHING
+			`, faucetActivity)
+			activities = append(activities, faucetActivity)
+			syntheticIdx++
+			continue
+		}
+
+		// 2. 🚀 优先级 B：识别合约部署
 		if tx.To() == nil {
 			deployActivity := models.Transfer{
 				BlockNumber:  models.BigInt{Int: blockNum},
@@ -171,7 +199,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			continue
 		}
 
-		// 2. 识别显著的原生 ETH 转账 (比如非零转账且未被 Log 捕获)
+		// 3. 🚀 优先级 C：识别普通原生 ETH 转账
 		if tx.Value().Cmp(big.NewInt(0)) > 0 && !txWithRealLogs[tx.Hash().Hex()] {
 			ethActivity := models.Transfer{
 				BlockNumber:  models.BigInt{Int: blockNum},
@@ -271,6 +299,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
 	}
 
+	// 🚀 核心增强：执行 Gas 大户分析
+	leaderboard := p.AnalyzeGas(block)
+
 	// 6. 实时事件推送 (在事务成功后)
 	if p.EventHook != nil {
 		// 计算端到端延迟 (毫秒)
@@ -293,6 +324,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			"message": fmt.Sprintf("✅ Processed Block #%d (%d txs)", block.NumberU64(), len(block.Transactions())),
 			"level":   "info",
 		})
+
+		// 🚀 推送 Gas 排行榜
+		p.EventHook("gas_leaderboard", leaderboard)
 
 		for _, t := range activities {
 			p.EventHook("transfer", map[string]interface{}{
@@ -331,4 +365,59 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	}
 
 	return nil
+}
+
+// AnalyzeGas 实时分析区块中的 Gas 消耗大户
+func (p *Processor) AnalyzeGas(block *types.Block) []models.GasSpender {
+	spenders := make(map[string]*models.GasSpender)
+
+	for _, tx := range block.Transactions() {
+		to := "0xcontract_creation"
+		if tx.To() != nil {
+			to = strings.ToLower(tx.To().Hex())
+		}
+
+		// 计算费用 (GasUsed * GasPrice)
+		// 注意：此处 tx.Gas() 是 Limit，实际应使用 Receipt 中的 GasUsed，但为了实时性，此处用 Limit 估算
+		fee := new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas()), tx.GasPrice())
+
+		if s, exists := spenders[to]; exists {
+			s.TotalGas += tx.Gas()
+			// 将 fee 加到总费用中
+			existingFee, _ := new(big.Int).SetString(s.TotalFee, 10)
+			if existingFee == nil {
+				existingFee = big.NewInt(0)
+			}
+			s.TotalFee = new(big.Int).Add(existingFee, fee).String()
+		} else {
+			label := GetAddressLabel(to)
+			spenders[to] = &models.GasSpender{
+				Address:  to,
+				Label:    label,
+				TotalGas: tx.Gas(),
+				TotalFee: fee.String(),
+			}
+		}
+	}
+
+	// 转换为 Slice 并排序
+	result := make([]models.GasSpender, 0, len(spenders))
+	for _, s := range spenders {
+		// 格式化费用为 ETH (粗略计算)
+		f, _ := new(big.Int).SetString(s.TotalFee, 10)
+		ethVal := new(big.Float).SetInt(f)
+		ethVal.Quo(ethVal, new(big.Float).SetFloat64(1e18))
+		s.TotalFee = fmt.Sprintf("%.4f", ethVal)
+		result = append(result, *s)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].TotalGas > result[j].TotalGas
+	})
+
+	// 取 Top 5
+	if len(result) > 5 {
+		result = result[:5]
+	}
+	return result
 }

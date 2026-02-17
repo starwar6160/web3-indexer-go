@@ -224,3 +224,12 @@ type Transfer struct {
 	Type         string  `db:"activity_type"` // ✅ 活动类型（如 TRANSFER, SWAP, MINT）
 	Amount       Uint256 `db:"amount"`        // 使用 Uint256 保证金融级精度
 }
+
+// GasSpender 记录 Gas 消耗大户
+type GasSpender struct {
+	Address  string `json:"address"`
+	Label    string `json:"label"`
+	TotalGas uint64 `json:"total_gas"`
+	TotalFee string `json:"total_fee"` // 格式化后的 ETH 字符串
+}
+
