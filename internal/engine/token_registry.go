@@ -29,14 +29,14 @@ func NewTokenRegistry() *TokenRegistry {
 			common.HexToAddress("0xCa14007Eff0dB1f8135f4C25B34De49AB0d42766"): "WMATIC", // Polygon
 
 			// DeFi Blue Chips
-			common.HexToAddress("0x6B175474E89094C44Da98b954EedeAC495271d0F"): "DAI",
-			common.HexToAddress("0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984"): "UNI",
+			common.HexToAddress("0x6B175474E89094C44Da98b954EedeAC495271d0F"):  "DAI",
+			common.HexToAddress("0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984"):  "UNI",
 			common.HexToAddress("0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9c"): "LINK",
-			common.HexToAddress("0xD533a949740bb3306d119CC777fa900bA034c52D"): "CRV",
+			common.HexToAddress("0xD533a949740bb3306d119CC777fa900bA034c52D"):  "CRV",
 
 			// LSTs (Liquid Staking Tokens)
-			common.HexToAddress("0xAE78736Cd615f374D08aDFc44B9E79b9bDCeEaeE"): "rETH",
-			common.HexToAddress("0x4d9F916011233A8a94F9575c019c0C24e6D2F2b2"): "stETH",
+			common.HexToAddress("0xAE78736Cd615f374D08aDFc44B9E79b9bDCeEaeE"):  "rETH",
+			common.HexToAddress("0x4d9F916011233A8a94F9575c019c0C24e6D2F2b2"):  "stETH",
 			common.HexToAddress("0x8c1EEdC876be49809e03EB08396afbc93EB376365"): "wBETH",
 
 			// LSTs on Sepolia
@@ -44,7 +44,7 @@ func NewTokenRegistry() *TokenRegistry {
 			common.HexToAddress("0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9"): "sepolINK",
 
 			// Gas Tokens
-			common.HexToAddress("0x0000000000000000000000000000000000000000"): "ETH", // Native ETH
+			common.HexToAddress("0x0000000000000000000000000000000000000000"): "ETH",     // Native ETH
 			common.HexToAddress("0x4200000000000000000000000000000000000006"): "WETH.op", // Optimism
 		},
 	}

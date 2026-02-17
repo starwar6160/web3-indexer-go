@@ -15,14 +15,14 @@ import (
 
 func main() {
 	fmt.Println("🚀 Initializing Ultra-High Speed Stress Tester (Target: 1000+ TPS)")
-	
+
 	// Use a mock logger to avoid I/O bottlenecks during stress test
-	engine.InitLogger("error") 
+	engine.InitLogger("error")
 
 	// 1. Setup minimal processor (mock DB to isolate processing logic)
 	// In a real scenario, we'd use a real DB but with Batch Upsert enabled
 	// For this tool, we focus on the Engine's parsing and logic overhead
-	
+
 	count := atomic.Int64{}
 	startTime := time.Now()
 
@@ -31,7 +31,7 @@ func main() {
 
 	// 2. Simulate block stream
 	fmt.Println("⚡ Starting Load Injection...")
-	
+
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		for range ticker.C {
@@ -46,13 +46,13 @@ func main() {
 	for i := 0; i < 1000000; i++ {
 		blockNum := big.NewInt(int64(i))
 		_ = generateMockTransactions(200) // 200 txs per block
-		
+
 		block := types.NewBlockWithHeader(&types.Header{
 			Number:     blockNum,
 			Time:       uint64(time.Now().Unix()),
 			ParentHash: common.HexToHash("0x123"),
 		})
-		
+
 		// Simulate data arriving from fetcher
 		_ = engine.BlockData{
 			Block:  block,
@@ -62,7 +62,7 @@ func main() {
 
 		// We increment count to simulate "work done"
 		count.Add(1)
-		
+
 		// Control speed if needed, but for "max out" we just loop
 		if i%1000 == 0 {
 			// Check if we should stop
@@ -73,7 +73,7 @@ func main() {
 	}
 
 	totalTime := time.Since(startTime)
-	fmt.Printf("🏁 Stress Test Completed!\nTotal Blocks: %d\nTotal Time: %v\nAverage TPS: %.2f\n", 
+	fmt.Printf("🏁 Stress Test Completed!\nTotal Blocks: %d\nTotal Time: %v\nAverage TPS: %.2f\n",
 		count.Load(), totalTime, float64(count.Load())/totalTime.Seconds())
 }
 

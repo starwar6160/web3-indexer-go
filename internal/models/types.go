@@ -232,4 +232,3 @@ type GasSpender struct {
 	TotalGas uint64 `json:"total_gas"`
 	TotalFee string `json:"total_fee"` // 格式化后的 ETH 字符串
 }
-

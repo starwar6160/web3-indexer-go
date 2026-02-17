@@ -20,10 +20,10 @@ type SignedPayload struct {
 
 // SignerMachine 负责 Ed25519 签名逻辑
 type SignerMachine struct {
-	privKey ed25519.PrivateKey
-	pubKey  ed25519.PublicKey
+	privKey  ed25519.PrivateKey
+	pubKey   ed25519.PublicKey
 	signerID string
-	mu      sync.RWMutex
+	mu       sync.RWMutex
 }
 
 // NewSignerMachine 创建签名机

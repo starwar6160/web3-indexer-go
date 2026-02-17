@@ -34,7 +34,7 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 	} else {
 		// 🚀 Industrial Grade: Unfiltered mode captures EVERYTHING
 		// No Topics = No Filter = All contract events captured
-		filterQuery.Topics = nil 
+		filterQuery.Topics = nil
 		Logger.Info("🌍 Fetching logs for ALL events (Full Sniffing)",
 			slog.String("from", start.String()),
 			slog.String("to", end.String()))
@@ -66,7 +66,7 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 	// Step 3: Fetch Full Blocks (with transactions) for blocks that have logs
 	for bNum, blockLogs := range logsByBlock {
 		bn := new(big.Int).SetUint64(bNum)
-		
+
 		// 🚀 修复：使用 BlockByNumber 获取完整区块（包含交易），而不是只用 Header
 		block, err := f.pool.BlockByNumber(ctx, bn)
 		if err != nil {
@@ -102,7 +102,7 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 			continue // Already sent in Step 3
 		}
 
-	// Fetch full block for the very last block in range to update UI time and tx count
+		// Fetch full block for the very last block in range to update UI time and tx count
 		// For others, we can be lazy and send nil Block to just move the pointer
 		var block *types.Block
 		if bn.Cmp(end) == 0 {
@@ -115,7 +115,7 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 					"err", err,
 					"skip", false) // 继续发送，但 block 为 nil
 			}
-			
+
 			// 🚀 防御性：如果 fetch 失败，仍然发送但 block 为 nil
 			if block == nil {
 				slog.Warn("⚠️ [FETCHER] Sending nil block for last block",
