@@ -2,6 +2,9 @@ package engine
 
 import (
 	"sync"
+	"sync/atomic"
+
+	"web3-indexer-go/internal/monitor"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -52,6 +55,9 @@ type Metrics struct {
 	SyncLag            prometheus.Gauge // 新增：同步滞后
 	E2ELatency         prometheus.Gauge // 新增：秒级 E2E 延迟
 	RealtimeTPS        prometheus.Gauge // 新增：实时 TPS
+
+	// 📊 Deterministic Telemetry
+	tpsMonitor *monitor.TPSMonitor
 
 	// 📊 交易类型分布
 	TransactionTypesTotal *prometheus.CounterVec
@@ -212,6 +218,8 @@ func NewMetrics() *Metrics {
 			Help: "Real-time transactions per second",
 		}),
 
+		tpsMonitor: monitor.NewTPSMonitor(),
+
 		TransactionTypesTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "indexer_transaction_types_total",
 			Help: "Total number of transactions by type (deploy, approve, eth_transfer, etc.)",
@@ -227,6 +235,16 @@ func NewMetrics() *Metrics {
 			Help: "Total number of token transfers by token symbol",
 		}, []string{"symbol"}),
 	}
+}
+
+// GetTotalBlocksProcessed returns the total number of blocks processed since start
+func (m *Metrics) GetTotalBlocksProcessed() uint64 {
+	return atomic.LoadUint64(&m.totalBlocksProcessed)
+}
+
+// GetTotalTransfersProcessed returns the total number of transfers processed since start
+func (m *Metrics) GetTotalTransfersProcessed() uint64 {
+	return atomic.LoadUint64(&m.totalTxProcessed)
 }
 
 // RecordTokenTransfer 记录单笔代币转账（用于代币统计）

@@ -145,3 +145,18 @@ func (m *Metrics) UpdateE2ELatency(seconds float64) {
 func (m *Metrics) UpdateRealtimeTPS(tps float64) {
 	m.RealtimeTPS.Set(tps)
 }
+
+// RecordActivity records a number of processed transactions into the sliding window
+func (m *Metrics) RecordActivity(count int) {
+	if m.tpsMonitor != nil {
+		m.tpsMonitor.Record(count)
+	}
+}
+
+// GetWindowTPS returns the average TPS from the sliding window
+func (m *Metrics) GetWindowTPS() float64 {
+	if m.tpsMonitor != nil {
+		return m.tpsMonitor.GetTPS()
+	}
+	return 0.0
+}

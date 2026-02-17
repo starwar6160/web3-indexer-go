@@ -279,6 +279,9 @@ func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer,
 		"latency_ms":  latency,
 	})
 	p.EventHook("gas_leaderboard", leaderboard)
+	if p.metrics != nil {
+		p.metrics.RecordActivity(len(activities))
+	}
 	for _, t := range activities {
 		// 🚀 工业级对齐：同步更新 Prometheus 计数器，确保与 UI 彻底同步
 		if p.metrics != nil {

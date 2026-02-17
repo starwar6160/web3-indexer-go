@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -489,18 +488,10 @@ func calculateLatency(ctx context.Context, db *sqlx.DB, latestChain, latestIndex
 	return fmt.Sprintf("%.2fs", fallbackLatency), fallbackLatency
 }
 
-// calculateTPS 计算 Transactions Per Second（基于滑动窗口：过去 10 秒）
+// calculateTPS 计算 Transactions Per Second
 func calculateTPS(ctx context.Context, db *sqlx.DB) float64 {
-	var recentCount int64
-	// 🛰️ 工业级实时性：统计过去 10 秒内的真实处理量，让指标对突发流量更敏感
-	query := "SELECT COUNT(*) FROM transfers WHERE created_at > NOW() - INTERVAL '10 seconds'"
-	err := db.GetContext(ctx, &recentCount, query)
-	if err != nil {
-		return 0.0
-	}
-
-	rawTPS := float64(recentCount) / 10.0
-	return math.Round(rawTPS*100) / 100
+	// 🚀 工业级对齐：直接从 Metrics 的 5s 滑动窗口获取
+	return engine.GetMetrics().GetWindowTPS()
 }
 
 // getLazyIndexerStatus returns a human-readable status for the lazy indexer

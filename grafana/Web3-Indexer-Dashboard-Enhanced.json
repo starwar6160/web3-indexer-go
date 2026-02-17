@@ -498,7 +498,7 @@
           "refId": "A"
         },
         {
-          "expr": "max(indexer_current_sync_height)",
+          "expr": "last_over_time(indexer_current_sync_height[1m])",
           "legendFormat": "Synced Height",
           "refId": "B"
         }
