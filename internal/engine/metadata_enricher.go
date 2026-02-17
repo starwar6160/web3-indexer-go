@@ -70,7 +70,7 @@ func NewMetadataEnricher(client LowLevelRPCClient, db DBUpdater, logger *slog.Lo
 		queue:        make(chan common.Address, 1000), // 增加缓冲区
 		db:           db,
 		logger:       logger,
-		batchSize:    25, // 每次处理 25 个地址，每个地址 2 个调用，共 50 个 call
+		batchSize:    50, // 提升至 50，进一步利用 Multicall3 带宽
 		erc20ABI:     mustParseABI(erc20ABIJSON),
 		multicallABI: mustParseABI(multiABIJSON),
 	}
@@ -143,7 +143,7 @@ func (me *MetadataEnricher) GetDecimals(addr common.Address) uint8 {
 // batchWorker 批量处理协程（优化 RPC 调用）
 func (me *MetadataEnricher) batchWorker() {
 	batch := make([]common.Address, 0, me.batchSize)
-	ticker := time.NewTicker(2 * time.Second) // 每 2 秒处理一批
+	ticker := time.NewTicker(200 * time.Millisecond) // 缩短至 200ms，快速清空队列
 	defer ticker.Stop()
 
 	for {
@@ -271,7 +271,7 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 				}
 			}
 
-			me.logger.Info("🎯 [MetadataEnricher] discovered",
+			me.logger.Debug("🎯 [MetadataEnricher] discovered",
 				"address", addrHex[:10],
 				"symbol", meta.Symbol,
 				"decimals", meta.Decimals)
