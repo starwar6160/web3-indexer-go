@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -30,16 +31,16 @@ type Block struct {
 }
 
 type Transfer struct {
-	ID           int     `db:"id" json:"id"`
-	BlockNumber  string  `db:"block_number" json:"block_number"`
-	TxHash       string  `db:"tx_hash" json:"tx_hash"`
-	LogIndex     int     `db:"log_index" json:"log_index"`
-	FromAddress  string  `db:"from_address" json:"from_address"`
-	ToAddress    string  `db:"to_address" json:"to_address"`
-	Amount       string  `db:"amount" json:"amount"`
-	TokenAddress string  `db:"token_address" json:"token_address"`
-	Symbol       string  `db:"symbol" json:"symbol"`        // ✅ 代币符号
-	Type         string  `db:"activity_type" json:"type"` // ✅ 新增：活动类型
+	ID           int    `db:"id" json:"id"`
+	BlockNumber  string `db:"block_number" json:"block_number"`
+	TxHash       string `db:"tx_hash" json:"tx_hash"`
+	LogIndex     int    `db:"log_index" json:"log_index"`
+	FromAddress  string `db:"from_address" json:"from_address"`
+	ToAddress    string `db:"to_address" json:"to_address"`
+	Amount       string `db:"amount" json:"amount"`
+	TokenAddress string `db:"token_address" json:"token_address"`
+	Symbol       string `db:"symbol" json:"symbol"`      // ✅ 代币符号
+	Type         string `db:"activity_type" json:"type"` // ✅ 新增：活动类型
 }
 
 // Server 包装 HTTP 服务
@@ -57,10 +58,10 @@ type Server struct {
 
 func NewServer(db *sqlx.DB, wsHub *web.Hub, port, title string) *Server {
 	return &Server{
-		db:    db,
-		wsHub: wsHub,
-		port:  port,
-		title: title,
+		db:     db,
+		wsHub:  wsHub,
+		port:   port,
+		title:  title,
 		signer: engine.NewSignerMachine("Yokohama-Lab-Primary"),
 	}
 }
@@ -334,135 +335,63 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 	}
 }
 
-func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64, signer *engine.SignerMachine) {
+func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, _ int64, signer *engine.SignerMachine) {
 	// Trigger indexing if cooldown period has passed
 	if lazyManager != nil {
 		slog.Debug("🚀 API access detected, triggering lazy manager")
 		lazyManager.Trigger()
 	}
 
-	// 1. 尝试实时获取链头
-	latestChainBlock, err := rpcPool.GetLatestBlockNumber(r.Context())
+	ctx := r.Context()
+	// 1. 获取链上高度与同步高度
+	latestChainBlock, err := rpcPool.GetLatestBlockNumber(ctx)
+	if err != nil {
+		slog.Error("failed_to_get_latest_block", "err", err)
+	}
+	latestIndexedBlock := getLatestIndexedBlock(ctx, db)
 
-	// 2. 缓存降级逻辑：如果 RPC 失败（如限流），从数据库读取 Heartbeat 记录
-	latestBlockStr := "0"
-	var latestChainInt64 int64
-	if err == nil && latestChainBlock != nil {
+	// 2. 获取统计数据
+	totalBlocks := getCount(ctx, db, "SELECT COUNT(*) FROM blocks")
+	totalTransfers := getCount(ctx, db, "SELECT COUNT(*) FROM transfers")
+	totalVisitors := getCount(ctx, db, "SELECT COUNT(DISTINCT ip_address) FROM visitor_stats")
+
+	// 3. 计算延迟与状态
+	latestChainInt64 := int64(0)
+	if latestChainBlock != nil {
 		latestChainInt64 = latestChainBlock.Int64()
-		latestBlockStr = latestChainBlock.String()
-	} else {
-		// 从 sync_checkpoints 读取心跳缓存 (动态根据 chainID)
-		var cachedBlock string
-		err = db.GetContext(r.Context(), &cachedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
-		if err == nil && cachedBlock != "" {
-			latestBlockStr = cachedBlock
-			if val, ok := new(big.Int).SetString(cachedBlock, 10); ok {
-				latestChainInt64 = val.Int64()
-			}
-			slog.Debug("using_cached_chain_head", "height", latestBlockStr, "chain_id", chainID)
-		}
+	}
+	latestIndexedBlockInt64 := parseBlockNumber(latestIndexedBlock)
+
+	syncLag := latestChainInt64 - latestIndexedBlockInt64
+	if syncLag < 0 {
+		syncLag = 0
 	}
 
-	var latestIndexedBlock string
-	err = db.GetContext(r.Context(), &latestIndexedBlock, "SELECT COALESCE(MAX(number), '0') FROM blocks")
-	if err != nil {
-		slog.Error("failed_to_get_latest_indexed_block", "err", err)
-		latestIndexedBlock = "0"
-	}
+	e2eLatencyDisplay, e2eLatencySeconds := calculateLatency(ctx, db, latestChainInt64, latestIndexedBlockInt64, latestIndexedBlock)
 
-	var totalBlocks, totalTransfers int64
-	err = db.GetContext(r.Context(), &totalBlocks, "SELECT COUNT(*) FROM blocks")
-	if err != nil {
-		slog.Error("failed_to_get_total_blocks", "err", err)
-		totalBlocks = 0
-	}
-
-	err = db.GetContext(r.Context(), &totalTransfers, "SELECT COUNT(*) FROM transfers")
-	if err != nil {
-		slog.Error("failed_to_get_total_transfers", "err", err)
-		totalTransfers = 0
-	}
-
-	var totalVisitors int64
-	err = db.GetContext(r.Context(), &totalVisitors, "SELECT COUNT(DISTINCT ip_address) FROM visitor_stats")
-	if err != nil {
-		slog.Error("failed_to_get_total_visitors", "err", err)
-		totalVisitors = 0
-	}
-
-	latestIndexedBlockInt64 := int64(0)
-	if latestIndexedBlock != "" && latestIndexedBlock != "0" {
-		if parsed, ok := new(big.Int).SetString(latestIndexedBlock, 10); ok {
-			latestIndexedBlockInt64 = parsed.Int64()
-		}
-	}
-
-	var syncLag int64
-	if latestChainInt64 > 0 {
-		// 修复：使用缓存或实时的链头高度进行计算
-		syncLag = latestChainInt64 - latestIndexedBlockInt64
-		if syncLag < 0 {
-			syncLag = 0
-		}
-	}
-
-	// 计算 E2E Latency（秒）
-	var e2eLatencySeconds float64
-	var e2eLatencyDisplay string
-	if latestChainInt64 > 0 && latestIndexedBlockInt64 > 0 {
-		// 估算逻辑
-		syncLag := latestChainInt64 - latestIndexedBlockInt64
-		if syncLag < 0 {
-			syncLag = 0
-		}
-
-		rawLatency := float64(syncLag) * 12 // Sepolia 平均出块时间
-
-		if syncLag > 100 {
-			// 大规模追赶模式：显示剩余块数
-			e2eLatencySeconds = rawLatency
-			e2eLatencyDisplay = fmt.Sprintf("Catching up... (%d blocks behind)", syncLag)
-		} else {
-			// 实时/小延迟模式：计算处理延迟
-			var processedAt time.Time
-			err = db.GetContext(r.Context(), &processedAt,
-				"SELECT processed_at FROM blocks WHERE number = $1", latestIndexedBlock)
-
-			if err == nil && !processedAt.IsZero() {
-				actualLatency := time.Since(processedAt).Seconds()
-				e2eLatencySeconds = actualLatency
-				e2eLatencyDisplay = fmt.Sprintf("%.2fs", actualLatency)
-			} else {
-				e2eLatencySeconds = rawLatency
-				e2eLatencyDisplay = fmt.Sprintf("%.2fs", rawLatency)
-			}
-		}
-	}
-
+	// 4. 组装响应
 	adminIP := globalAnalyzer.GetAdminIP()
 	if adminIP != "" && adminIP != "127.0.0.1" {
-		// 隐私防御：抹除真实 IP，替换为固定占位符
 		adminIP = "Protected-Internal-Node"
 	}
 
-	// 计算 TPS（追赶模式下显示为 0）
 	tps := calculateTPS(totalTransfers, totalBlocks)
-	isCatchingUp := syncLag > 10 // 追赶模式阈值：10 个块
+	isCatchingUp := syncLag > 10
 	if isCatchingUp {
-		tps = 0.0 // 追赶模式下不显示实时 TPS，避免误导
+		tps = 0.0
 	}
 
 	status := map[string]interface{}{
-		"version":            "v2.2.0-intelligence-engine", // 🚀 同步版本号
+		"version":            "v2.2.0-intelligence-engine",
 		"state":              "active",
-		"latest_block":       latestBlockStr,
+		"latest_block":       fmt.Sprintf("%d", latestChainInt64),
 		"latest_indexed":     latestIndexedBlock,
 		"sync_lag":           syncLag,
 		"total_blocks":       totalBlocks,
 		"total_transfers":    totalTransfers,
 		"total_visitors":     totalVisitors,
-		"tps":                tps,          // 追赶模式下显示为 0
-		"is_catching_up":     isCatchingUp, // 新增：是否在追赶模式
+		"tps":                tps,
+		"is_catching_up":     isCatchingUp,
 		"bps":                currentBPS.Load(),
 		"is_healthy":         rpcPool.GetHealthyNodeCount() > 0,
 		"self_healing_count": selfHealingEvents.Load(),
@@ -471,21 +400,17 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 			"healthy": rpcPool.GetHealthyNodeCount(),
 			"total":   rpcPool.GetTotalNodeCount(),
 		},
-		// E2E Latency（带上限检测和友好显示）
 		"e2e_latency_seconds": e2eLatencySeconds,
 		"e2e_latency_display": e2eLatencyDisplay,
 	}
 
-	// Add lazy indexer status if available
 	if lazyManager != nil {
-		lazyStatus := lazyManager.GetStatus()
-		status["lazy_indexer"] = lazyStatus
+		status["lazy_indexer"] = lazyManager.GetStatus()
 	}
 
 	// 🛡️ 确定性安全签名
 	if signer != nil {
-		signed, err := signer.Sign("status", status)
-		if err == nil {
+		if signed, err := signer.Sign("status", status); err == nil {
 			w.Header().Set("X-Payload-Signature", signed.Signature)
 			w.Header().Set("X-Signer-ID", signed.SignerID)
 			w.Header().Set("X-Public-Key", signed.PubKey)
@@ -496,6 +421,51 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		slog.Error("failed_to_encode_status", "err", err)
 	}
+}
+
+func getLatestIndexedBlock(ctx context.Context, db *sqlx.DB) string {
+	var latest string
+	if err := db.GetContext(ctx, &latest, "SELECT COALESCE(MAX(number), '0') FROM blocks"); err != nil {
+		return "0"
+	}
+	return latest
+}
+
+func getCount(ctx context.Context, db *sqlx.DB, query string) int64 {
+	var count int64
+	if err := db.GetContext(ctx, &count, query); err != nil {
+		return 0
+	}
+	return count
+}
+
+func parseBlockNumber(s string) int64 {
+	if s == "" || s == "0" {
+		return 0
+	}
+	if parsed, ok := new(big.Int).SetString(s, 10); ok {
+		return parsed.Int64()
+	}
+	return 0
+}
+
+func calculateLatency(ctx context.Context, db *sqlx.DB, latestChain, latestIndexed int64, latestIndexedStr string) (string, float64) {
+	if latestChain <= 0 || latestIndexed <= 0 {
+		return "0s", 0
+	}
+
+	syncLag := latestChain - latestIndexed
+	if syncLag > 100 {
+		return fmt.Sprintf("Catching up... (%d blocks behind)", syncLag), float64(syncLag) * 12
+	}
+
+	var processedAt time.Time
+	if err := db.GetContext(ctx, &processedAt, "SELECT processed_at FROM blocks WHERE number = $1", latestIndexedStr); err == nil && !processedAt.IsZero() {
+		latency := time.Since(processedAt).Seconds()
+		return fmt.Sprintf("%.2fs", latency), latency
+	}
+
+	return fmt.Sprintf("%.2fs", float64(syncLag)*12), float64(syncLag) * 12
 }
 
 // calculateTPS 计算 Transactions Per Second（基于历史数据）

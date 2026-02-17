@@ -86,7 +86,9 @@ func (e *Emulator) sendTransfer(ctx context.Context) {
 			if e.OnSelfHealing != nil {
 				e.OnSelfHealing("nonce_mismatch")
 			}
-			_ = e.nm.ResyncNonce(ctx)
+			if resyncErr := e.nm.ResyncNonce(ctx); resyncErr != nil {
+				e.logger.Warn("failed_to_resync_nonce_in_emulator", slog.String("error", resyncErr.Error()))
+			}
 		} else {
 			// 对于其他网络错误，尝试回滚 nonce 以便下次重试该号
 			e.nm.RollbackNonce(nonce)

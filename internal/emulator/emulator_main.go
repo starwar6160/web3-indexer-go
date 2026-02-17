@@ -88,7 +88,9 @@ func (e *Emulator) deployContract(ctx context.Context) (common.Address, error) {
 	}
 
 	if err := e.client.SendTransaction(ctx, signedTx); err != nil {
-		_ = e.nm.ResyncNonce(ctx)
+		if resyncErr := e.nm.ResyncNonce(ctx); resyncErr != nil {
+			e.logger.Warn("failed_to_resync_nonce", slog.String("error", resyncErr.Error()))
+		}
 		return common.Address{}, err
 	}
 

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"strings"
@@ -20,6 +21,7 @@ var Multicall3Address = common.HexToAddress("0xca11bde05977b3631167028862be2a173
 const (
 	erc20ABIJSON = `[{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]`
 	multiABIJSON = `[{"inputs":[{"components":[{"internalType":"address","name":"target","type":"address"},{"internalType":"bool","name":"allowFailure","type":"bool"},{"internalType":"bytes","name":"callData","type":"bytes"}],"internalType":"struct Multicall3.Call3[]","name":"calls","type":"tuple[]"}],"name":"aggregate3","outputs":[{"components":[{"internalType":"bool","name":"success","type":"bool"},{"internalType":"bytes","name":"returnData","type":"bytes"}],"internalType":"struct Multicall3.Result[]","name":"returnData","type":"tuple[]"}],"stateMutability":"view","type":"function"}]`
+	unknownValue = "UNKNOWN"
 )
 
 // TokenMetadata 代币元数据结构
@@ -50,14 +52,20 @@ type DBUpdater interface {
 	UpdateTokenDecimals(tokenAddress string, decimals uint8) error
 }
 
+// mustParseABI 辅助函数
+func mustParseABI(json string) abi.ABI {
+	parsed, err := abi.JSON(strings.NewReader(json))
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse ABI: %v", err))
+	}
+	return parsed
+}
+
 // NewMetadataEnricher 创建元数据丰富器
 func NewMetadataEnricher(client LowLevelRPCClient, db DBUpdater, logger *slog.Logger) *MetadataEnricher {
 	if logger == nil {
 		logger = slog.Default()
 	}
-
-	parsedERC20, _ := abi.JSON(strings.NewReader(erc20ABIJSON))
-	parsedMulti, _ := abi.JSON(strings.NewReader(multiABIJSON))
 
 	me := &MetadataEnricher{
 		client:       client,
@@ -65,8 +73,8 @@ func NewMetadataEnricher(client LowLevelRPCClient, db DBUpdater, logger *slog.Lo
 		db:           db,
 		logger:       logger,
 		batchSize:    25, // 每次处理 25 个地址，每个地址 2 个调用，共 50 个 call
-		erc20ABI:     parsedERC20,
-		multicallABI: parsedMulti,
+		erc20ABI:     mustParseABI(erc20ABIJSON),
+		multicallABI: mustParseABI(multiABIJSON),
 	}
 
 	me.ctx, me.cancel = context.WithCancel(context.Background())
@@ -89,7 +97,9 @@ func (me *MetadataEnricher) GetSymbol(addr common.Address) string {
 
 	// 1. 检查缓存
 	if val, ok := me.cache.Load(addrHex); ok {
-		return val.(TokenMetadata).Symbol
+		if meta, ok := val.(TokenMetadata); ok {
+			return meta.Symbol
+		}
 	}
 
 	// 2. 异步入队（非阻塞）
@@ -113,7 +123,9 @@ func (me *MetadataEnricher) GetDecimals(addr common.Address) uint8 {
 
 	addrHex := addr.Hex()
 	if val, ok := me.cache.Load(addrHex); ok {
-		return val.(TokenMetadata).Decimals
+		if meta, ok := val.(TokenMetadata); ok {
+			return meta.Decimals
+		}
 	}
 	return 18 // 默认 18
 }
@@ -165,10 +177,18 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 	calls := make([]Call3, 0, addrCount*2)
 
 	for _, addr := range addresses {
-		symData, _ := me.erc20ABI.Pack("symbol")
-		decData, _ := me.erc20ABI.Pack("decimals")
-		calls = append(calls, Call3{addr, true, symData})
-		calls = append(calls, Call3{addr, true, decData})
+		symData, err := me.erc20ABI.Pack("symbol")
+		if err != nil {
+			continue
+		}
+		decData, err := me.erc20ABI.Pack("decimals")
+		if err != nil {
+			continue
+		}
+		calls = append(calls,
+			Call3{addr, true, symData},
+			Call3{addr, true, decData},
+		)
 	}
 
 	// 2. 打包并发送请求
@@ -208,18 +228,22 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 		// 解析 Symbol (结果索引为 i*2)
 		if multiRes[i*2].Success && len(multiRes[i*2].ReturnData) >= 64 {
 			// ERC20 symbol 返回 string，需要 Unpack
-			if out, err := me.erc20ABI.Unpack("symbol", multiRes[i*2].ReturnData); err == nil {
-				meta.Symbol = out[0].(string)
-				found = true
+			if out, err := me.erc20ABI.Unpack("symbol", multiRes[i*2].ReturnData); err == nil && len(out) > 0 {
+				if s, ok := out[0].(string); ok {
+					meta.Symbol = s
+					found = true
+				}
 			}
 		}
 
 		// 解析 Decimals (结果索引为 i*2+1)
 		if multiRes[i*2+1].Success && len(multiRes[i*2+1].ReturnData) >= 32 {
 			// decimals 返回 uint8
-			if out, err := me.erc20ABI.Unpack("decimals", multiRes[i*2+1].ReturnData); err == nil {
-				meta.Decimals = out[0].(uint8)
-				found = true
+			if out, err := me.erc20ABI.Unpack("decimals", multiRes[i*2+1].ReturnData); err == nil && len(out) > 0 {
+				if d, ok := out[0].(uint8); ok {
+					meta.Decimals = d
+					found = true
+				}
 			}
 		}
 
@@ -227,8 +251,12 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 			// 更新缓存与 DB
 			me.cache.Store(addrHex, meta)
 			if me.db != nil {
-				_ = me.db.UpdateTokenSymbol(addrHex, meta.Symbol)
-				_ = me.db.UpdateTokenDecimals(addrHex, meta.Decimals)
+				if err := me.db.UpdateTokenSymbol(addrHex, meta.Symbol); err != nil {
+					me.logger.Warn("failed to update token symbol", "err", err)
+				}
+				if err := me.db.UpdateTokenDecimals(addrHex, meta.Decimals); err != nil {
+					me.logger.Warn("failed to update token decimals", "err", err)
+				}
 			}
 			me.logger.Info("🎯 [MetadataEnricher] discovered",
 				"address", addrHex[:10],
@@ -243,9 +271,9 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 }
 
 // fetchTokenMetadata 仍然保留单条查询逻辑作为 Fallback (可选)
-func (me *MetadataEnricher) fetchTokenMetadata(ctx context.Context, addr common.Address) (TokenMetadata, error) {
+func (me *MetadataEnricher) fetchTokenMetadata(ctx context.Context, addr common.Address) TokenMetadata {
 	metadata := TokenMetadata{
-		Symbol:   "UNKNOWN",
+		Symbol:   unknownValue,
 		Decimals: 18,
 		Name:     "Unknown Token",
 	}
@@ -261,6 +289,7 @@ func (me *MetadataEnricher) fetchTokenMetadata(ctx context.Context, addr common.
 	if err == nil && len(decimals) >= 32 {
 		d := new(big.Int).SetBytes(common.Hex2Bytes(decimals))
 		if d.IsUint64() && d.Uint64() <= 255 {
+			// #nosec G115
 			metadata.Decimals = uint8(d.Uint64())
 		}
 	}
@@ -271,7 +300,7 @@ func (me *MetadataEnricher) fetchTokenMetadata(ctx context.Context, addr common.
 		metadata.Name = me.decodeStringResult(name)
 	}
 
-	return metadata, nil
+	return metadata
 }
 
 // callContractMethod 调用合约方法（使用 eth_call）
@@ -293,7 +322,7 @@ func (me *MetadataEnricher) callContractMethod(ctx context.Context, addr common.
 // decodeStringResult 解码 ABI 编码的字符串结果
 func (me *MetadataEnricher) decodeStringResult(hexData string) string {
 	if len(hexData) < 128 {
-		return "UNKNOWN"
+		return unknownValue
 	}
 
 	// 跳过 offset (32 bytes) 和 length (32 bytes)
@@ -302,7 +331,7 @@ func (me *MetadataEnricher) decodeStringResult(hexData string) string {
 	length := new(big.Int).SetBytes(common.Hex2Bytes(lengthHex)).Int64()
 
 	if length <= 0 || length > 1000 {
-		return "UNKNOWN"
+		return unknownValue
 	}
 
 	// 读取字符串数据
@@ -315,7 +344,7 @@ func (me *MetadataEnricher) decodeStringResult(hexData string) string {
 	dataHex := hexData[dataStart:dataEnd]
 	data, err := hex.DecodeString(dataHex)
 	if err != nil {
-		return "UNKNOWN"
+		return unknownValue
 	}
 
 	// 清理非打印字符
@@ -335,7 +364,7 @@ func (me *MetadataEnricher) Stop() {
 
 // GetCacheStats 获取缓存统计（用于监控）
 func (me *MetadataEnricher) GetCacheStats() (count int) {
-	me.cache.Range(func(key, value interface{}) bool {
+	me.cache.Range(func(_, _ interface{}) bool {
 		count++
 		return true
 	})

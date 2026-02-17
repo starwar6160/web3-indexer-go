@@ -35,7 +35,7 @@ func (p *Processor) ProcessLog(vLog types.Log) *models.Transfer {
 		return nil
 	}
 
-	activityType := "CONTRACT_CALL"
+	var activityType string
 	from := ""
 	to := ""
 	var amount models.Uint256
@@ -119,9 +119,9 @@ func (p *Processor) ProcessLog(vLog types.Log) *models.Transfer {
 }
 
 // ProcessTransaction 扫描原始交易以发现部署或原生 ETH 转账
-func (p *Processor) ProcessTransaction(blockNum *big.Int, txs types.Transactions, chainID int64) []models.Transfer {
+func (p *Processor) ProcessTransaction(_ *big.Int, _ types.Transactions, _ int64) []models.Transfer {
 	activities := []models.Transfer{}
-	
+
 	// 这里目前在 ProcessorBatch 或 ProcessBlock 中直接处理了
 	// 未来可以抽离到这里进行更复杂的嗅探
 	return activities

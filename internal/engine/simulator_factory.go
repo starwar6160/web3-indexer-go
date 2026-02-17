@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"math/big"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -39,12 +38,12 @@ func NewSyntheticTransferInjector(rpcURL string, chainID *big.Int, enabled bool)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	injector := &SyntheticTransferInjector{
-		client:     client,
-		chainID:    chainID,
-		enabled:    enabled,
-		rateLimit:  500 * time.Millisecond, // 默认每秒 2 笔
-		ctx:        ctx,
-		cancel:     cancel,
+		client:    client,
+		chainID:   chainID,
+		enabled:   enabled,
+		rateLimit: 500 * time.Millisecond, // 默认每秒 2 笔
+		ctx:       ctx,
+		cancel:    cancel,
 		mockTokens: []common.Address{
 			common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), // Mock USDC
 			common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"), // Mock USDT
@@ -110,17 +109,17 @@ func (s *SyntheticTransferInjector) generateMockTransfer(seqNum int64) *Synthesi
 	defer s.mu.Unlock()
 
 	// 随机选择代币和钱包
-	token := s.mockTokens[rand.Intn(len(s.mockTokens))]
-	from := s.mockWallets[rand.Intn(len(s.mockWallets))]
-	to := s.mockWallets[rand.Intn(len(s.mockWallets))]
+	token := s.mockTokens[secureIntn(len(s.mockTokens))]
+	from := s.mockWallets[secureIntn(len(s.mockWallets))]
+	to := s.mockWallets[secureIntn(len(s.mockWallets))]
 
 	// 确保发送者和接收者不同
 	for to == from {
-		to = s.mockWallets[rand.Intn(len(s.mockWallets))]
+		to = s.mockWallets[secureIntn(len(s.mockWallets))]
 	}
 
 	// 随机金额 (1-1000 tokens)
-	amount := big.NewInt(int64(rand.Intn(1000) + 1))
+	amount := big.NewInt(int64(secureIntn(1000) + 1))
 	amount.Mul(amount, big.NewInt(1000000000)) // 模拟 18 位精度
 
 	// 获取当前区块号
@@ -131,7 +130,7 @@ func (s *SyntheticTransferInjector) generateMockTransfer(seqNum int64) *Synthesi
 	}
 
 	transfer := &SynthesizedTransfer{
-		TxHash:        common.BytesToHash([]byte{0x00, byte(seqNum)}), // 伪造交易哈希
+		TxHash:       common.BytesToHash([]byte{0x00, byte(seqNum)}), // 伪造交易哈希
 		BlockNumber:  currentBlock.Number.Uint64(),
 		BlockHash:    currentBlock.Hash(),
 		TokenAddress: token,
@@ -155,13 +154,13 @@ func (s *SyntheticTransferInjector) SetRateLimit(dur time.Duration) {
 
 // SynthesizedTransfer 合成的 Transfer 事件
 type SynthesizedTransfer struct {
-	TxHash        common.Hash
-	BlockNumber   uint64
-	BlockHash     common.Hash
-	TokenAddress  common.Address
-	From          common.Address
-	To            common.Address
-	Amount        *big.Int
-	Timestamp     int64
-	Synthesized   bool // 标记为合成数据
+	TxHash       common.Hash
+	BlockNumber  uint64
+	BlockHash    common.Hash
+	TokenAddress common.Address
+	From         common.Address
+	To           common.Address
+	Amount       *big.Int
+	Timestamp    int64
+	Synthesized  bool // 标记为合成数据
 }

@@ -109,8 +109,9 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 		}
 	}
 
+	const envTrue = "true"
 	var globalRPS float64
-	forceRPS := os.Getenv("FORCE_RPS") == "true"
+	forceRPS := os.Getenv("FORCE_RPS") == envTrue
 
 	if isLocal {
 		globalRPS = 500.0 // 本地 Anvil 开启火力

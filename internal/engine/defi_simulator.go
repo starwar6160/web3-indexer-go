@@ -2,9 +2,10 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
-	"math/rand"
+	mathrand "math/rand/v2"
 	"sync"
 	"time"
 
@@ -15,18 +16,18 @@ import (
 // DeFiSimulator 工业级 DeFi 交易模拟器
 // 模拟高频套利、Flashloan、MEV 等复杂场景
 type DeFiSimulator struct {
-	client    *ethclient.Client
-	chainID   *big.Int
-	enabled   bool
-	mu        sync.Mutex
-	ctx       context.Context
-	cancel    context.CancelFunc
+	client  *ethclient.Client
+	chainID *big.Int
+	enabled bool
+	mu      sync.Mutex
+	ctx     context.Context
+	cancel  context.CancelFunc
 
 	// 模拟的 DeFi 协议地址
-	uniswapV3Router  common.Address
-	curvePool        common.Address
-	balancerVault    common.Address
-	aaveV3Pool       common.Address
+	uniswapV3Router common.Address
+	curvePool       common.Address
+	balancerVault   common.Address
+	aaveV3Pool      common.Address
 
 	// 模拟的代币（带精度）
 	tokens []*TokenInfo
@@ -35,15 +36,15 @@ type DeFiSimulator struct {
 	arbitrageBots []common.Address
 
 	// 配置参数
-	tps              int          // 每秒交易数
-	batchSize        int          // 每批交易数
-	complexityLevel  string       // "simple", "complex", "mev"
+	tps             int    // 每秒交易数
+	batchSize       int    // 每批交易数
+	complexityLevel string // "simple", "complex", "mev"
 }
 
 // TokenInfo 代币信息（含精度）
 type TokenInfo struct {
-	Address common.Address
-	Symbol  string
+	Address  common.Address
+	Symbol   string
 	Decimals int
 	PriceUSD float64 // USD 价格（用于计算实际金额）
 }
@@ -79,8 +80,8 @@ func NewDeFiSimulator(rpcURL string, chainID *big.Int, enabled bool) (*DeFiSimul
 			common.HexToAddress("0x5615dEb798BB3E4dFa01397d0Db2C6b0404A38D7"), // MEV Bot #2
 			common.HexToAddress("0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0bE"), // Binance Hot Wallet
 		},
-		tps:             10,    // 默认每秒 10 笔
-		batchSize:       5,     // 每批 5 笔
+		tps:             10,        // 默认每秒 10 笔
+		batchSize:       5,         // 每批 5 笔
 		complexityLevel: "complex", // 默认复杂模式
 	}
 
@@ -143,7 +144,7 @@ func (s *DeFiSimulator) generateDeFiTransfer(seqNum int64) *SynthesizedTransfer 
 	currentBlock := header.Number.Uint64()
 
 	// 随机选择交易类型
-	txType := rand.Intn(100)
+	txType := secureIntn(100)
 	var transfer *SynthesizedTransfer
 
 	switch {
@@ -167,8 +168,8 @@ func (s *DeFiSimulator) generateDeFiTransfer(seqNum int64) *SynthesizedTransfer 
 // generateSwapTransfer 生成普通 Swap 交易
 func (s *DeFiSimulator) generateSwapTransfer(blockNumber uint64, seqNum int64) *SynthesizedTransfer {
 	// 随机选择代币对
-	token0 := s.tokens[rand.Intn(len(s.tokens))]
-	_ = s.tokens[rand.Intn(len(s.tokens))] // token1 (未使用，简化逻辑)
+	token0 := s.tokens[secureIntn(len(s.tokens))]
+	_ = s.tokens[secureIntn(len(s.tokens))] // token1 (未使用，简化逻辑)
 
 	// 幂律分布金额（模拟真实交易）
 	amountRaw := s.generatePowerLawAmount(token0.Decimals)
@@ -181,15 +182,15 @@ func (s *DeFiSimulator) generateSwapTransfer(blockNumber uint64, seqNum int64) *
 	txHash := s.generateTxHash(blockNumber, seqNum, "SWAP")
 
 	transfer := &SynthesizedTransfer{
-		TxHash:        txHash,
-		BlockNumber:   blockNumber,
-		BlockHash:     common.HexToHash("0x" + string(blockNumber)),
-		TokenAddress:  token0.Address,
-		From:          from,
-		To:            to,
-		Amount:        amountRaw,
-		Timestamp:     time.Now().Unix(),
-		Synthesized:   true,
+		TxHash:       txHash,
+		BlockNumber:  blockNumber,
+		BlockHash:    common.HexToHash(fmt.Sprintf("0x%d", blockNumber)),
+		TokenAddress: token0.Address,
+		From:         from,
+		To:           to,
+		Amount:       amountRaw,
+		Timestamp:    time.Now().Unix(),
+		Synthesized:  true,
 	}
 
 	slog.Debug("🔄 [SWAP] Generated",
@@ -203,10 +204,10 @@ func (s *DeFiSimulator) generateSwapTransfer(blockNumber uint64, seqNum int64) *
 // generateArbitrageTransfer 生成套利交易
 func (s *DeFiSimulator) generateArbitrageTransfer(blockNumber uint64, seqNum int64) *SynthesizedTransfer {
 	// 套利机器人
-	bot := s.arbitrageBots[rand.Intn(len(s.arbitrageBots))]
+	bot := s.arbitrageBots[secureIntn(len(s.arbitrageBots))]
 
 	// 选择代币进行套利
-	token0 := s.tokens[rand.Intn(len(s.tokens))]
+	token0 := s.tokens[secureIntn(len(s.tokens))]
 
 	// 大额交易（套利通常是高价值）
 	amountRaw := s.generateLargeAmount(token0.Decimals)
@@ -214,15 +215,15 @@ func (s *DeFiSimulator) generateArbitrageTransfer(blockNumber uint64, seqNum int
 	txHash := s.generateTxHash(blockNumber, seqNum, "ARBITRAGE")
 
 	transfer := &SynthesizedTransfer{
-		TxHash:        txHash,
-		BlockNumber:   blockNumber,
-		BlockHash:     common.HexToHash("0x" + string(blockNumber)),
-		TokenAddress:  token0.Address,
-		From:          bot,
-		To:            s.uniswapV3Router,
-		Amount:        amountRaw,
-		Timestamp:     time.Now().Unix(),
-		Synthesized:   true,
+		TxHash:       txHash,
+		BlockNumber:  blockNumber,
+		BlockHash:    common.HexToHash(fmt.Sprintf("0x%d", blockNumber)),
+		TokenAddress: token0.Address,
+		From:         bot,
+		To:           s.uniswapV3Router,
+		Amount:       amountRaw,
+		Timestamp:    time.Now().Unix(),
+		Synthesized:  true,
 	}
 
 	slog.Info("🦈 [ARBITRAGE] Generated",
@@ -239,7 +240,7 @@ func (s *DeFiSimulator) generateFlashloanTransfer(blockNumber uint64, seqNum int
 	pool := s.aaveV3Pool
 
 	// 随机代币
-	token := s.tokens[rand.Intn(len(s.tokens))]
+	token := s.tokens[secureIntn(len(s.tokens))]
 
 	// Flashloan 通常是超大额
 	amountRaw := s.generateMegaAmount(token.Decimals)
@@ -247,15 +248,15 @@ func (s *DeFiSimulator) generateFlashloanTransfer(blockNumber uint64, seqNum int
 	txHash := s.generateTxHash(blockNumber, seqNum, "FLASHLOAN")
 
 	transfer := &SynthesizedTransfer{
-		TxHash:        txHash,
-		BlockNumber:   blockNumber,
-		BlockHash:     common.HexToHash("0x" + string(blockNumber)),
-		TokenAddress:  token.Address,
-		From:          pool,
-		To:            s.balancerVault, // Balancer Vault
-		Amount:        amountRaw,
-		Timestamp:     time.Now().Unix(),
-		Synthesized:   true,
+		TxHash:       txHash,
+		BlockNumber:  blockNumber,
+		BlockHash:    common.HexToHash(fmt.Sprintf("0x%d", blockNumber)),
+		TokenAddress: token.Address,
+		From:         pool,
+		To:           s.balancerVault, // Balancer Vault
+		Amount:       amountRaw,
+		Timestamp:    time.Now().Unix(),
+		Synthesized:  true,
 	}
 
 	slog.Info("⚡ [FLASHLOAN] Generated",
@@ -268,7 +269,7 @@ func (s *DeFiSimulator) generateFlashloanTransfer(blockNumber uint64, seqNum int
 // generateMEVTransfer 生成 MEV 交易（Sandwich Attack）
 func (s *DeFiSimulator) generateMEVTransfer(blockNumber uint64, seqNum int64) *SynthesizedTransfer {
 	// MEV Bot
-	bot := s.arbitrageBots[rand.Intn(len(s.arbitrageBots))]
+	bot := s.arbitrageBots[secureIntn(len(s.arbitrageBots))]
 
 	// 通常攻击 WETH 或主流币
 	token := s.tokens[3] // WETH
@@ -279,15 +280,15 @@ func (s *DeFiSimulator) generateMEVTransfer(blockNumber uint64, seqNum int64) *S
 	txHash := s.generateTxHash(blockNumber, seqNum, "MEV")
 
 	transfer := &SynthesizedTransfer{
-		TxHash:        txHash,
-		BlockNumber:   blockNumber,
-		BlockHash:     common.HexToHash("0x" + string(blockNumber)),
-		TokenAddress:  token.Address,
-		From:          bot,
-		To:            s.uniswapV3Router,
-		Amount:        amountRaw,
-		Timestamp:     time.Now().Unix(),
-		Synthesized:   true,
+		TxHash:       txHash,
+		BlockNumber:  blockNumber,
+		BlockHash:    common.HexToHash(fmt.Sprintf("0x%d", blockNumber)),
+		TokenAddress: token.Address,
+		From:         bot,
+		To:           s.uniswapV3Router,
+		Amount:       amountRaw,
+		Timestamp:    time.Now().Unix(),
+		Synthesized:  true,
 	}
 
 	slog.Info("🦈 [MEV] Generated",
@@ -302,20 +303,23 @@ func (s *DeFiSimulator) generateMEVTransfer(blockNumber uint64, seqNum int64) *S
 // 模拟真实交易：大部分是小额，少数是巨额
 func (s *DeFiSimulator) generatePowerLawAmount(decimals int) *big.Int {
 	// 使用指数分布生成 [0, 1) 之间的值
-	expValue := rand.ExpFloat64()
+	expValue := mathrand.ExpFloat64()
 
 	// 映射到不同数量级
 	var magnitude float64
 	switch {
 	case expValue < 0.7:
 		// 70% 的小额交易 (1-100 tokens)
-		magnitude = 1 + rand.Float64()*99
+		// #nosec G404
+		magnitude = 1 + mathrand.Float64()*99
 	case expValue < 0.95:
 		// 25% 的中额交易 (100-10000 tokens)
-		magnitude = 100 + rand.Float64()*9900
+		// #nosec G404
+		magnitude = 100 + mathrand.Float64()*9900
 	default:
 		// 5% 的大额交易 (10000-1000000 tokens)
-		magnitude = 10000 + rand.Float64()*990000
+		// #nosec G404
+		magnitude = 10000 + mathrand.Float64()*990000
 	}
 
 	// 应用精度
@@ -334,7 +338,8 @@ func (s *DeFiSimulator) generatePowerLawAmount(decimals int) *big.Int {
 
 // generateLargeAmount 生成大额金额（套利交易）
 func (s *DeFiSimulator) generateLargeAmount(decimals int) *big.Int {
-	base := new(big.Float).SetFloat64(10000 + rand.Float64()*90000) // 10k-100k
+	// #nosec G404
+	base := new(big.Float).SetFloat64(10000 + mathrand.Float64()*90000) // 10k-100k
 	precision := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil))
 	base.Mul(base, precision)
 
@@ -345,7 +350,8 @@ func (s *DeFiSimulator) generateLargeAmount(decimals int) *big.Int {
 
 // generateMegaAmount 生成超大额金额（Flashloan）
 func (s *DeFiSimulator) generateMegaAmount(decimals int) *big.Int {
-	base := new(big.Float).SetFloat64(100000 + rand.Float64()*900000) // 100k-1M
+	// #nosec G404
+	base := new(big.Float).SetFloat64(100000 + mathrand.Float64()*900000) // 100k-1M
 	precision := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil))
 	base.Mul(base, precision)
 
@@ -356,7 +362,8 @@ func (s *DeFiSimulator) generateMegaAmount(decimals int) *big.Int {
 
 // generateMediumAmount 生成中额金额（MEV）
 func (s *DeFiSimulator) generateMediumAmount(decimals int) *big.Int {
-	base := new(big.Float).SetFloat64(1000 + rand.Float64()*9000) // 1k-10k
+	// #nosec G404
+	base := new(big.Float).SetFloat64(1000 + mathrand.Float64()*9000) // 1k-10k
 	precision := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil))
 	base.Mul(base, precision)
 
@@ -375,7 +382,7 @@ func (s *DeFiSimulator) randomUserAddress() common.Address {
 		"0x90F79bf6EB2c4f870365E785982E1f101E93b906",
 		"0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
 	}
-	return common.HexToAddress(addresses[rand.Intn(len(addresses))])
+	return common.HexToAddress(addresses[secureIntn(len(addresses))])
 }
 
 // generateTxHash 生成伪造的交易哈希

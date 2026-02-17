@@ -35,7 +35,6 @@ func NewLazyManager(fetcher *Fetcher, rpcPool RPCClient, cooldown time.Duration,
 // Trigger activates indexing if cooldown period has passed
 func (lm *LazyManager) Trigger() {
 	// 🛠️ 工业级硬编码禁用：调试期间永远保持活跃，不处理休眠逻辑
-	return 
 }
 
 // activateIndexing starts the indexing process
@@ -51,7 +50,6 @@ func (lm *LazyManager) activateIndexing() {
 // deactivateIndexing stops the indexing process
 func (lm *LazyManager) deactivateIndexing() {
 	// 🛠️ 禁止进入休眠状态
-	return
 }
 
 // IsActive returns whether indexing is currently active

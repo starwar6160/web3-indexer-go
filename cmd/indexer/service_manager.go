@@ -62,7 +62,9 @@ func (sm *ServiceManager) StartTailFollow(ctx context.Context, startBlock *big.I
 			// 启动后台协程回填 Gap，不阻塞主 Tail 流程
 			go func() {
 				catchupCtx := context.Background()
-				_ = sm.fetcher.Schedule(catchupCtx, big.NewInt(maxInDB+1), big.NewInt(startNum-1))
+				if err := sm.fetcher.Schedule(catchupCtx, big.NewInt(maxInDB+1), big.NewInt(startNum-1)); err != nil {
+					engine.Logger.Error("failed_to_schedule_catchup", "err", err)
+				}
 			}()
 		}
 	}

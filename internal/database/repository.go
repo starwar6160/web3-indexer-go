@@ -147,7 +147,7 @@ func (r *Repository) UpdateTokenSymbol(tokenAddress, symbol string) error {
 }
 
 // UpdateTokenDecimals 更新代币精度（用于未来扩展）
-func (r *Repository) UpdateTokenDecimals(tokenAddress string, decimals uint8) error {
+func (r *Repository) UpdateTokenDecimals(_ string, _ uint8) error {
 	// 预留方法，当前 schema 没有 decimals 字段
 	// 未来可以添加 token_metadata 表来存储这些信息
 	return nil

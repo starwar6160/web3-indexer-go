@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/jmoiron/sqlx"
 )
 
 // ProcessBlock 处理单个区块（必须在顺序保证下调用）
@@ -44,89 +45,50 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	}()
 
 	// 1. Reorg 检测 (Parent Hash Check)
-	var lastBlock models.Block
-	err = dbTx.GetContext(ctx, &lastBlock,
-		"SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = $1",
-		new(big.Int).Sub(blockNum, big.NewInt(1)).String())
-
-	if err == nil {
-		// 如果找到了上一个区块，检查 Hash 链
-		if lastBlock.Hash != block.ParentHash().Hex() {
-			LogReorgDetected(blockNum.String(), lastBlock.Hash, block.ParentHash().Hex())
-			if p.EventHook != nil {
-				p.EventHook("log", map[string]interface{}{
-					"message": fmt.Sprintf("🚨 REORG DETECTED at #%s! Rolling back...", blockNum.String()),
-					"level":   "error",
-				})
-			}
-			// 只返回错误，不在当前事务内删除（避免被 defer tx.Rollback() 回滚）
-			// 上层会统一处理回滚与重新调度
-			return ReorgError{At: new(big.Int).Set(blockNum)}
-		}
-	} else if err != sql.ErrNoRows {
-		// 数据库查询错误（不是空结果）
-		return fmt.Errorf("failed to query parent block: %w", err)
+	if err := p.handleReorg(ctx, dbTx, blockNum, block.ParentHash()); err != nil {
+		return err
 	}
-	// 如果是第一个区块或父块不存在（可能是同步开始），继续处理
 
 	// 2. 写入 Block
-	var baseFee *models.BigInt
-	if block.BaseFee() != nil {
-		baseFee = &models.BigInt{Int: block.BaseFee()}
-	}
-
-	// 🛡️ 工业级逻辑守卫：哈希自指检测
-	if block.Hash().Hex() == block.ParentHash().Hex() {
-		Logger.Error("❌ FATAL: Block hash equals parent hash!",
-			slog.String("block", blockNum.String()),
-			slog.String("hash", block.Hash().Hex()))
-		return fmt.Errorf("hash self-reference detected at block %s", blockNum.String())
-	}
-
-	// 🛡️ 工业级逻辑守卫：零值父哈希防护 (针对非 Genesis 块)
-	parentHashHex := block.ParentHash().Hex()
-	if blockNum.Cmp(big.NewInt(0)) > 0 && (parentHashHex == "" || parentHashHex == "0x0000000000000000000000000000000000000000000000000000000000000000") {
-		Logger.Warn("⚠️ Zero parent hash detected for non-genesis block",
-			slog.String("block", blockNum.String()))
-		// 允许继续，但在日志中记录，这通常发生在链的极早期或者测试网模拟中
-	}
-
-	_, err = dbTx.NamedExecContext(ctx, `
-		INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, base_fee_per_gas, transaction_count)
-		VALUES (:number, :hash, :parent_hash, :timestamp, :gas_limit, :gas_used, :base_fee_per_gas, :transaction_count)
-		ON CONFLICT (number) DO UPDATE SET
-			hash = EXCLUDED.hash,
-			parent_hash = EXCLUDED.parent_hash,
-			timestamp = EXCLUDED.timestamp,
-			gas_limit = EXCLUDED.gas_limit,
-			gas_used = EXCLUDED.gas_used,
-			base_fee_per_gas = EXCLUDED.base_fee_per_gas,
-			transaction_count = EXCLUDED.transaction_count,
-			processed_at = NOW()
-	`, models.Block{
-		Number:           models.BigInt{Int: blockNum},
-		Hash:             block.Hash().Hex(),
-		ParentHash:       block.ParentHash().Hex(),
-		Timestamp:        block.Time(),
-		GasLimit:         block.GasLimit(),
-		GasUsed:          block.GasUsed(),
-		BaseFeePerGas:    baseFee,
-		TransactionCount: len(block.Transactions()),
-	})
-	if err != nil {
-		LogTransactionFailed("insert_block", blockNum.String(), err)
-		return fmt.Errorf("failed to insert block: %w", err)
+	if err := p.insertBlock(ctx, dbTx, block); err != nil {
+		return err
 	}
 
 	// 3. 处理链上活动
-	var activities []models.Transfer        // 用于实时推送
-	txWithRealLogs := make(map[string]bool) // track tx hashes that produced logs
-	
-	// A. 扫描所有日志 (全量嗅探模式)
-	for _, vLog := range data.Logs {
+	activities, _ := p.processActivities(ctx, dbTx, blockNum, data.Logs, block.Transactions())
+
+	// 🚀 模拟模式：强制生成 Synthetic Transfer（让空链也有数据）
+	activities = p.processAnvilSynthetic(ctx, dbTx, blockNum, block, activities)
+
+	// 4. 更新 Checkpoint（按批次更新以提升性能）
+	p.handleCheckpoint(ctx, dbTx, blockNum, data.RangeEnd)
+
+	// 5. 提交事务
+	if err := dbTx.Commit(); err != nil {
+		LogTransactionFailed("commit_transaction", blockNum.String(), err)
+		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
+	}
+
+	// 🚀 核心增强：执行 Gas 大户分析
+	leaderboard := p.AnalyzeGas(block)
+
+	// 6. 实时事件推送 (在事务成功后)
+	p.pushEvents(block, activities, leaderboard)
+
+	// 记录处理耗时 and 当前同步高度
+	p.updateMetrics(start, block)
+
+	return nil
+}
+
+func (p *Processor) processActivities(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, logs []types.Log, transactions types.Transactions) ([]models.Transfer, map[string]bool) {
+	var activities []models.Transfer
+	txWithRealLogs := make(map[string]bool)
+
+	for _, vLog := range logs {
 		activity := p.ProcessLog(vLog)
 		if activity != nil {
-			_, err = dbTx.NamedExecContext(ctx, `
+			_, err := dbTx.NamedExecContext(ctx, `
 				INSERT INTO transfers
 				(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
 				VALUES
@@ -140,231 +102,210 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		}
 	}
 
-	// B. 扫描交易列表 (捕获部署与原生转账)
-	syntheticIdx := uint(20000) // 业务逻辑偏移量，避免与 LogIndex 冲突
-	for _, tx := range block.Transactions() {
+	syntheticIdx := uint(20000)
+	for _, tx := range transactions {
 		msg, err := types.Sender(types.LatestSignerForChainID(big.NewInt(p.chainID)), tx)
 		fromAddr := "0xunknown"
 		if err == nil {
 			fromAddr = msg.Hex()
 		}
 
-		// 1. 🚀 优先级 A：识别已知实体（如领水）
-		faucetLabel := GetAddressLabel(fromAddr)
-		if faucetLabel != "" {
-			faucetActivity := models.Transfer{
-				BlockNumber:  models.BigInt{Int: blockNum},
-				TxHash:       tx.Hash().Hex(),
-				LogIndex:     syntheticIdx,
-				From:         strings.ToLower(fromAddr),
-				To:           strings.ToLower(func() string {
-					if tx.To() == nil { return "0xcontract_creation" }
-					return tx.To().Hex()
-				}()),
-				Amount:       models.NewUint256FromBigInt(tx.Value()),
-				TokenAddress: "0x0000000000000000000000000000000000000000",
-				Symbol:       faucetLabel,
-				Type:         "FAUCET_CLAIM",
-			}
-			_, _ = dbTx.NamedExecContext(ctx, `
-				INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
-				VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
-				ON CONFLICT DO NOTHING
-			`, faucetActivity)
-			activities = append(activities, faucetActivity)
+		if faucet := p.detectFaucet(ctx, dbTx, blockNum, tx, fromAddr, syntheticIdx); faucet != nil {
+			activities = append(activities, *faucet)
 			syntheticIdx++
 			continue
 		}
 
-		// 2. 🚀 优先级 B：识别合约部署
-		if tx.To() == nil {
-			deployActivity := models.Transfer{
-				BlockNumber:  models.BigInt{Int: blockNum},
-				TxHash:       tx.Hash().Hex(),
-				LogIndex:     syntheticIdx,
-				From:         strings.ToLower(fromAddr),
-				To:           "0xcontract_creation",
-				Amount:       models.NewUint256FromBigInt(tx.Value()),
-				TokenAddress: "0x0000000000000000000000000000000000000000",
-				Symbol:       "EVM",
-				Type:         "DEPLOY",
-			}
-			_, _ = dbTx.NamedExecContext(ctx, `
-				INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
-				VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
-				ON CONFLICT DO NOTHING
-			`, deployActivity)
-			activities = append(activities, deployActivity)
+		if deploy := p.detectDeploy(ctx, dbTx, blockNum, tx, fromAddr, syntheticIdx); deploy != nil {
+			activities = append(activities, *deploy)
 			syntheticIdx++
 			continue
 		}
 
-		// 3. 🚀 优先级 C：识别普通原生 ETH 转账
-		if tx.Value().Cmp(big.NewInt(0)) > 0 && !txWithRealLogs[tx.Hash().Hex()] {
-			ethActivity := models.Transfer{
-				BlockNumber:  models.BigInt{Int: blockNum},
-				TxHash:       tx.Hash().Hex(),
-				LogIndex:     syntheticIdx,
-				From:         strings.ToLower(fromAddr),
-				To:           strings.ToLower(tx.To().Hex()),
-				Amount:       models.NewUint256FromBigInt(tx.Value()),
-				TokenAddress: "0x0000000000000000000000000000000000000000",
-				Symbol:       "ETH",
-				Type:         "ETH_TRANSFER",
-			}
-			_, _ = dbTx.NamedExecContext(ctx, `
-				INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
-				VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
-				ON CONFLICT DO NOTHING
-			`, ethActivity)
-			activities = append(activities, ethActivity)
+		if eth := p.detectEthTransfer(ctx, dbTx, blockNum, tx, fromAddr, syntheticIdx, txWithRealLogs); eth != nil {
+			activities = append(activities, *eth)
 			syntheticIdx++
 		}
 	}
+	return activities, txWithRealLogs
+}
 
-	// 🚀 模拟模式：强制生成 Synthetic Transfer（让空链也有数据）
-	// 诊断：如果这个区块没有任何 Transfer（real + synthetic），则伪造一个
-	if p.enableSimulator && p.networkMode == "anvil" {
-		Logger.Info("🔍 [ANVIL] Checking if synthetic transfer needed",
-			slog.String("block", blockNum.String()),
-			slog.Int("existing_transfers", len(activities)),
-		)
+func (p *Processor) detectFaucet(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
+	faucetLabel := GetAddressLabel(fromAddr)
+	if faucetLabel == "" {
+		return nil
 	}
 
-	if len(activities) == 0 && p.enableSimulator && p.networkMode == "anvil" {
-		// 生成一个模拟的 ETH 转账
-		mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Anvil Account #0
-		mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"   // Anvil Account #1
-		mockAmount := big.NewInt(int64(blockNum.Int64() % 1000000000)) // 伪随机金额
+	activity := &models.Transfer{
+		BlockNumber: models.BigInt{Int: blockNum},
+		TxHash:      tx.Hash().Hex(),
+		LogIndex:    idx,
+		From:        strings.ToLower(fromAddr),
+		To: strings.ToLower(func() string {
+			if tx.To() == nil {
+				return "0xcontract_creation"
+			}
+			return tx.To().Hex()
+		}()),
+		Amount:       models.NewUint256FromBigInt(tx.Value()),
+		TokenAddress: "0x0000000000000000000000000000000000000000",
+		Symbol:       faucetLabel,
+		Type:         "FAUCET_CLAIM",
+	}
+	if _, err := dbTx.NamedExecContext(ctx, `INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type) VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type) ON CONFLICT DO NOTHING`, activity); err != nil {
+		Logger.Warn("failed_to_insert_detected_activity", "err", err)
+	}
+	return activity
+}
 
-		anvilTransfer := &models.Transfer{
-			BlockNumber:  models.BigInt{Int: blockNum},
-			TxHash:       common.BytesToHash(append(block.Hash().Bytes(), []byte("ANVIL_MOCK")...)).Hex(),
-			LogIndex:     99999, // 特殊标记
-			From:         strings.ToLower(mockFrom),
-			To:           strings.ToLower(mockTo),
-			Amount:       models.NewUint256FromBigInt(mockAmount),
-			TokenAddress: "0x0000000000000000000000000000000000000000", // ETH
-			Type:         "TRANSFER",
-		}
+func (p *Processor) detectDeploy(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
+	if tx.To() != nil {
+		return nil
+	}
+	activity := &models.Transfer{
+		BlockNumber:  models.BigInt{Int: blockNum},
+		TxHash:       tx.Hash().Hex(),
+		LogIndex:     idx,
+		From:         strings.ToLower(fromAddr),
+		To:           "0xcontract_creation",
+		Amount:       models.NewUint256FromBigInt(tx.Value()),
+		TokenAddress: "0x0000000000000000000000000000000000000000",
+		Symbol:       "EVM",
+		Type:         "DEPLOY",
+	}
+	if _, err := dbTx.NamedExecContext(ctx, `INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type) VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type) ON CONFLICT DO NOTHING`, activity); err != nil {
+		Logger.Warn("failed_to_insert_detected_activity", "err", err)
+	}
+	return activity
+}
 
-		_, err = dbTx.NamedExecContext(ctx, `
-			INSERT INTO transfers
-			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
-			VALUES
-			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
-			ON CONFLICT (block_number, log_index) DO NOTHING
-		`, anvilTransfer)
+func (p *Processor) detectEthTransfer(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint, txWithRealLogs map[string]bool) *models.Transfer {
+	if tx.Value().Cmp(big.NewInt(0)) <= 0 || txWithRealLogs[tx.Hash().Hex()] {
+		return nil
+	}
+	activity := &models.Transfer{
+		BlockNumber:  models.BigInt{Int: blockNum},
+		TxHash:       tx.Hash().Hex(),
+		LogIndex:     idx,
+		From:         strings.ToLower(fromAddr),
+		To:           strings.ToLower(tx.To().Hex()),
+		Amount:       models.NewUint256FromBigInt(tx.Value()),
+		TokenAddress: "0x0000000000000000000000000000000000000000",
+		Symbol:       "ETH",
+		Type:         "ETH_TRANSFER",
+	}
+	if _, err := dbTx.NamedExecContext(ctx, `INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type) VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type) ON CONFLICT DO NOTHING`, activity); err != nil {
+		Logger.Warn("failed_to_insert_detected_activity", "err", err)
+	}
+	return activity
+}
 
-		if err == nil {
-			activities = append(activities, *anvilTransfer)
-			Logger.Info("🏭 [ANVIL] Synthetic Transfer generated",
-				slog.String("stage", "PROCESSOR"),
-				slog.String("block", blockNum.String()),
-				slog.String("from", mockFrom),
-				slog.String("to", mockTo),
-				slog.String("amount", mockAmount.String()),
-			)
-		} else {
-			Logger.Error("❌ [ANVIL] Failed to insert synthetic transfer",
-				slog.String("block", blockNum.String()),
-				slog.String("error", err.Error()),
-			)
-		}
+func (p *Processor) processAnvilSynthetic(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, block *types.Block, activities []models.Transfer) []models.Transfer {
+	if len(activities) > 0 || !p.enableSimulator || p.networkMode != "anvil" {
+		return activities
 	}
 
-	// 4. 更新 Checkpoint（按批次更新以提升性能）
+	mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+	mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"
+	mockAmount := big.NewInt(blockNum.Int64() % 1000000000)
+
+	anvilTransfer := models.Transfer{
+		BlockNumber:  models.BigInt{Int: blockNum},
+		TxHash:       common.BytesToHash(append(block.Hash().Bytes(), []byte("ANVIL_MOCK")...)).Hex(),
+		LogIndex:     99999,
+		From:         strings.ToLower(mockFrom),
+		To:           strings.ToLower(mockTo),
+		Amount:       models.NewUint256FromBigInt(mockAmount),
+		TokenAddress: "0x0000000000000000000000000000000000000000",
+		Type:         "TRANSFER",
+	}
+
+	if _, err := dbTx.NamedExecContext(ctx, `INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type) VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type) ON CONFLICT DO NOTHING`, anvilTransfer); err != nil {
+		Logger.Error("failed_to_insert_anvil_synthetic_transfer", "err", err)
+	}
+	return append(activities, anvilTransfer)
+}
+
+func (p *Processor) handleCheckpoint(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, rangeEnd *big.Int) {
 	p.blocksSinceLastCheckpoint++
-
-	// 如果是范围抓取的最后一个块，或者达到了批次上限
 	checkpointTarget := blockNum
 	shouldUpdateCheckpoint := p.blocksSinceLastCheckpoint >= p.checkpointBatch
-
-	if data.RangeEnd != nil && data.RangeEnd.Cmp(blockNum) >= 0 {
-		checkpointTarget = data.RangeEnd
+	if rangeEnd != nil && rangeEnd.Cmp(blockNum) >= 0 {
+		checkpointTarget = rangeEnd
 		shouldUpdateCheckpoint = true
 	}
-
 	if shouldUpdateCheckpoint {
 		if err := p.updateCheckpointInTx(ctx, dbTx, p.chainID, checkpointTarget); err != nil {
-			return fmt.Errorf("failed to update checkpoint for block %s: %w", checkpointTarget.String(), err)
+			Logger.Warn("failed_to_update_checkpoint", "err", err)
 		}
 		p.blocksSinceLastCheckpoint = 0
-		Logger.Debug("checkpoint_persisted", slog.String("block", checkpointTarget.String()))
 	}
+}
 
-	// 5. 提交事务
-	if err := dbTx.Commit(); err != nil {
-		LogTransactionFailed("commit_transaction", blockNum.String(), err)
-		return fmt.Errorf("failed to commit transaction for block %s: %w", blockNum.String(), err)
+func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer, leaderboard []models.GasSpender) {
+	if p.EventHook == nil {
+		return
 	}
+	// #nosec G115
+	latency := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
+	if latency < 0 {
+		latency = 0
+	}
+	p.EventHook("block", map[string]interface{}{
+		"number":      block.NumberU64(),
+		"hash":        block.Hash().Hex(),
+		"parent_hash": block.ParentHash().Hex(),
+		"timestamp":   block.Time(),
+		"tx_count":    len(block.Transactions()),
+		"latency_ms":  latency,
+	})
+	p.EventHook("gas_leaderboard", leaderboard)
+	for _, t := range activities {
+		p.EventHook("transfer", map[string]interface{}{"tx_hash": t.TxHash, "from": t.From, "to": t.To, "value": t.Amount.String(), "block_number": t.BlockNumber.String(), "token_address": t.TokenAddress, "symbol": t.Symbol, "type": t.Type, "log_index": t.LogIndex})
+	}
+}
 
-	// 🚀 核心增强：执行 Gas 大户分析
-	leaderboard := p.AnalyzeGas(block)
-
-	// 6. 实时事件推送 (在事务成功后)
-	if p.EventHook != nil {
-		// 计算端到端延迟 (毫秒)
-		// #nosec G115 - Block time fits in int64
-		latency := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
+func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
+	if p.metrics == nil {
+		return
+	}
+	p.metrics.RecordBlockProcessed(time.Since(start))
+	if block.Number().IsInt64() {
+		p.metrics.UpdateCurrentSyncHeight(block.Number().Int64())
+		// #nosec G115
+		latency := time.Since(time.Unix(int64(block.Time()), 0)).Seconds()
 		if latency < 0 {
 			latency = 0
 		}
-
-		p.EventHook("block", map[string]interface{}{
-			"number":      block.NumberU64(),
-			"hash":        block.Hash().Hex(),
-			"parent_hash": block.ParentHash().Hex(), // 🚀 补齐这个关键字段
-			"timestamp":   block.Time(),
-			"tx_count":    len(block.Transactions()),
-			"latency_ms":  latency,
-		})
-
-		p.EventHook("log", map[string]interface{}{
-			"message": fmt.Sprintf("✅ Processed Block #%d (%d txs)", block.NumberU64(), len(block.Transactions())),
-			"level":   "info",
-		})
-
-		// 🚀 推送 Gas 排行榜
-		p.EventHook("gas_leaderboard", leaderboard)
-
-		for _, t := range activities {
-			p.EventHook("transfer", map[string]interface{}{
-				"tx_hash":       t.TxHash,
-				"from":          t.From,
-				"to":            t.To,
-				"value":         t.Amount.String(),
-				"block_number":  t.BlockNumber.String(),
-				"token_address": t.TokenAddress,
-				"symbol":        t.Symbol, // 🎨 添加 Symbol 字段供前端渲染 Token Badge
-				"type":          t.Type,   // 🚀 新增：活动类型
-				"log_index":     t.LogIndex,
-			})
-		}
+		p.metrics.UpdateE2ELatency(latency)
 	}
+}
 
-	// 记录处理耗时 and 当前同步高度
-	if p.metrics != nil {
-		p.metrics.RecordBlockProcessed(time.Since(start))
-		// 更新当前同步高度 gauge (增加溢出安全性检查)
-		if blockNum.IsInt64() {
-			p.metrics.UpdateCurrentSyncHeight(blockNum.Int64())
-			slog.Debug("metrics_updated", "height", blockNum.Int64())
-
-			// 计算并更新高精度 E2E Latency
-			// #nosec G115
-			blockTime := time.Unix(int64(block.Time()), 0)
-			latency := time.Since(blockTime).Seconds()
-			if latency < 0 {
-				latency = 0
-			}
-			p.metrics.UpdateE2ELatency(latency)
-		} else {
-			Logger.Warn("block_number_overflows_int64_for_metrics", slog.String("block", blockNum.String()))
-		}
+func (p *Processor) handleReorg(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, parentHash common.Hash) error {
+	var lastBlock models.Block
+	err := dbTx.GetContext(ctx, &lastBlock, "SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = $1", new(big.Int).Sub(blockNum, big.NewInt(1)).String())
+	if err == nil && lastBlock.Hash != parentHash.Hex() {
+		return ReorgError{At: new(big.Int).Set(blockNum)}
 	}
-
 	return nil
+}
+
+func (p *Processor) insertBlock(ctx context.Context, dbTx *sqlx.Tx, block *types.Block) error {
+	var baseFee *models.BigInt
+	if block.BaseFee() != nil {
+		baseFee = &models.BigInt{Int: block.BaseFee()}
+	}
+	_, err := dbTx.NamedExecContext(ctx, `INSERT INTO blocks (number, hash, parent_hash, timestamp, gas_limit, gas_used, base_fee_per_gas, transaction_count) VALUES (:number, :hash, :parent_hash, :timestamp, :gas_limit, :gas_used, :base_fee_per_gas, :transaction_count) ON CONFLICT (number) DO UPDATE SET hash = EXCLUDED.hash, parent_hash = EXCLUDED.parent_hash, timestamp = EXCLUDED.timestamp, gas_limit = EXCLUDED.gas_limit, gas_used = EXCLUDED.gas_used, base_fee_per_gas = EXCLUDED.base_fee_per_gas, transaction_count = EXCLUDED.transaction_count, processed_at = NOW()`, models.Block{
+		Number:           models.BigInt{Int: block.Number()},
+		Hash:             block.Hash().Hex(),
+		ParentHash:       block.ParentHash().Hex(),
+		Timestamp:        block.Time(),
+		GasLimit:         block.GasLimit(),
+		GasUsed:          block.GasUsed(),
+		BaseFeePerGas:    baseFee,
+		TransactionCount: len(block.Transactions()),
+	})
+	return err
 }
 
 // AnalyzeGas 实时分析区块中的 Gas 消耗大户

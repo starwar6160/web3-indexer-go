@@ -58,7 +58,7 @@ func Load() *Config {
 	enableSimulatorStr := os.Getenv("ENABLE_SIMULATOR")
 	var enableSimulator bool
 	if enableSimulatorStr != "" {
-		enableSimulator = strings.ToLower(enableSimulatorStr) == trueVal
+		enableSimulator = strings.EqualFold(enableSimulatorStr, trueVal)
 	} else {
 		// 默认逻辑：Demo 模式或本地 Anvil 自动开启
 		enableSimulator = demoMode || chainID == 31337
