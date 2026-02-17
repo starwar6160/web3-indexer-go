@@ -42,9 +42,10 @@ type Config struct {
 }
 
 func Load() *Config {
-	if err := godotenv.Load(); err != nil {
-		log.Printf("Note: .env file not loaded: %v", err)
-	}
+	// 🚀 工业级增强：递归寻找 .env 文件，解决从不同子目录启动时的路径问题
+	_ = godotenv.Load() // 尝试当前目录
+	_ = godotenv.Load("../.env") // 尝试上一级
+	_ = godotenv.Load("../../.env") // 尝试上两级
 
 	const trueVal = "true"
 
@@ -87,7 +88,7 @@ func Load() *Config {
 	gasSafetyMargin := int(getEnvAsInt64("GAS_SAFETY_MARGIN", 20))
 	checkpointBatch := int(getEnvAsInt64("CHECKPOINT_BATCH", 100))
 	retryQueueSize := int(getEnvAsInt64("RETRY_QUEUE_SIZE", 500))
-	maxSyncBatch := int(getEnvAsInt64("MAX_SYNC_BATCH", 5)) // Default to 5 for testnet safety
+	maxSyncBatch := int(getEnvAsInt64("MAX_SYNC_BATCH", 20)) // 提高至 20 块，对抗 1.0 TPS 限制
 
 	// Check if we're connecting to a testnet
 	isTestnet := false
