@@ -25,13 +25,12 @@ func (r *repositoryAdapter) UpdateTokenSymbol(tokenAddress, symbol string) error
 	return err
 }
 
-func (r *repositoryAdapter) UpdateTokenDecimals(tokenAddress string, decimals uint8) error {
+func (r *repositoryAdapter) UpdateTokenDecimals(_ string, _ uint8) error {
 	// 预留方法，当前 schema 没有 decimals 字段
 	return nil
 }
 
 // TransferEventHash defined in signatures.go
-
 
 // ErrReorgDetected is returned when a blockchain reorganization is detected
 var ErrReorgDetected = errors.New("reorg detected: parent hash mismatch")
@@ -93,7 +92,7 @@ func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int
 		if enhancedPool, ok := client.(*EnhancedRPCClientPool); ok {
 			metadataClient = enhancedPool.GetClientForMetadata()
 		}
-		
+
 		if metadataClient != nil {
 			// 使用 Repository 包装 db 以满足 DBUpdater 接口
 			repo := &repositoryAdapter{db: db}
@@ -150,6 +149,11 @@ func (p *Processor) SetWatchedAddresses(addresses []string) {
 		p.watchedAddresses[common.HexToAddress(addr)] = true
 		Logger.Info("processor_watching_address", slog.String("address", strings.ToLower(addr)))
 	}
+}
+
+// GetRPCClient returns the RPC client used by the processor
+func (p *Processor) GetRPCClient() RPCClient {
+	return p.client
 }
 
 // ProcessBlockWithRetry 带重试的区块处理

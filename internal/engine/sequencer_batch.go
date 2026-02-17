@@ -112,10 +112,11 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 		Logger.Warn("sequencer_fetch_error_retrying", slog.String("block", blockNum.String()))
 		if blockNum != nil {
 			var err error
-			data.Block, err = s.processor.client.BlockByNumber(ctx, blockNum)
+			rpcClient := s.processor.GetRPCClient()
+			data.Block, err = rpcClient.BlockByNumber(ctx, blockNum)
 			if err == nil {
 				q := ethereum.FilterQuery{FromBlock: blockNum, ToBlock: blockNum, Topics: [][]common.Hash{{TransferEventHash}}}
-				data.Logs, err = s.processor.client.FilterLogs(ctx, q)
+				data.Logs, err = rpcClient.FilterLogs(ctx, q)
 				if err == nil {
 					data.Err = nil
 					Logger.Info("sequencer_retry_success", slog.String("block", blockNum.String()))
