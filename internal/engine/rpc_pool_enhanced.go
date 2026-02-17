@@ -333,10 +333,10 @@ func (p *EnhancedRPCClientPool) enforceSyncBatchLimit() error {
 		p.currentSyncBatch++
 
 		// 🚀 工业级优化：提高批次上限并缩短惩罚停顿，使 TPS 更加平滑
-		if p.currentSyncBatch > 10 {
+		if p.currentSyncBatch > 50 {
 			// Wait before allowing more requests
-			log.Printf("Sync batch threshold reached (%d), short pause for 1s to smooth throughput", p.currentSyncBatch)
-			time.Sleep(1 * time.Second)
+			log.Printf("Sync batch threshold reached (%d), micro-pause for 200ms to smooth throughput", p.currentSyncBatch)
+			time.Sleep(200 * time.Millisecond)
 			p.currentSyncBatch = 0
 		}
 	}
