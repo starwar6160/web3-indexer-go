@@ -147,9 +147,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 				_, err = dbTx.NamedExecContext(ctx, `
 					INSERT INTO transfers
-					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
+					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
 					VALUES
-					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
+					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
 					ON CONFLICT (block_number, log_index) DO NOTHING
 				`, transfer)
 				if err != nil {
@@ -231,9 +231,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 				_, err = dbTx.NamedExecContext(ctx, `
 					INSERT INTO transfers
-					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
+					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
 					VALUES
-					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
+					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
 					ON CONFLICT (block_number, log_index) DO NOTHING
 				`, syntheticTransfer)
 				if err == nil {
@@ -274,9 +274,9 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 
 		_, err = dbTx.NamedExecContext(ctx, `
 			INSERT INTO transfers
-			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
+			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
 			VALUES
-			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
+			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
 			ON CONFLICT (block_number, log_index) DO NOTHING
 		`, anvilTransfer)
 
