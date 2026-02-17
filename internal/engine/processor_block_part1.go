@@ -117,135 +117,80 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		return fmt.Errorf("failed to insert block: %w", err)
 	}
 
-	// 3. 处理 Transfer 事件（如果日志中有）
-	var transfers []models.Transfer         // 用于实时推送
-	txWithRealLogs := make(map[string]bool) // track tx hashes that produced real Transfer logs
-	if len(data.Logs) > 0 {
-		Logger.Debug("scanning_logs",
-			slog.String("block", blockNum.String()),
-			slog.Int("logs_count", len(data.Logs)),
-		)
-	}
-
+	// 3. 处理链上活动
+	var activities []models.Transfer        // 用于实时推送
+	txWithRealLogs := make(map[string]bool) // track tx hashes that produced logs
+	
+	// A. 扫描所有日志 (全量嗅探模式)
 	for _, vLog := range data.Logs {
-		// 🚀 工业级放开：只要是标准的 Transfer 事件 (Topic0 匹配)，直接进入处理流程
-		if len(vLog.Topics) > 0 && vLog.Topics[0] == TransferEventHash {
-			Logger.Info("✨ 发现全网 Transfer 事件",
-				slog.String("stage", "PROCESSOR"),
-				slog.String("tx_hash", vLog.TxHash.Hex()),
-				slog.String("contract", vLog.Address.Hex()),
-			)
-
-			transfer := p.ExtractTransfer(vLog)
-			if transfer != nil {
-				Logger.Info("📦 解析成功，准备入库",
-					slog.String("stage", "PROCESSOR"),
-					slog.String("from", transfer.From),
-					slog.String("to", transfer.To),
-					slog.String("amount", transfer.Amount.String()),
-				)
-
-				_, err = dbTx.NamedExecContext(ctx, `
-					INSERT INTO transfers
-					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
-					VALUES
-					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
-					ON CONFLICT (block_number, log_index) DO NOTHING
-				`, transfer)
-				if err != nil {
-					Logger.Error("❌ 数据库写入失败",
-						slog.String("stage", "PROCESSOR"),
-						slog.String("error", err.Error()),
-						slog.String("tx_hash", transfer.TxHash),
-					)
-					if p.metrics != nil {
-						p.metrics.RecordTransferFailed()
-					}
-					return fmt.Errorf("failed to insert transfer at block %s: %w", blockNum.String(), err)
-				}
-				txWithRealLogs[transfer.TxHash] = true
-				transfers = append(transfers, *transfer)
-				if p.metrics != nil {
-					p.metrics.RecordTransferProcessed()
-				}
+		activity := p.ProcessLog(vLog)
+		if activity != nil {
+			_, err = dbTx.NamedExecContext(ctx, `
+				INSERT INTO transfers
+				(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
+				VALUES
+				(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
+				ON CONFLICT (block_number, log_index) DO NOTHING
+			`, activity)
+			if err == nil {
+				txWithRealLogs[activity.TxHash] = true
+				activities = append(activities, *activity)
 			}
 		}
 	}
 
-	// Fallback: Scan transactions for direct calls to watched addresses (ONLY in anvil mode)
-	if p.networkMode == "anvil" {
-		Logger.Debug("fallback_scanning_transactions",
-			slog.String("block", blockNum.String()),
-			slog.Int("tx_count", len(data.Block.Transactions())),
-		)
-		syntheticIdx := uint(10000) // high base to avoid conflict with real log_index
-		for _, tx := range data.Block.Transactions() {
-			if tx.To() != nil {
-				txToLow := strings.ToLower(tx.To().Hex())
-				
-				// 🚀 工业级放开：如果没有关注地址，则把每一笔交易都视为“发现匹配交易”
-				isMatched := (len(p.watchedAddresses) == 0)
-				if !isMatched {
-					for addr := range p.watchedAddresses {
-						if strings.ToLower(addr.Hex()) == txToLow {
-							isMatched = true
-							break
-						}
-					}
-				}
+	// B. 扫描交易列表 (捕获部署与原生转账)
+	syntheticIdx := uint(20000) // 业务逻辑偏移量，避免与 LogIndex 冲突
+	for _, tx := range block.Transactions() {
+		msg, err := types.Sender(types.LatestSignerForChainID(big.NewInt(p.chainID)), tx)
+		fromAddr := "0xunknown"
+		if err == nil {
+			fromAddr = msg.Hex()
+		}
 
-				if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
-					toAddr := txToLow
-					Logger.Info("🎯 发现匹配交易",
-						slog.String("stage", "PROCESSOR"),
-						slog.String("tx_hash", tx.Hash().Hex()),
-						slog.String("to", txToLow),
-					)
-
-					// 构造一个合成的 Transfer 事件 (尝试从交易中提取真实地址)
-					input := tx.Data()
-					syntheticAmount := big.NewInt(1000) // 默认值
-					if len(input) >= 68 {
-						// 提取第 4-36 字节作为 To 地址 (ERC20 transfer 参数)
-						toAddr = common.BytesToAddress(input[16:36]).Hex()
-						// 提取最后 32 字节作为金额
-						syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
-					}
-
-					// 尝试获取发送者 (使用正确的 EIP155 Signer)
-					fromAddr := "[Contract_Call]"
-					signer := types.LatestSignerForChainID(big.NewInt(p.chainID))
-					if sender, err := types.Sender(signer, tx); err == nil {
-						fromAddr = sender.Hex()
-					}
-
-					syntheticTransfer := &models.Transfer{
-						BlockNumber:  models.BigInt{Int: blockNum},
-						TxHash:       tx.Hash().Hex(),
-						LogIndex:     syntheticIdx,
-						From:         strings.ToLower(fromAddr),
-						To:           strings.ToLower(toAddr),
-						Amount:       models.NewUint256FromBigInt(syntheticAmount),
-						TokenAddress: txToLow,
-					}
-					syntheticIdx++
-
-					_, err = dbTx.NamedExecContext(ctx, `
-						INSERT INTO transfers
-						(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
-						VALUES
-						(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
-						ON CONFLICT (block_number, log_index) DO NOTHING
-					`, syntheticTransfer)
-					if err == nil {
-						transfers = append(transfers, *syntheticTransfer)
-						Logger.Info("✅ Synthetic Transfer saved to DB",
-							slog.String("stage", "PROCESSOR"),
-							slog.String("tx_hash", tx.Hash().Hex()),
-						)
-					}
-				}
+		// 1. 识别合约部署
+		if tx.To() == nil {
+			deployActivity := models.Transfer{
+				BlockNumber:  models.BigInt{Int: blockNum},
+				TxHash:       tx.Hash().Hex(),
+				LogIndex:     syntheticIdx,
+				From:         strings.ToLower(fromAddr),
+				To:           "0xcontract_creation",
+				Amount:       models.NewUint256FromBigInt(tx.Value()),
+				TokenAddress: "0x0000000000000000000000000000000000000000",
+				Symbol:       "EVM",
+				Type:         "DEPLOY",
 			}
+			_, _ = dbTx.NamedExecContext(ctx, `
+				INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
+				VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
+				ON CONFLICT DO NOTHING
+			`, deployActivity)
+			activities = append(activities, deployActivity)
+			syntheticIdx++
+			continue
+		}
+
+		// 2. 识别显著的原生 ETH 转账 (比如非零转账且未被 Log 捕获)
+		if tx.Value().Cmp(big.NewInt(0)) > 0 && !txWithRealLogs[tx.Hash().Hex()] {
+			ethActivity := models.Transfer{
+				BlockNumber:  models.BigInt{Int: blockNum},
+				TxHash:       tx.Hash().Hex(),
+				LogIndex:     syntheticIdx,
+				From:         strings.ToLower(fromAddr),
+				To:           strings.ToLower(tx.To().Hex()),
+				Amount:       models.NewUint256FromBigInt(tx.Value()),
+				TokenAddress: "0x0000000000000000000000000000000000000000",
+				Symbol:       "ETH",
+				Type:         "ETH_TRANSFER",
+			}
+			_, _ = dbTx.NamedExecContext(ctx, `
+				INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
+				VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
+				ON CONFLICT DO NOTHING
+			`, ethActivity)
+			activities = append(activities, ethActivity)
+			syntheticIdx++
 		}
 	}
 
@@ -254,11 +199,11 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	if p.enableSimulator && p.networkMode == "anvil" {
 		Logger.Info("🔍 [ANVIL] Checking if synthetic transfer needed",
 			slog.String("block", blockNum.String()),
-			slog.Int("existing_transfers", len(transfers)),
+			slog.Int("existing_transfers", len(activities)),
 		)
 	}
 
-	if len(transfers) == 0 && p.enableSimulator && p.networkMode == "anvil" {
+	if len(activities) == 0 && p.enableSimulator && p.networkMode == "anvil" {
 		// 生成一个模拟的 ETH 转账
 		mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Anvil Account #0
 		mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"   // Anvil Account #1
@@ -272,18 +217,19 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			To:           strings.ToLower(mockTo),
 			Amount:       models.NewUint256FromBigInt(mockAmount),
 			TokenAddress: "0x0000000000000000000000000000000000000000", // ETH
+			Type:         "TRANSFER",
 		}
 
 		_, err = dbTx.NamedExecContext(ctx, `
 			INSERT INTO transfers
-			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
+			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
 			VALUES
-			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
+			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
 			ON CONFLICT (block_number, log_index) DO NOTHING
 		`, anvilTransfer)
 
 		if err == nil {
-			transfers = append(transfers, *anvilTransfer)
+			activities = append(activities, *anvilTransfer)
 			Logger.Info("🏭 [ANVIL] Synthetic Transfer generated",
 				slog.String("stage", "PROCESSOR"),
 				slog.String("block", blockNum.String()),
@@ -348,7 +294,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 			"level":   "info",
 		})
 
-		for _, t := range transfers {
+		for _, t := range activities {
 			p.EventHook("transfer", map[string]interface{}{
 				"tx_hash":       t.TxHash,
 				"from":          t.From,
@@ -357,6 +303,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 				"block_number":  t.BlockNumber.String(),
 				"token_address": t.TokenAddress,
 				"symbol":        t.Symbol, // 🎨 添加 Symbol 字段供前端渲染 Token Badge
+				"type":          t.Type,   // 🚀 新增：活动类型
 				"log_index":     t.LogIndex,
 			})
 		}

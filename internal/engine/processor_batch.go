@@ -51,69 +51,53 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 				}
 			}
 			if isMatched || len(p.watchedAddresses) == 0 {
-				if vLog.Topics[0] == TransferEventHash {
-					transfer := p.ExtractTransfer(vLog)
-					if transfer != nil {
-						validTransfers = append(validTransfers, *transfer)
-						txWithRealLogs[transfer.TxHash] = true
-					}
+				activity := p.ProcessLog(vLog)
+				if activity != nil {
+					validTransfers = append(validTransfers, *activity)
+					txWithRealLogs[activity.TxHash] = true
 				}
 			}
 		}
 
-		// Fallback: Scan transactions for direct calls to watched addresses (ONLY in anvil mode)
 		blockNum := block.Number()
-		if p.networkMode == "anvil" {
-			syntheticIdx := 10000 // high base to avoid conflict with real log_index
-			for _, tx := range block.Transactions() {
-				if tx.To() != nil {
-					txToLow := strings.ToLower(tx.To().Hex())
-					isMatched := false
-					for addr := range p.watchedAddresses {
-						if strings.ToLower(addr.Hex()) == txToLow {
-							isMatched = true
-							break
-						}
-					}
-					if len(p.watchedAddresses) == 0 {
-						isMatched = true
-					}
-					if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
-						Logger.Info("🎯 [Batch] 发现直接调用监控合约的交易（无真实日志，使用合成）",
-							slog.String("tx_hash", tx.Hash().Hex()),
-							slog.String("to", txToLow),
-							slog.String("block", blockNum.String()),
-						)
-						// 尝试从 Data 中提取金额和接收者
-						input := tx.Data()
-						syntheticAmount := big.NewInt(1000)
-						syntheticTo := txToLow
-						if len(input) >= 68 {
-							syntheticTo = common.BytesToAddress(input[16:36]).Hex()
-							syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
-						}
+		// B. 扫描交易列表 (捕获部署与原生转账)
+		syntheticIdx := uint(20000)
+		for _, tx := range block.Transactions() {
+			msg, err := types.Sender(types.LatestSignerForChainID(big.NewInt(chainID)), tx)
+			fromAddr := "0xunknown"
+			if err == nil {
+				fromAddr = msg.Hex()
+			}
 
-						// 尝试获取发送者
-						fromAddr := "0xunknown"
-						signer := types.LatestSignerForChainID(big.NewInt(chainID))
-						if sender, err := types.Sender(signer, tx); err == nil {
-							fromAddr = sender.Hex()
-						}
+			if tx.To() == nil {
+				validTransfers = append(validTransfers, models.Transfer{
+					BlockNumber:  models.BigInt{Int: blockNum},
+					TxHash:       tx.Hash().Hex(),
+					LogIndex:     syntheticIdx,
+					From:         strings.ToLower(fromAddr),
+					To:           "0xcontract_creation",
+					Amount:       models.NewUint256FromBigInt(tx.Value()),
+					TokenAddress: "0x0000000000000000000000000000000000000000",
+					Symbol:       "EVM",
+					Type:         "DEPLOY",
+				})
+				syntheticIdx++
+				continue
+			}
 
-						syntheticTransfer := models.Transfer{
-							BlockNumber: models.BigInt{Int: blockNum},
-							TxHash:      tx.Hash().Hex(),
-							// #nosec G115 - syntheticIdx is a local loop counter
-							LogIndex:     uint(syntheticIdx),
-							From:         strings.ToLower(fromAddr),
-							To:           strings.ToLower(syntheticTo),
-							Amount:       models.NewUint256FromBigInt(syntheticAmount),
-							TokenAddress: txToLow,
-						}
-						validTransfers = append(validTransfers, syntheticTransfer)
-						syntheticIdx++
-					}
-				}
+			if tx.Value().Cmp(big.NewInt(0)) > 0 && !txWithRealLogs[tx.Hash().Hex()] {
+				validTransfers = append(validTransfers, models.Transfer{
+					BlockNumber:  models.BigInt{Int: blockNum},
+					TxHash:       tx.Hash().Hex(),
+					LogIndex:     syntheticIdx,
+					From:         strings.ToLower(fromAddr),
+					To:           strings.ToLower(tx.To().Hex()),
+					Amount:       models.NewUint256FromBigInt(tx.Value()),
+					TokenAddress: "0x0000000000000000000000000000000000000000",
+					Symbol:       "ETH",
+					Type:         "ETH_TRANSFER",
+				})
+				syntheticIdx++
 			}
 		}
 
@@ -128,8 +112,8 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		}
 
 		// 如果这个区块没有任何 Transfer，生成一个 Synthetic Transfer
-		if transfersBeforeThisBlock == 0 && chainID == 31337 {
-			// 🎯 工业级模拟：随机选择主流 ERC20 代币
+		if transfersBeforeThisBlock == 0 && chainID == 31337 && p.enableSimulator {
+			// ... (keep existing synthetic logic if still needed, but check p.enableSimulator)
 			mockTokens := []struct {
 				addr   common.Address
 				symbol string
@@ -155,6 +139,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 				Amount:       models.NewUint256FromBigInt(mockAmount),
 				TokenAddress: strings.ToLower(selectedToken.addr.Hex()), // ✅ 使用真实的代币地址
 				Symbol:       selectedToken.symbol,                      // ✅ 添加 Symbol
+				Type:         "TRANSFER",
 			}
 			validTransfers = append(validTransfers, anvilTransfer)
 
@@ -189,8 +174,15 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 	}
 
 	if len(validTransfers) > 0 {
-		if err := inserter.InsertTransfersBatchTx(ctx, dbTx, validTransfers); err != nil {
-			return fmt.Errorf("batch insert transfers failed: %w", err)
+		_, err := dbTx.NamedExecContext(ctx, `
+			INSERT INTO transfers
+			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
+			VALUES
+			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
+			ON CONFLICT (block_number, log_index) DO NOTHING
+		`, validTransfers)
+		if err != nil {
+			return fmt.Errorf("batch insert activities failed: %w", err)
 		}
 	}
 
@@ -245,6 +237,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 				"block_number":  t.BlockNumber.String(),
 				"token_address": t.TokenAddress,
 				"symbol":        t.Symbol, // 🎨 添加 Symbol 字段供前端渲染 Token Badge
+				"type":          t.Type,   // 🚀 新增：活动类型
 				"log_index":     t.LogIndex,
 			})
 		}

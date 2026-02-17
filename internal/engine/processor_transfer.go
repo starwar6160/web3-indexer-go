@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"log/slog"
 	"math/big"
 	"strings"
 	"web3-indexer-go/internal/models"
@@ -30,54 +29,91 @@ func getTokenSymbol(tokenAddr common.Address) string {
 	return "" // 返回空，触发异步抓取逻辑
 }
 
-// ExtractTransfer 从区块日志中提取 ERC20 Transfer 事件
-func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
-	// 检查是否为 Transfer 事件 (topic[0])
-	if len(vLog.Topics) < 3 || vLog.Topics[0] != TransferEventHash {
+// ProcessLog 从区块日志中提取并识别各种活动（Transfer, Swap, Mint, etc.）
+func (p *Processor) ProcessLog(vLog types.Log) *models.Transfer {
+	if len(vLog.Topics) == 0 {
 		return nil
 	}
 
-	from := common.BytesToAddress(vLog.Topics[1].Bytes())
-	to := common.BytesToAddress(vLog.Topics[2].Bytes())
-	// 使用 uint256 处理金额，保证金融级精度
-	amount := models.NewUint256FromBigInt(new(big.Int).SetBytes(vLog.Data))
+	activityType := "CONTRACT_CALL"
+	from := ""
+	to := ""
+	var amount models.Uint256
 
-	transfer := &models.Transfer{
+	switch vLog.Topics[0] {
+	case TransferEventHash:
+		activityType = "TRANSFER"
+		if len(vLog.Topics) >= 3 {
+			from = common.BytesToAddress(vLog.Topics[1].Bytes()).Hex()
+			to = common.BytesToAddress(vLog.Topics[2].Bytes()).Hex()
+		}
+		amount = models.NewUint256FromBigInt(new(big.Int).SetBytes(vLog.Data))
+
+	case SwapEventHash:
+		activityType = "SWAP"
+		if len(vLog.Topics) >= 3 {
+			from = common.BytesToAddress(vLog.Topics[1].Bytes()).Hex()
+			to = common.BytesToAddress(vLog.Topics[2].Bytes()).Hex()
+		}
+		amount = models.NewUint256FromBigInt(new(big.Int).SetBytes(vLog.Data))
+
+	case ApprovalEventHash:
+		activityType = "APPROVE"
+		if len(vLog.Topics) >= 3 {
+			from = common.BytesToAddress(vLog.Topics[1].Bytes()).Hex()
+			to = common.BytesToAddress(vLog.Topics[2].Bytes()).Hex()
+		}
+		amount = models.NewUint256FromBigInt(new(big.Int).SetBytes(vLog.Data))
+
+	case MintEventHash:
+		activityType = "MINT"
+		from = "0x0000000000000000000000000000000000000000"
+		if len(vLog.Topics) >= 2 {
+			to = common.BytesToAddress(vLog.Topics[1].Bytes()).Hex()
+		}
+		amount = models.NewUint256FromBigInt(new(big.Int).SetBytes(vLog.Data))
+
+	default:
+		// 🚀 记录为通用合约交互
+		activityType = "CONTRACT_EVENT"
+		from = vLog.Address.Hex()
+		to = "Multiple"
+		amount = models.NewUint256(0)
+	}
+
+	activity := &models.Transfer{
 		BlockNumber:  models.BigInt{Int: new(big.Int).SetUint64(vLog.BlockNumber)},
 		TxHash:       vLog.TxHash.Hex(),
 		LogIndex:     vLog.Index,
-		From:         strings.ToLower(from.Hex()),
-		To:           strings.ToLower(to.Hex()),
+		From:         strings.ToLower(from),
+		To:           strings.ToLower(to),
 		Amount:       amount,
 		TokenAddress: strings.ToLower(vLog.Address.Hex()),
+		Type:         activityType,
 	}
 
-	// 🎨 元数据解析逻辑：优先使用基因映射，其次异步抓取
+	// 🎨 元数据解析逻辑
 	staticSymbol := getTokenSymbol(vLog.Address)
 	if staticSymbol != "" {
-		transfer.Symbol = staticSymbol
+		activity.Symbol = staticSymbol
 	} else if p.enricher != nil {
-		tokenAddr := common.HexToAddress(transfer.TokenAddress)
-		transfer.Symbol = p.enricher.GetSymbol(tokenAddr)
+		tokenAddr := common.HexToAddress(activity.TokenAddress)
+		activity.Symbol = p.enricher.GetSymbol(tokenAddr)
 	}
+
+	if activity.Symbol == "" {
+		// 对于普通事件，显示合约缩写
+		activity.Symbol = activity.TokenAddress[:10] + "..."
+	}
+
+	return activity
+}
+
+// ProcessTransaction 扫描原始交易以发现部署或原生 ETH 转账
+func (p *Processor) ProcessTransaction(blockNum *big.Int, txs types.Transactions, chainID int64) []models.Transfer {
+	activities := []models.Transfer{}
 	
-	// 🛡️ 防御性：确保 symbol 不为空（如果基因和 enricher 都没拿到）
-	if transfer.Symbol == "" {
-		transfer.Symbol = transfer.TokenAddress[:10] + "..."
-	}
-
-	// 📊 记录代币转账统计（用于 Prometheus + Grafana）
-	tokenSymbol := transfer.Symbol
-	amountFloat := float64(amount.Int.Uint64()) / 1e18 // 假设 18 位小数，转换为标准单位
-	p.metrics.RecordTokenTransfer(tokenSymbol, amountFloat)
-
-	// 调试日志（可选）
-	slog.Debug("transfer_extracted",
-		slog.String("token", tokenSymbol),
-		slog.String("amount", amount.String()),
-		slog.String("from", transfer.From),
-		slog.String("to", transfer.To),
-	)
-
-	return transfer
+	// 这里目前在 ProcessorBatch 或 ProcessBlock 中直接处理了
+	// 未来可以抽离到这里进行更复杂的嗅探
+	return activities
 }
