@@ -93,6 +93,16 @@ reset-8091-live: stop-dev build
 	  ./bin/$(BINARY_NAME) --start-from latest &
 	@echo "🚀 Sepolia indexer is running in background (Port 8081). Check logs/ for progress."
 
+# --- 自动化部署与缓存失效 (Industrial Deployment) ---
+TIMESTAMP := $(shell date +%Y%m%d%H%M)
+
+deploy-stable:
+	@echo "🏷️  Injecting frontend fingerprints: v$(TIMESTAMP)"
+	@sed -i 's/dashboard.js?v=[^"]*/dashboard.js?v=$(TIMESTAMP)/g' internal/web/dashboard.html
+	@sed -i 's/dashboard.css?v=[^"]*/dashboard.css?v=$(TIMESTAMP)/g' internal/web/dashboard.html
+	@echo "🚢 Starting automated deployment pipeline..."
+	@./scripts/ops/deploy.sh
+
 # --- 网关管理指令 ---
 gateway-config:
 	@chmod +x scripts/gen-nginx-config.sh

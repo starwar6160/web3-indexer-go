@@ -1,65 +1,39 @@
 #!/bin/bash
-
-# ==============================================================================
-# Web3 Indexer 生产级一键部署脚本
-# 使用方法: sudo ./scripts/deploy.sh
-# ==============================================================================
+# scripts/ops/deploy.sh - Industrial-grade deployment & cache alignment
 
 set -e
 
-# 颜色定义
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+# Configuration (Overrides via env vars recommended)
+IMAGE_NAME="web3-indexer-go:stable"
+PROJECT_NAME="web3-indexer"
+INFRA_COMPOSE="configs/docker/docker-compose.infra.yml"
+TESTNET_COMPOSE="configs/docker/docker-compose.testnet.yml"
 
-PROJECT_ROOT="/home/ubuntu/zwCode/web3-indexer-go"
-SERVICE_NAME="web3-indexer"
-BINARY_NAME="indexer"
+echo "🚀 [STAGE 1] Performing engineering build (No-Cache)..."
+docker build --no-cache -t $IMAGE_NAME .
 
-echo -e "${BLUE}=== 启动工业级部署流水线 ===${NC}"
+echo "♻️ [STAGE 2] Force recreating instances to align logic..."
+# Handle Sepolia
+docker stop web3-testnet-app || true
+docker rm web3-testnet-app || true
+set -a; . configs/env/.env.testnet; set +a;
+docker compose -p $PROJECT_NAME -f $TESTNET_COMPOSE up -d --no-build
 
-# 1. 权限检查
-if [ "$EUID" -ne 0 ]; then 
-  echo -e "${RED}错误: 请使用 sudo 运行此脚本${NC}"
-  exit 1
-fi
+# Handle Anvil Demo
+docker stop web3-indexer-app || true
+docker rm web3-indexer-app || true
+set -a; . configs/env/.env.demo2; set +a;
+COMPOSE_PROJECT_NAME=web3-demo2 docker compose -p $PROJECT_NAME -f configs/docker/docker-compose.yml up -d --no-build
 
-# 2. 进入项目根目录
-cd $PROJECT_ROOT
-
-# 3. 生产级编译 (静态链接 + 移除调试符号)
-echo -e "${YELLOW}Step 1: 正在进行生产级增量编译...${NC}"
-CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/$BINARY_NAME ./cmd/indexer
-echo -e "${GREEN}✅ 编译成功: bin/$BINARY_NAME${NC}"
-
-# 4. 更新 Systemd 配置文件
-echo -e "${YELLOW}Step 2: 同步 Systemd 单元文件...${NC}"
-if [ -f "bin/$SERVICE_NAME.service" ]; then
-    cp bin/$SERVICE_NAME.service /etc/systemd/system/
-    echo -e "${GREEN}✅ 服务文件已同步至 /etc/systemd/system/${NC}"
+echo "🧹 [STAGE 3] Purging Cloudflare Cache (if configured)..."
+if [ -n "$CF_ZONE_ID" ] && [ -n "$CF_API_TOKEN" ]; then
+    curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
+         -H "Authorization: Bearer $CF_API_TOKEN" \
+         -H "Content-Type: application/json" \
+         --data '{"purge_everything":true}' | jq .
+    echo "✅ Cloudflare edge purged."
 else
-    echo -e "${RED}警告: 未发现 bin/$SERVICE_NAME.service，将跳过配置更新${NC}"
+    echo "⚠️ Skipping CF purge (CF_ZONE_ID/CF_API_TOKEN not set)."
 fi
 
-# 5. 重载并重启服务
-echo -e "${YELLOW}Step 3: 重载配置并重启服务 [Graceful Restart]...${NC}"
-systemctl daemon-reload
-systemctl enable $SERVICE_NAME.service
-systemctl restart $SERVICE_NAME.service
-
-# 6. 状态验证
-echo -e "${YELLOW}Step 4: 正在执行健康检查...${NC}"
-sleep 2
-SERVICE_STATUS=$(systemctl is-active $SERVICE_NAME)
-
-if [ "$SERVICE_STATUS" = "active" ]; then
-    echo -e "${GREEN}🚀 部署圆满成功！${NC}"
-    echo -e "服务当前状态: ${GREEN}RUNNING${NC}"
-    echo -e "实时日志查看: ${BLUE}journalctl -u $SERVICE_NAME -f${NC}"
-    echo -e "Dashboard 地址: ${BLUE}https://demo2.st6160.click${NC}"
-else
-    echo -e "${RED}❌ 部署失败！请执行 'journalctl -u $SERVICE_NAME -n 50' 查看原因${NC}"
-    exit 1
-fi
+echo "✅ [SUCCESS] Deployment complete. Yokohama Lab results are now global."

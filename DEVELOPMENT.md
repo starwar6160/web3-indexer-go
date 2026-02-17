@@ -36,8 +36,28 @@ This log documents the rapid evolution of the Web3 Indexer from a blank reposito
 * **Task**: Startup Teleport and Hash Chain repair.
 * **Solve**: Developed **Hash Chain Self-Healing** to automatically backtrack and repair data gaps asynchronously, ensuring 100% historical data integrity.
 
-### **Phase 4: Metadata & Cryptographic Proof (Day 9-10)**
+### **Phase 4: Metadata & Cryptographic Proof (Day 9)**
 
-* **Feb 16-17: Final Hardening & UI Polish**
+* **Feb 16: Security & Metadata**
 * **Task**: Metadata enrichment and Ed25519 signing.
 * **Solve**: Implemented **Asynchronous Metadata Sniffing** (Symbol/Decimals) to enrich raw Sepolia data. Added **Ed25519 Payload Signing** to provide cryptographic proof of data provenance for every API/WS response.
+
+### **Phase 5: Intelligence Engine & On-chain Intent (Day 10)**
+
+* **Feb 17: From Indexer to Intelligence Engine**
+* **Task**: Full-protocol sniffing and multi-dimensional activity detection.
+* **Solve**: 
+    * **Unfiltered Sniffing**: Removed RPC topic filters to capture 100% of contract logs.
+    * **Activity Categorization**: Implemented logic to identify **Swap, Approve, Mint, and Deploy** events.
+    * **Transaction Sniffing**: Added scanning of raw transactions to capture **Native ETH Transfers** and **Contract Deployments**, providing a complete picture of network activity.
+
+### **Phase 6: Automated Deployment & SRE Dashboards (Final Polish)**
+
+* **Feb 17 (Evening): Closing the loop**
+* **Task**: Automated deployment pipeline and economic monitoring.
+* **Solve**: 
+    * **Gas Guzzlers Leaderboard**: Implemented real-time in-memory aggregation of gas spenders to identify network-heavy contracts.
+    * **Automated Deployment**: Created `deploy.sh` and `make deploy-stable` to automate version fingerprinting and Cloudflare cache purging.
+    * **UI/UX Refinement**: Applied professional SRE-grade styling to economic widgets, ensuring consistent presentation across global edge nodes.
+
+
