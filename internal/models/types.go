@@ -232,3 +232,21 @@ type GasSpender struct {
 	TotalGas uint64 `json:"total_gas"`
 	TotalFee string `json:"total_fee"` // 格式化后的 ETH 字符串
 }
+
+// TokenMetadata 代币元数据结构
+type TokenMetadata struct {
+	Symbol   string
+	Decimals uint8
+	Name     string
+}
+
+// Activity types for better categorization
+const (
+	ActivityTransfer = "TRANSFER"
+	ActivitySwap     = "SWAP"
+	ActivityApprove  = "APPROVE"
+	ActivityMint     = "MINT"
+	ActivityDeploy   = "DEPLOY"
+	ActivityETH      = "ETH_TRANSFER"
+	ActivityFaucet   = "FAUCET_CLAIM"
+)

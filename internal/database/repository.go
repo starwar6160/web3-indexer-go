@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"web3-indexer-go/internal/models"
@@ -146,7 +147,7 @@ func (r *Repository) PruneFutureData(ctx context.Context, chainHead int64) error
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() // nolint:errcheck // Rollback is standard practice, error is usually non-critical during cleanup
 
 	// 1. 删除过时的转账记录
 	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", chainHead); err != nil {
@@ -160,6 +161,11 @@ func (r *Repository) PruneFutureData(ctx context.Context, chainHead int64) error
 
 	// 3. 更新同步检查点
 	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", chainHead); err != nil {
+		return err
+	}
+
+	// 🚀 工业级对齐：更新或重置 sync_status，防止 API 抓取到脏高度
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_status SET last_processed_block = $1, last_processed_timestamp = NOW()", chainHead); err != nil {
 		return err
 	}
 
@@ -182,4 +188,44 @@ func (r *Repository) UpdateTokenDecimals(_ string, _ uint8) error {
 	// 预留方法，当前 schema 没有 decimals 字段
 	// 未来可以添加 token_metadata 表来存储这些信息
 	return nil
+}
+
+// SaveTokenMetadata 持久化代币元数据到 L2 缓存
+func (r *Repository) SaveTokenMetadata(meta models.TokenMetadata, address string) error {
+	query := `
+		INSERT INTO token_metadata (address, symbol, decimals, name, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (address) DO UPDATE SET
+			symbol = EXCLUDED.symbol,
+			decimals = EXCLUDED.decimals,
+			name = EXCLUDED.name,
+			updated_at = NOW()
+	`
+	_, err := r.db.Exec(query, strings.ToLower(address), meta.Symbol, meta.Decimals, meta.Name)
+	return err
+}
+
+// LoadAllMetadata 从数据库加载所有已缓存的元数据
+func (r *Repository) LoadAllMetadata() (map[string]models.TokenMetadata, error) {
+	var rows []struct {
+		Address  string `db:"address"`
+		Symbol   string `db:"symbol"`
+		Decimals uint8  `db:"decimals"`
+		Name     string `db:"name"`
+	}
+
+	err := r.db.Select(&rows, "SELECT address, symbol, decimals, name FROM token_metadata")
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]models.TokenMetadata)
+	for _, row := range rows {
+		result[strings.ToLower(row.Address)] = models.TokenMetadata{
+			Symbol:   row.Symbol,
+			Decimals: row.Decimals,
+			Name:     row.Name,
+		}
+	}
+	return result, nil
 }
