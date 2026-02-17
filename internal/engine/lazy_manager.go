@@ -70,11 +70,14 @@ func (lm *LazyManager) Trigger() {
 	}
 }
 
-// StartMonitor starts a background loop to check for inactivity
+// StartMonitor starts a background loop to check for inactivity and regression
 func (lm *LazyManager) StartMonitor(ctx context.Context) {
 	go func() {
+		// 🚀 工业级监控周期：30秒检查一次活跃度，60秒执行一次回归预警
 		ticker := time.NewTicker(30 * time.Second)
+		regressTicker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
+		defer regressTicker.Stop()
 
 		for {
 			select {
@@ -91,6 +94,23 @@ func (lm *LazyManager) StartMonitor(ctx context.Context) {
 					}
 				}
 				lm.mu.Unlock()
+
+			case <-regressTicker.C:
+				// 🛡️ Regressive Watchdog: 即使在活跃状态，也要检查是否发生了环境回滚
+				lm.mu.RLock()
+				active := lm.isActive
+				lm.mu.RUnlock()
+
+				if active && lm.guard != nil {
+					// 💡 执行轻量级回归检查，无需加锁
+					go func() {
+						regressCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						defer cancel()
+						if err := lm.guard.PerformLinearityCheck(regressCtx); err != nil {
+							lm.logger.Error("background_regression_check_failed", "err", err)
+						}
+					}()
+				}
 			}
 		}
 	}()
