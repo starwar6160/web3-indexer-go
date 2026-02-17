@@ -2,13 +2,13 @@ package engine
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
+
+	"web3-indexer-go/internal/models"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -24,19 +24,23 @@ const (
 	unknownValue = "UNKNOWN"
 )
 
-// TokenMetadata 代币元数据结构
-type TokenMetadata struct {
-	Symbol   string
-	Decimals uint8
-	Name     string
+// DBUpdater 定义数据库更新接口（解耦依赖）
+type DBUpdater interface {
+	UpdateTokenSymbol(tokenAddress, symbol string) error
+	UpdateTokenDecimals(tokenAddress string, decimals uint8) error
+	SaveTokenMetadata(meta models.TokenMetadata, address string) error
+	LoadAllMetadata() (map[string]models.TokenMetadata, error)
+	GetMaxStoredBlock(ctx context.Context) (int64, error)
+	PruneFutureData(ctx context.Context, chainHead int64) error
 }
 
 // MetadataEnricher 异步元数据丰富器
 // 用于在 Sepolia 等真实网络上动态抓取 ERC20 代币的 Symbol 和 Decimals
 type MetadataEnricher struct {
 	client       LowLevelRPCClient
-	cache        sync.Map // addr.Hex() -> TokenMetadata
+	cache        sync.Map // addr.Hex() -> models.TokenMetadata
 	queue        chan common.Address
+	inflight     sync.Map // addr.Hex() -> bool (正在处理中的地址)
 	db           DBUpdater
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -44,12 +48,6 @@ type MetadataEnricher struct {
 	batchSize    int
 	erc20ABI     abi.ABI
 	multicallABI abi.ABI
-}
-
-// DBUpdater 定义数据库更新接口（解耦依赖）
-type DBUpdater interface {
-	UpdateTokenSymbol(tokenAddress, symbol string) error
-	UpdateTokenDecimals(tokenAddress string, decimals uint8) error
 }
 
 // mustParseABI 辅助函数
@@ -79,6 +77,16 @@ func NewMetadataEnricher(client LowLevelRPCClient, db DBUpdater, logger *slog.Lo
 
 	me.ctx, me.cancel = context.WithCancel(context.Background())
 
+	// 🚀 L2 加载：启动时从数据库恢复缓存
+	if db != nil {
+		if metas, err := db.LoadAllMetadata(); err == nil {
+			for addr, m := range metas {
+				me.cache.Store(addr, m)
+			}
+			me.logger.Info("📚 [MetadataEnricher] L2 Cache loaded", "count", len(metas))
+		}
+	}
+
 	// 启动后台 Worker (移除旧的单条 worker，全量采用批处理以节省配额)
 	go me.batchWorker()
 
@@ -95,20 +103,22 @@ func (me *MetadataEnricher) GetSymbol(addr common.Address) string {
 
 	addrHex := addr.Hex()
 
-	// 1. 检查缓存
+	// 1. 检查 L1 缓存 (Memory)
 	if val, ok := me.cache.Load(addrHex); ok {
-		if meta, ok := val.(TokenMetadata); ok {
+		if meta, ok := val.(models.TokenMetadata); ok {
 			return meta.Symbol
 		}
 	}
 
-	// 2. 异步入队（非阻塞）
-	select {
-	case me.queue <- addr:
-		me.logger.Debug("📋 [MetadataEnricher] queued", "address", addrHex)
-	default:
-		// 队列满了，跳过（保证不阻塞主进程）
-		me.logger.Debug("⚠️ [MetadataEnricher] queue full, skipping", "address", addrHex)
+	// 2. 异步入队（带去重，防止重复 RPC）
+	if _, loading := me.inflight.LoadOrStore(addrHex, true); !loading {
+		select {
+		case me.queue <- addr:
+			me.logger.Debug("📋 [MetadataEnricher] queued", "address", addrHex)
+		default:
+			me.inflight.Delete(addrHex)
+			me.logger.Debug("⚠️ [MetadataEnricher] queue full, skipping", "address", addrHex)
+		}
 	}
 
 	// 3. 返回截断的地址作为临时显示
@@ -123,7 +133,7 @@ func (me *MetadataEnricher) GetDecimals(addr common.Address) uint8 {
 
 	addrHex := addr.Hex()
 	if val, ok := me.cache.Load(addrHex); ok {
-		if meta, ok := val.(TokenMetadata); ok {
+		if meta, ok := val.(models.TokenMetadata); ok {
 			return meta.Decimals
 		}
 	}
@@ -222,7 +232,7 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 	// 4. 对齐结果并分发更新
 	for i, addr := range addresses {
 		addrHex := addr.Hex()
-		meta := TokenMetadata{Symbol: "UNKNOWN", Decimals: 18}
+		meta := models.TokenMetadata{Symbol: "UNKNOWN", Decimals: 18}
 		found := false
 
 		// 解析 Symbol (结果索引为 i*2)
@@ -248,112 +258,32 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 		}
 
 		if found {
-			// 更新缓存与 DB
+			// 更新 L1 缓存 (Memory)
 			me.cache.Store(addrHex, meta)
+
+			// 🚀 工业级故障隔离：持久化到 L2 (DB) 采用“尽力而为”模式
+			// 即使数据库表不存在或写入失败，也不应导致整个同步逻辑回滚
 			if me.db != nil {
-				if err := me.db.UpdateTokenSymbol(addrHex, meta.Symbol); err != nil {
-					me.logger.Warn("failed to update token symbol", "err", err)
-				}
-				if err := me.db.UpdateTokenDecimals(addrHex, meta.Decimals); err != nil {
-					me.logger.Warn("failed to update token decimals", "err", err)
+				if err := me.db.SaveTokenMetadata(meta, addrHex); err != nil {
+					me.logger.Warn("⚠️ [MetadataEnricher] L2 persistence failed (non-blocking)", 
+						"address", addrHex[:10], 
+						"err", err)
 				}
 			}
+
 			me.logger.Info("🎯 [MetadataEnricher] discovered",
 				"address", addrHex[:10],
 				"symbol", meta.Symbol,
 				"decimals", meta.Decimals)
 		}
+
+		// 任务完成，移除 inflight 标记
+		me.inflight.Delete(addrHex)
 	}
 
 	me.logger.Debug("📦 [MetadataEnricher] batch processed",
 		"addr_count", addrCount,
 		"duration", time.Since(startTime))
-}
-
-// fetchTokenMetadata 仍然保留单条查询逻辑作为 Fallback (可选)
-func (me *MetadataEnricher) fetchTokenMetadata(ctx context.Context, addr common.Address) TokenMetadata {
-	metadata := TokenMetadata{
-		Symbol:   unknownValue,
-		Decimals: 18,
-		Name:     "Unknown Token",
-	}
-
-	// 1. 获取 Symbol
-	symbol, err := me.callContractMethod(ctx, addr, "0x95d89b41") // symbol() 的 method ID
-	if err == nil && len(symbol) >= 64 {
-		metadata.Symbol = me.decodeStringResult(symbol)
-	}
-
-	// 2. 获取 Decimals
-	decimals, err := me.callContractMethod(ctx, addr, "0x313ce567") // decimals() 的 method ID
-	if err == nil && len(decimals) >= 32 {
-		d := new(big.Int).SetBytes(common.Hex2Bytes(decimals))
-		if d.IsUint64() && d.Uint64() <= 255 {
-			// #nosec G115
-			metadata.Decimals = uint8(d.Uint64())
-		}
-	}
-
-	// 3. 获取 Name（可选）
-	name, err := me.callContractMethod(ctx, addr, "0x06fdde03") // name() 的 method ID
-	if err == nil && len(name) >= 64 {
-		metadata.Name = me.decodeStringResult(name)
-	}
-
-	return metadata
-}
-
-// callContractMethod 调用合约方法（使用 eth_call）
-func (me *MetadataEnricher) callContractMethod(ctx context.Context, addr common.Address, methodID string) (string, error) {
-	data := common.Hex2Bytes(methodID)
-	msg := ethereum.CallMsg{
-		To:   &addr,
-		Data: data,
-	}
-
-	result, err := me.client.CallContract(ctx, msg, nil)
-	if err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(result), nil
-}
-
-// decodeStringResult 解码 ABI 编码的字符串结果
-func (me *MetadataEnricher) decodeStringResult(hexData string) string {
-	if len(hexData) < 128 {
-		return unknownValue
-	}
-
-	// 跳过 offset (32 bytes) 和 length (32 bytes)
-	offset := 64
-	lengthHex := hexData[offset : offset+64]
-	length := new(big.Int).SetBytes(common.Hex2Bytes(lengthHex)).Int64()
-
-	if length <= 0 || length > 1000 {
-		return unknownValue
-	}
-
-	// 读取字符串数据
-	dataStart := offset + 64
-	dataEnd := dataStart + int(length)*2
-	if dataEnd > len(hexData) {
-		dataEnd = len(hexData)
-	}
-
-	dataHex := hexData[dataStart:dataEnd]
-	data, err := hex.DecodeString(dataHex)
-	if err != nil {
-		return unknownValue
-	}
-
-	// 清理非打印字符
-	result := strings.TrimSpace(strings.ToValidUTF8(string(data), ""))
-	if len(result) > 50 {
-		result = result[:50]
-	}
-
-	return result
 }
 
 // Stop 停止丰富器

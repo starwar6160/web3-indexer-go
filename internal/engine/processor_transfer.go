@@ -115,6 +115,11 @@ func (p *Processor) ProcessLog(vLog types.Log) *models.Transfer {
 		activity.Symbol = activity.TokenAddress[:10] + "..."
 	}
 
+	// 🚀 获取精度用于 UI 格式化 (可选，供后续前端优化)
+	if p.enricher != nil {
+		_ = p.enricher.GetDecimals(vLog.Address)
+	}
+
 	return activity
 }
 
