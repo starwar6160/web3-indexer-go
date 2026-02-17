@@ -31,7 +31,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           cache: true
 
       - name: Run golangci-lint
@@ -54,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           cache: true
 
       - name: Run GoSec security audit
@@ -87,12 +87,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           cache: true
 
       - name: Run unit tests
         run: |
-          go test -v -race -count=1 -short ./internal/engine/...
+          go test -v -race -count=1 -short -coverprofile=coverage.txt ./internal/engine/...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -130,7 +130,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           cache: true
 
       - name: Run integration tests
@@ -153,14 +153,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           cache: true
 
       - name: Verify build
         run: |
           go vet ./...
-          go build -v ./cmd/indexer
-          go build -v ./cmd/admin
+          go build -v -o indexer ./cmd/indexer
 
       - name: Check binary size
         run: |
