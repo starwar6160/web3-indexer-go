@@ -36,8 +36,8 @@ var upgrader = websocket.Upgrader{
 			return true // 允许非浏览器请求
 		}
 
-		// 允许本地开发环境
-		if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+		// 允许本地开发环境 (localhost/127.0.0.1 和 mp1 域名)
+		if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") || strings.Contains(origin, "mp1") {
 			return true
 		}
 
