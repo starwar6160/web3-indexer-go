@@ -345,7 +345,7 @@ async function fetchData() {
                 const from = t.from_address || '0x...';
                 const to = t.to_address || '0x...';
                 const symbol = t.symbol || '';
-                const type = t.type || 'TRANSFER';
+                const type = t.type || t.activity_type || 'TRANSFER';
                 const token = t.token_address || '0x...';
                 const displayAmount = formatAmount(t.amount || '0', 18); // 默认 18 位精度
                 

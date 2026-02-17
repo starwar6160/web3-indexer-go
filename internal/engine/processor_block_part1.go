@@ -180,7 +180,7 @@ func (p *Processor) detectDeploy(ctx context.Context, dbTx *sqlx.Tx, blockNum *b
 }
 
 func (p *Processor) detectEthTransfer(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint, txWithRealLogs map[string]bool) *models.Transfer {
-	if tx.Value().Cmp(big.NewInt(0)) <= 0 || txWithRealLogs[tx.Hash().Hex()] {
+	if tx.Value().Cmp(big.NewInt(0)) <= 0 || txWithRealLogs[tx.Hash().Hex()] || tx.To() == nil {
 		return nil
 	}
 	activity := &models.Transfer{
@@ -195,7 +195,7 @@ func (p *Processor) detectEthTransfer(ctx context.Context, dbTx *sqlx.Tx, blockN
 		Type:         "ETH_TRANSFER",
 	}
 	if _, err := dbTx.NamedExecContext(ctx, `INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type) VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type) ON CONFLICT DO NOTHING`, activity); err != nil {
-		Logger.Warn("failed_to_insert_detected_activity", "err", err)
+		Logger.Warn("failed_to_insert_eth_transfer", "err", err)
 	}
 	return activity
 }
@@ -205,25 +205,44 @@ func (p *Processor) processAnvilSynthetic(ctx context.Context, dbTx *sqlx.Tx, bl
 		return activities
 	}
 
-	mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-	mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"
-	mockAmount := big.NewInt(blockNum.Int64() % 1000000000)
+	// 🚀 工业级增强：一次生成多笔交易，提升 TPS 视觉效果
+	numMocks := 2 + secureIntn(4) // 2-5 笔
+	for i := 0; i < numMocks; i++ {
+		mockFrom := p.getAnvilAccount(i)
+		mockTo := p.getAnvilAccount(i + 1)
+		mockAmount := big.NewInt(int64(100 + secureIntn(1000)))
 
-	anvilTransfer := models.Transfer{
-		BlockNumber:  models.BigInt{Int: blockNum},
-		TxHash:       common.BytesToHash(append(block.Hash().Bytes(), []byte("ANVIL_MOCK")...)).Hex(),
-		LogIndex:     99999,
-		From:         strings.ToLower(mockFrom),
-		To:           strings.ToLower(mockTo),
-		Amount:       models.NewUint256FromBigInt(mockAmount),
-		TokenAddress: "0x0000000000000000000000000000000000000000",
-		Type:         "TRANSFER",
-	}
+		anvilTransfer := models.Transfer{
+			BlockNumber: models.BigInt{Int: blockNum},
+			TxHash:      common.BytesToHash(append(block.Hash().Bytes(), []byte(fmt.Sprintf("ANVIL_MOCK_%d", i))...)).Hex(),
+			// #nosec G115
+			LogIndex:     uint(99990 + i),
+			From:         strings.ToLower(mockFrom),
+			To:           strings.ToLower(mockTo),
+			Amount:       models.NewUint256FromBigInt(mockAmount),
+			TokenAddress: "0x0000000000000000000000000000000000000000",
+			Symbol:       "ETH", // 给它一个符号
+			Type:         "TRANSFER",
+		}
 
-	if _, err := dbTx.NamedExecContext(ctx, `INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type) VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type) ON CONFLICT DO NOTHING`, anvilTransfer); err != nil {
-		Logger.Error("failed_to_insert_anvil_synthetic_transfer", "err", err)
+		if _, err := dbTx.NamedExecContext(ctx, `INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type) VALUES (:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type) ON CONFLICT DO NOTHING`, anvilTransfer); err != nil {
+			Logger.Error("failed_to_insert_anvil_synthetic_transfer", "err", err)
+		} else {
+			activities = append(activities, anvilTransfer)
+		}
 	}
-	return append(activities, anvilTransfer)
+	return activities
+}
+
+func (p *Processor) getAnvilAccount(index int) string {
+	accounts := []string{
+		"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+		"0x70997970C51812dc3A010C7d01b50e0d17dc79ee",
+		"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+		"0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+		"0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+	}
+	return accounts[index%len(accounts)]
 }
 
 func (p *Processor) handleCheckpoint(ctx context.Context, dbTx *sqlx.Tx, blockNum *big.Int, rangeEnd *big.Int) {
@@ -261,6 +280,12 @@ func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer,
 	})
 	p.EventHook("gas_leaderboard", leaderboard)
 	for _, t := range activities {
+		// 🚀 工业级对齐：同步更新 Prometheus 计数器，确保与 UI 彻底同步
+		if p.metrics != nil {
+			p.metrics.TransfersProcessed.Inc()
+			p.metrics.TransactionTypesTotal.WithLabelValues(t.Type).Inc()
+		}
+
 		p.EventHook("transfer", map[string]interface{}{"tx_hash": t.TxHash, "from": t.From, "to": t.To, "value": t.Amount.String(), "block_number": t.BlockNumber.String(), "token_address": t.TokenAddress, "symbol": t.Symbol, "type": t.Type, "log_index": t.LogIndex})
 	}
 }

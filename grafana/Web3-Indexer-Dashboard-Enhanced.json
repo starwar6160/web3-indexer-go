@@ -138,7 +138,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "sum(rate(indexer_transfers_total[1m]))",
+          "expr": "sum(rate(indexer_transfers_processed_total[1m]))",
           "legendFormat": "Real-time TPS",
           "refId": "A"
         }

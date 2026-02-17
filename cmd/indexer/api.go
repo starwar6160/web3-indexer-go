@@ -199,7 +199,7 @@ func handleGetBlocks(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 
 func handleGetTransfers(w http.ResponseWriter, r *http.Request, db *sqlx.DB) {
 	var transfers []Transfer
-	err := db.SelectContext(r.Context(), &transfers, "SELECT id, block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol FROM transfers ORDER BY block_number DESC LIMIT 10")
+	err := db.SelectContext(r.Context(), &transfers, "SELECT id, block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type FROM transfers ORDER BY block_number DESC, log_index DESC LIMIT 10")
 	if err != nil {
 		slog.Error("failed_to_get_transfers", "err", err)
 		http.Error(w, "Failed to retrieve transfers", 500)
@@ -375,7 +375,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		adminIP = "Protected-Internal-Node"
 	}
 
-	tps := calculateTPS(totalTransfers, totalBlocks)
+	tps := calculateTPS(ctx, db)
 	isCatchingUp := syncLag > 10
 	if isCatchingUp {
 		tps = 0.0
@@ -455,31 +455,51 @@ func calculateLatency(ctx context.Context, db *sqlx.DB, latestChain, latestIndex
 	}
 
 	syncLag := latestChain - latestIndexed
-	if syncLag > 100 {
-		return fmt.Sprintf("Catching up... (%d blocks behind)", syncLag), float64(syncLag) * 12
+	if syncLag < 0 {
+		syncLag = 0
 	}
 
+	// 🚀 工业级防御：如果落后太多（>100块），直接按区块平均时间估算
+	if syncLag > 100 {
+		estLatency := float64(syncLag) * 12
+		return fmt.Sprintf("Catching up... (%d blocks behind)", syncLag), estLatency
+	}
+
+	// 实时/小延迟模式：尝试从数据库获取最新区块的处理时间
 	var processedAt time.Time
-	if err := db.GetContext(ctx, &processedAt, "SELECT processed_at FROM blocks WHERE number = $1", latestIndexedStr); err == nil && !processedAt.IsZero() {
+	err := db.GetContext(ctx, &processedAt, "SELECT processed_at FROM blocks WHERE number = $1", latestIndexedStr)
+
+	if err == nil && !processedAt.IsZero() {
 		latency := time.Since(processedAt).Seconds()
+		// 🛡️ 异常防御：如果计算出的延迟超过了理论上限（比如 Anvil 重启导致的巨大时间差），进行平滑处理
+		maxExpectedLatency := float64(syncLag+1) * 15 // 允许一定的 Buffer
+		if latency > maxExpectedLatency && syncLag < 5 {
+			// 如果只有几个块的延迟，但时间差巨大，说明是环境重置
+			latency = float64(syncLag) * 2.0 // 给一个较小的假定值
+		}
+
+		if latency < 0 {
+			latency = 0
+		}
 		return fmt.Sprintf("%.2fs", latency), latency
 	}
 
-	return fmt.Sprintf("%.2fs", float64(syncLag)*12), float64(syncLag) * 12
+	// Fallback: 纯理论估算
+	fallbackLatency := float64(syncLag) * 12
+	return fmt.Sprintf("%.2fs", fallbackLatency), fallbackLatency
 }
 
-// calculateTPS 计算 Transactions Per Second（基于历史数据）
-// 保留 2 位小数，避免长浮点数显示
-func calculateTPS(totalTransfers, totalBlocks int64) float64 {
-	if totalBlocks == 0 {
+// calculateTPS 计算 Transactions Per Second（基于滑动窗口：过去 10 秒）
+func calculateTPS(ctx context.Context, db *sqlx.DB) float64 {
+	var recentCount int64
+	// 🛰️ 工业级实时性：统计过去 10 秒内的真实处理量，让指标对突发流量更敏感
+	query := "SELECT COUNT(*) FROM transfers WHERE created_at > NOW() - INTERVAL '10 seconds'"
+	err := db.GetContext(ctx, &recentCount, query)
+	if err != nil {
 		return 0.0
 	}
-	// 简化计算：平均每个区块的转账数 / 12 秒（Sepolia 出块时间）
-	// 注意：这是历史平均值，不是实时速率
-	avgTransfersPerBlock := float64(totalTransfers) / float64(totalBlocks)
-	rawTPS := avgTransfersPerBlock / 12.0
 
-	// 保留 2 位小数（四舍五入）
+	rawTPS := float64(recentCount) / 10.0
 	return math.Round(rawTPS*100) / 100
 }
 

@@ -53,6 +53,9 @@ type Metrics struct {
 	E2ELatency         prometheus.Gauge // 新增：秒级 E2E 延迟
 	RealtimeTPS        prometheus.Gauge // 新增：实时 TPS
 
+	// 📊 交易类型分布
+	TransactionTypesTotal *prometheus.CounterVec
+
 	// 📊 代币转账统计（按代币符号）
 	TokenTransferVolume *prometheus.CounterVec
 	TokenTransferCount  *prometheus.CounterVec
@@ -208,6 +211,11 @@ func NewMetrics() *Metrics {
 			Name: "indexer_realtime_tps",
 			Help: "Real-time transactions per second",
 		}),
+
+		TransactionTypesTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "indexer_transaction_types_total",
+			Help: "Total number of transactions by type (deploy, approve, eth_transfer, etc.)",
+		}, []string{"type"}),
 
 		// 📊 代币转账统计指标
 		TokenTransferVolume: promauto.NewCounterVec(prometheus.CounterOpts{
