@@ -1,108 +1,77 @@
 package engine
 
 import (
-	"bytes"
 	"crypto/ed25519"
-	"encoding/base64"
+	"crypto/rand"
 	"encoding/hex"
-	"fmt"
-	"net/http"
-	"os"
+	"encoding/json"
+	"log/slog"
+	"sync"
 )
 
-type SigningMiddleware struct {
-	PrivateKey ed25519.PrivateKey
-	KeyID      string
-	PublicKey  ed25519.PublicKey
+// SignedPayload 封装带签名的 JSON 数据包 (信封模式)
+type SignedPayload struct {
+	Type      string      `json:"type"`
+	Data      interface{} `json:"data"`
+	Signature string      `json:"signature"`
+	PubKey    string      `json:"pub_key"`
+	SignerID  string      `json:"signer_id"`
 }
 
-func NewSigningMiddleware(seedHex, keyID string) (*SigningMiddleware, error) {
-	seed, err := hex.DecodeString(seedHex)
-	if err != nil || len(seed) != 32 {
-		// 如果没有提供有效的 seed，我们生成一个临时的（仅用于演示）
-		pub, priv, err := ed25519.GenerateKey(nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate key: %w", err)
-		}
-		return &SigningMiddleware{
-			PrivateKey: priv,
-			PublicKey:  pub,
-			KeyID:      keyID + "-temp",
-		}, nil
+// SignerMachine 负责 Ed25519 签名逻辑
+type SignerMachine struct {
+	privKey ed25519.PrivateKey
+	pubKey  ed25519.PublicKey
+	signerID string
+	mu      sync.RWMutex
+}
+
+// NewSignerMachine 创建签名机
+// seed 用于确定性生成密钥（可选），如果为 nil 则随机生成
+func NewSignerMachine(signerID string) *SignerMachine {
+	// 在演示模式下，我们随机生成一对密钥
+	// 生产环境下应从安全存储加载
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		slog.Error("failed_to_generate_ed25519_key", "err", err)
+		return nil
 	}
 
-	priv := ed25519.NewKeyFromSeed(seed)
-	pub, ok := priv.Public().(ed25519.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("failed to cast public key to ed25519.PublicKey")
+	return &SignerMachine{
+		privKey:  priv,
+		pubKey:   pub,
+		signerID: signerID,
+	}
+}
+
+// Sign 签署数据并返回信封
+func (s *SignerMachine) Sign(msgType string, data interface{}) (*SignedPayload, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msgBytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
 	}
 
-	return &SigningMiddleware{
-		PrivateKey: priv,
-		PublicKey:  pub,
-		KeyID:      keyID,
+	// 执行 Ed25519 签名
+	sig := ed25519.Sign(s.privKey, msgBytes)
+
+	return &SignedPayload{
+		Type:      msgType,
+		Data:      data,
+		Signature: hex.EncodeToString(sig),
+		PubKey:    hex.EncodeToString(s.pubKey),
+		SignerID:  s.signerID,
 	}, nil
 }
 
-// responseWrapper 用于捕获响应体进行加签
-type responseWrapper struct {
-	http.ResponseWriter
-	body       *bytes.Buffer
-	statusCode int
+// GetPublicKeyHex 返回公钥的十六进制表示
+func (s *SignerMachine) GetPublicKeyHex() string {
+	return hex.EncodeToString(s.pubKey)
 }
 
-func (rw *responseWrapper) Write(b []byte) (int, error) {
-	return rw.body.Write(b)
-}
-
-func (rw *responseWrapper) WriteHeader(statusCode int) {
-	rw.statusCode = statusCode
-}
-
-func (sm *SigningMiddleware) Handler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 跳过 WebSocket 和 Metrics
-		if r.URL.Path == "/ws" || r.URL.Path == "/metrics" || r.URL.Path == "/security" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		rw := &responseWrapper{
-			ResponseWriter: w,
-			body:           &bytes.Buffer{},
-			statusCode:     http.StatusOK,
-		}
-
-		next.ServeHTTP(rw, r)
-
-		// 只有在成功响应时才进行加签
-		if rw.statusCode >= 200 && rw.statusCode < 300 {
-			data := rw.body.Bytes()
-			signature := ed25519.Sign(sm.PrivateKey, data)
-			sigBase64 := base64.StdEncoding.EncodeToString(signature)
-
-			// 【关键修复】：必须在发送任何内容之前设置 Header
-			w.Header().Set("X-Payload-Signature", sigBase64)
-			w.Header().Set("X-Signer-ID", sm.KeyID)
-			w.Header().Set("X-Content-Integrity", "Ed25519")
-
-			// 手动触发写入状态码和之前捕获的数据
-			w.WriteHeader(rw.statusCode)
-			w.Write(data)
-		} else {
-			// 失败请求原样写回
-			w.WriteHeader(rw.statusCode)
-			w.Write(rw.body.Bytes())
-		}
-	})
-}
-
-// 自动获取或初始化 Seed
-func GetORInitSeed() string {
-	seed := os.Getenv("API_SIGNER_SEED")
-	if seed == "" {
-		// 默认一个固定 Seed 用于演示，确保多次启动签名一致
-		return "414f357a429bfc346b7bf5c18c55aaee9b1057e8cc44efb68dfaa7c5ead23a01"
-	}
-	return seed
+// GetSignerID 返回签名者标识
+func (s *SignerMachine) GetSignerID() string {
+	return s.signerID
 }

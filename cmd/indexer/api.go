@@ -49,6 +49,7 @@ type Server struct {
 	title       string
 	rpcPool     engine.RPCClient
 	lazyManager *engine.LazyManager
+	signer      *engine.SignerMachine
 	chainID     int64
 	mu          sync.RWMutex
 }
@@ -59,6 +60,7 @@ func NewServer(db *sqlx.DB, wsHub *web.Hub, port, title string) *Server {
 		wsHub: wsHub,
 		port:  port,
 		title: title,
+		signer: engine.NewSignerMachine("Yokohama-Lab-Primary"),
 	}
 }
 
@@ -122,7 +124,7 @@ func (s *Server) Start() error {
 			}
 			return
 		}
-		handleGetStatus(w, r, db, rpcPool, lazyManager, chainID)
+		handleGetStatus(w, r, db, rpcPool, lazyManager, chainID, s.signer)
 	})
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -331,7 +333,7 @@ func logVisitor(db *sqlx.DB, ip, ua, path string) {
 	}
 }
 
-func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64) {
+func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64, signer *engine.SignerMachine) {
 	// Trigger indexing if cooldown period has passed
 	if lazyManager != nil {
 		slog.Debug("🚀 API access detected, triggering lazy manager")
@@ -476,6 +478,16 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	if lazyManager != nil {
 		lazyStatus := lazyManager.GetStatus()
 		status["lazy_indexer"] = lazyStatus
+	}
+
+	// 🛡️ 确定性安全签名
+	if signer != nil {
+		signed, err := signer.Sign("status", status)
+		if err == nil {
+			w.Header().Set("X-Payload-Signature", signed.Signature)
+			w.Header().Set("X-Signer-ID", signed.SignerID)
+			w.Header().Set("X-Public-Key", signed.PubKey)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

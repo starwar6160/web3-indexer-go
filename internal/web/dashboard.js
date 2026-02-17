@@ -36,14 +36,24 @@ function connectWS() {
 
     ws.onmessage = (event) => {
         try {
-            const msg = JSON.parse(event.data);
+            const raw = JSON.parse(event.data);
+            let msg = raw;
+            
+            // 🛡️ Signed Payload Detection
+            if (raw.signature && raw.data) {
+                updateSignatureStatus(true, raw.signer_id, raw.signature);
+                msg = { type: raw.type, data: raw.data };
+            }
+
             if (msg.type === 'block') {
                 updateBlocksTable(msg.data);
                 fetchStatus();
             } else if (msg.type === 'transfer') {
                 const tx = msg.data;
-                tx.amount = tx.value; 
+                tx.amount = tx.value || tx.amount; 
                 updateTransfersTable(tx);
+                // 🚀 Optimistic UI: If we see a transfer, the block is definitely processed
+                optimisticUpdateBlockStatus(tx.block_number);
                 addLog(`Transfer detected: ${tx.tx_hash.substring(0,10)}...`, 'success');
             } else if (msg.type === 'log') {
                 addLog(msg.data.message, msg.data.level);
@@ -133,6 +143,27 @@ async function fetchStatus() {
     }
 }
 
+/**
+ * 🚀 Optimistic UI: Force block status to Success based on event metadata
+ */
+function optimisticUpdateBlockStatus(blockNumber) {
+    const row = document.querySelector(`tr[data-block-num="${blockNumber}"]`);
+    if (row) {
+        const statusCell = row.querySelector('.status-cell');
+        if (statusCell && statusCell.classList.contains('status-syncing')) {
+            statusCell.classList.remove('status-syncing');
+            statusCell.classList.add('status-success');
+            statusCell.innerHTML = `
+                <div class="status-indicator">
+                    <span class="dot"></span>
+                    <span class="status-text">Processed</span>
+                </div>
+            `;
+            console.debug(`[OptimisticUI] Block ${blockNumber} marked SUCCESS via event trigger.`);
+        }
+    }
+}
+
 function updateBlocksTable(block) {
     if (!block) return;
     if (!isWSConnected) {
@@ -146,54 +177,63 @@ function updateBlocksTable(block) {
     // 💡 工业级防御：探测所有可能的字段变体
     const number = block.number || block.Number || '0';
     const hash = block.hash || block.Hash || '0x...';
-    const parentHash = block.parent_hash || block.parentHash || block.ParentHash || '⛓️ Syncing...';
+    const parentHash = block.parent_hash || block.parentHash || block.ParentHash || '0x...';
     
     // 🚀 实时数据修正
     const blockTime = block.timestamp ? new Date(parseInt(block.timestamp) * 1000).toLocaleTimeString() : 'Now';
     
-    const row = `<tr>
+    const row = `<tr data-block-num="${number}">
         <td class="stat-value">${number}</td>
         <td class="hash" title="${hash}">${hash.substring(0, 16)}...</td>
         <td class="hash" title="${parentHash}">${parentHash.substring(0, 16)}...</td>
-        <td>${blockTime}</td>
+        <td class="status-cell status-syncing">
+            <div class="status-indicator">
+                <span class="dot"></span>
+                <span class="status-text">Syncing...</span>
+            </div>
+        </td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
     if (table.rows.length > 10) table.deleteRow(10);
 }
 
 function formatAmount(amt, decimals = 18) {
-    if (!amt) return '0.00';
+    if (!amt || amt === '0') return '0.0000';
     
-    // 处理科学计数法或过大的数字
-    const s = amt.toString();
-    if (s.length > 30 || s.includes('e')) {
-        // 使用 BigInt 处理大数
-        try {
-            const amount = BigInt(s);
-            const divisor = BigInt(10 ** decimals);
-            const integerPart = amount / divisor;
-            const fractionalPart = amount % divisor;
-            
-            let fractionStr = fractionalPart.toString().padStart(decimals, '0');
-            // 只保留 4 位小数，去除末尾零
-            fractionStr = fractionStr.substring(0, 4).replace(/0+$/, '');
-            if (fractionStr === '') fractionStr = '00';
-            
-            return `${integerPart}.${fractionStr}`;
-        } catch (e) {
-            // BigInt 解析失败，回退到截断显示
-            return s.substring(0, 10) + '...';
+    // 🛡️ 工业级鲁棒性：强制转换为字符串处理
+    let s = amt.toString();
+    
+    // 如果已经是科学计数法或者包含小数点，先简单截断
+    if (s.includes('e') || s.includes('.')) {
+        let val = parseFloat(s);
+        if (isNaN(val)) return '0.0000';
+        if (val > 1e12) return val.toExponential(2);
+        return val.toFixed(4);
+    }
+
+    try {
+        const amount = BigInt(s);
+        const divisor = BigInt(10 ** decimals);
+        const integerPart = amount / divisor;
+        const fractionalPart = amount % divisor;
+        
+        let intStr = integerPart.toString();
+        
+        // 🚀 天文数字防御：整数部分超过 12 位，改用缩写，防止撑破布局
+        if (intStr.length > 12) {
+            return intStr.substring(0, 6) + '...' + intStr.substring(intStr.length - 3);
         }
+        
+        let fractionStr = fractionalPart.toString().padStart(decimals, '0');
+        // 只保留 4 位小数，去除末尾零
+        fractionStr = fractionStr.substring(0, 4);
+        
+        return `${intStr}.${fractionStr}`;
+    } catch (e) {
+        // Fallback: 极其复杂的情况，直接截断原始字符串
+        if (s.length > 15) return s.substring(0, 8) + '...';
+        return s;
     }
-    
-    // 小数字直接返回
-    if (s.length <= 18) {
-        const num = parseFloat(s) / Math.pow(10, decimals);
-        return num.toFixed(4);
-    }
-    
-    // 中等长度数字，截断显示
-    return s.substring(0, 6) + '...' + s.substring(s.length - 6);
 }
 
 function updateTransfersTable(tx) {
@@ -241,16 +281,19 @@ async function fetchData() {
                 const hash = b.hash || b.Hash || '0x...';
                 const parent = b.parent_hash || b.ParentHash || '0x...';
                 
-                // 🚀 修复：以太坊 timestamp 是秒，JS 需要毫秒
-                const blockTime = b.timestamp ? new Date(parseInt(b.timestamp) * 1000).toLocaleString() : 'Pending';
-                // processed_at 已经是后端格式化好的字符串 (15:04:05.000)
-                const processedAt = b.processed_at || 'Recent';
+                // 🚀 以太坊 timestamp 是秒，JS 需要毫秒
+                const blockTime = b.timestamp ? new Date(parseInt(b.timestamp) * 1000).toLocaleTimeString() : 'Pending';
                 
-                return `<tr>
+                return `<tr data-block-num="${number}">
                     <td class="stat-value">${number}</td>
                     <td class="hash" title="${hash}">${hash.substring(0, 16)}...</td>
                     <td class="hash" title="${parent}">${parent.substring(0, 16)}...</td>
-                    <td>${blockTime} <br><small style="color:#666">${processedAt}</small></td>
+                    <td class="status-cell status-success">
+                        <div class="status-indicator">
+                            <span class="dot"></span>
+                            <span class="status-text">${blockTime}</span>
+                        </div>
+                    </td>
                 </tr>`;
             }).join('');
         }

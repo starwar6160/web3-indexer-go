@@ -42,7 +42,7 @@ type Client struct {
 // Hub 负责维护活跃连接和广播消息
 type Hub struct {
 	clients    map[*Client]bool
-	broadcast  chan WSEvent
+	broadcast  chan interface{}
 	register   chan *Client
 	unregister chan *Client
 	logger     *slog.Logger
@@ -50,7 +50,7 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:  make(chan WSEvent, 1024), // 增加缓冲区防止丢消息
+		broadcast:  make(chan interface{}, 1024), // 增加缓冲区防止丢消息
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		clients:    make(map[*Client]bool),
@@ -91,7 +91,6 @@ func (h *Hub) Run(ctx context.Context) {
 
 			// 广播给所有客户端
 			if len(h.clients) == 0 {
-				h.logger.Debug("ws_no_clients_dropping_broadcast", slog.String("type", event.Type))
 				continue
 			}
 
@@ -109,12 +108,12 @@ func (h *Hub) Run(ctx context.Context) {
 }
 
 // Broadcast 对外暴露的广播方法，非阻塞
-func (h *Hub) Broadcast(event WSEvent) {
+func (h *Hub) Broadcast(event interface{}) {
 	select {
 	case h.broadcast <- event:
 	default:
 		// 如果 Hub 处理不过来，丢弃消息，保证 Indexer 核心不卡死
-		h.logger.Warn("ws_hub_blocked_dropping_message", slog.String("type", event.Type))
+		h.logger.Warn("ws_hub_blocked_dropping_message")
 	}
 }
 

@@ -35,6 +35,42 @@ h1 { color: #333; font-size: 28px; margin-bottom: 10px; }
 .status-connecting { color: #ffc107; }
 .status-down { color: #dc3545; }
 
+/* 🚀 Breathing Light Status Indicators */
+.status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.status-indicator .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    position: relative;
+}
+
+/* Syncing: Amber Breathing Pulse */
+.status-syncing .dot {
+    background-color: #f59e0b;
+    box-shadow: 0 0 0 rgba(245, 158, 11, 0.4);
+    animation: pulse-amber 2s infinite;
+}
+
+/* Success: Emerald Solid Glow */
+.status-success .dot {
+    background-color: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    transition: all 0.3s ease;
+}
+
+@keyframes pulse-amber {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
 /* 🎨 Token Badge Styles - Industrial Grade Color Coding */
 .token-badge {
     display: inline-block;

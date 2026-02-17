@@ -207,7 +207,7 @@ func main() {
 			return
 		}
 
-		sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency)
+		sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, cfg.FetchConcurrency, cfg.EnableSimulator, cfg.NetworkMode)
 
 		// ✨ Configure token filtering based on TOKEN_FILTER_MODE
 		if cfg.TokenFilterMode == "all" {
@@ -244,7 +244,17 @@ func main() {
 		)
 
 		sm.processor.EventHook = func(eventType string, data interface{}) {
-			wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
+			// 🛡️ WebSocket 实时流签名
+			if apiServer.signer != nil {
+				signed, err := apiServer.signer.Sign(eventType, data)
+				if err == nil {
+					wsHub.Broadcast(signed)
+				} else {
+					wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
+				}
+			} else {
+				wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
+			}
 		}
 
 		startBlock, err := sm.GetStartBlock(ctx, forceFrom, *resetDB)
@@ -284,7 +294,7 @@ func main() {
 		go recovery.WithRecoveryNamed("tail_follow", func() { sm.StartTailFollow(ctx, startBlock) })
 
 		// 🏭 Pro Simulator：工业级持续交易模拟器
-		if cfg.DemoMode || cfg.ChainID == 31337 {
+		if cfg.EnableSimulator {
 			proSim := engine.NewProSimulator(cfg.RPCURLs[0], true, 2) // 2 TPS
 			wg.Add(1)
 			go recovery.WithRecoveryNamed("pro_simulator", func() {
@@ -295,7 +305,7 @@ func main() {
 		}
 
 		// 仿真器 (仅 demo，已废弃，保留 Pro Simulator)
-		if cfg.DemoMode {
+		if cfg.EnableSimulator && cfg.DemoMode {
 			emuCfg := emulator.LoadConfig()
 			if emuCfg.Enabled {
 				emu, err := emulator.NewEmulator(cfg.RPCURLs[0], emuCfg.PrivateKey)
