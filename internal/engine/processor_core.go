@@ -15,7 +15,8 @@ import (
 )
 
 // TransferEventHash is the ERC20 Transfer event signature hash
-var TransferEventHash = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+// 🚀 工业级修正：0xddf252ad...0afda6
+var TransferEventHash = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f5514cfc0afda6")
 
 // ErrReorgDetected is returned when a blockchain reorganization is detected
 var ErrReorgDetected = errors.New("reorg detected: parent hash mismatch")

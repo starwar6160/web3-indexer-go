@@ -18,25 +18,37 @@ infra-up:
 # 不需要构建镜像，直接利用 3800X 的性能秒开
 
 test-a1: infra-up
+	@echo "🚀 [LOCAL] 正在确保数据库 Schema 已就绪..."
+	@PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_sepolia -f scripts/db/init-db.sql >/dev/null 2>&1 || true
 	@echo "🚀 [LOCAL] 正在以 Sepolia 配置直接启动..."
 	@docker stop web3-sepolia-staging 2>/dev/null || true
 	@set -a; . configs/env/.env.testnet; set +a; \
 	PORT=8091 \
 	DEMO_MODE=false \
+	RPC_RATE_LIMIT=10 \
+	FETCH_CONCURRENCY=3 \
 	APP_TITLE="🚀 SEP-LOCAL (8091)" \
 	DATABASE_URL="postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_sepolia?sslmode=disable" \
 	go run cmd/indexer/*.go
 
 test-a2: infra-up
-	@echo "🚀 [LOCAL] 正在以 Anvil 配置直接启动..."
-	@docker stop web3-anvil-staging 2>/dev/null || true
-	@set -a; . configs/env/.env.demo2; set +a; \
+	@echo "🔍 [LOCAL] 检测 Anvil 当前高度..."
+	@ANVIL_HEIGHT=$$(scripts/get-anvil-height.sh); \
+	echo "📊 Anvil 当前高度: $$ANVIL_HEIGHT"; \
+	echo "🚀 [LOCAL] 正在确保数据库 Schema 已就绪..."; \
+	PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo -f scripts/db/001_init.sql >/dev/null 2>&1 || true; \
+	PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo -f scripts/db/002_visitor_stats.sql >/dev/null 2>&1 || true; \
+	echo "🚀 [LOCAL] 正在以 Anvil 配置直接启动..."; \
+	docker stop web3-anvil-staging 2>/dev/null || true; \
+	set -a; . configs/env/.env.demo2; set +a; \
 	PORT=8092 \
 	RPC_URLS="http://127.0.0.1:8545" \
 	CHAIN_ID=31337 \
+	START_BLOCK=$$ANVIL_HEIGHT \
 	DATABASE_URL="postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_demo?sslmode=disable" \
-	APP_TITLE="🧪 ANVIL-LOCAL (8092)" \
+	APP_TITLE="🧪 ANVIL-LOCAL (8092) [Block:$$ANVIL_HEIGHT]" \
 	DEMO_MODE=false \
+	RPC_RATE_LIMIT=500 \
 	go run cmd/indexer/*.go
 
 # --- 2. 生产晋升阶段 (Docker Deployment) ---

@@ -68,6 +68,15 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 			f.sendResult(ctx, BlockData{Number: bn, Err: err})
 			continue
 		}
+
+		// 🚀 防御性检查：确保 header 不为 nil
+		if header == nil {
+			slog.Warn("⚠️ [FETCHER] Received nil header for block with logs",
+				"block", bn,
+				"skip", true)
+			continue
+		}
+
 		block := types.NewBlockWithHeader(header)
 		f.sendResult(ctx, BlockData{Number: bn, Block: block, Logs: blockLogs})
 	}
@@ -81,13 +90,20 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 			continue // Already sent in Step 3
 		}
 
-		// Fetch header for the very last block in range to update UI time
+	// Fetch header for the very last block in range to update UI time
 		// For others, we can be lazy and send nil Block to just move the pointer
 		var block *types.Block
 		if bn.Cmp(end) == 0 {
 			header, err := f.fetchHeaderWithRetry(ctx, bn)
-			if err == nil {
+			if err == nil && header != nil {
 				block = types.NewBlockWithHeader(header)
+			}
+			// 🚀 防御性：如果 fetch 失败，记录警告但不发送 nil block
+			if header == nil {
+				slog.Warn("⚠️ [FETCHER] Failed to fetch header for last block",
+					"block", bn,
+					"skip", true)
+				continue // 跳过这个块
 			}
 		}
 

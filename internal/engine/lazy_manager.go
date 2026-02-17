@@ -34,111 +34,36 @@ func NewLazyManager(fetcher *Fetcher, rpcPool RPCClient, cooldown time.Duration,
 
 // Trigger activates indexing if cooldown period has passed
 func (lm *LazyManager) Trigger() {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-
-	now := time.Now()
-
-	// Check if we're still in cooldown period
-	if now.Sub(lm.lastStartTime) < lm.cooldown && lm.isActive {
-		// Still in active period, do nothing
-		return
-	}
-
-	// Check if we're past the cooldown period
-	if !lm.isActive && now.Sub(lm.lastStartTime) > lm.cooldown {
-		lm.activateIndexing()
-	} else if lm.isActive {
-		// Already active, extend the timer
-		if lm.stopTimer != nil {
-			lm.stopTimer.Stop()
-		}
-		lm.setupStopTimer()
-	}
+	// 🛠️ 工业级硬编码禁用：调试期间永远保持活跃，不处理休眠逻辑
+	return 
 }
 
 // activateIndexing starts the indexing process
 func (lm *LazyManager) activateIndexing() {
 	lm.isActive = true
 	lm.lastStartTime = time.Now()
-	slog.Info("🚀 访客触发：开始限时索引（正在追赶中...）",
-		slog.Duration("active_period", lm.activePeriod),
-		slog.Duration("cooldown_period", lm.cooldown))
-
-	// Resume the fetcher if it was paused
+	// 始终确保 Fetcher 是运行状态
 	if lm.fetcher.IsPaused() {
 		lm.fetcher.Resume()
 	}
-
-	// Setup timer to stop indexing after active period
-	lm.setupStopTimer()
-}
-
-// setupStopTimer creates a timer to stop indexing after the active period
-func (lm *LazyManager) setupStopTimer() {
-	if lm.stopTimer != nil {
-		lm.stopTimer.Stop()
-	}
-
-	lm.stopTimer = time.AfterFunc(lm.activePeriod, func() {
-		lm.deactivateIndexing()
-	})
 }
 
 // deactivateIndexing stops the indexing process
 func (lm *LazyManager) deactivateIndexing() {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-
-	if !lm.isActive {
-		return
-	}
-
-	lm.isActive = false
-	slog.Info("💤 任务完成：进入懒惰模式，暂停索引以节省额度")
-
-	// Pause the fetcher to stop indexing
-	lm.fetcher.Pause()
+	// 🛠️ 禁止进入休眠状态
+	return
 }
 
 // IsActive returns whether indexing is currently active
 func (lm *LazyManager) IsActive() bool {
-	lm.mu.RLock()
-	defer lm.mu.RUnlock()
-	return lm.isActive
+	return true // 永远活跃
 }
 
 // GetStatus returns the current status of the lazy indexer
 func (lm *LazyManager) GetStatus() map[string]interface{} {
-	lm.mu.RLock()
-	defer lm.mu.RUnlock()
-
-	now := time.Now()
 	status := make(map[string]interface{})
-
-	if lm.isActive {
-		remainingTime := lm.activePeriod - now.Sub(lm.lastStartTime)
-		if remainingTime < 0 {
-			remainingTime = 0
-		}
-
-		status["mode"] = "active"
-		status["display"] = "● 正在追赶中 (Catching up...)"
-		status["remaining_time"] = remainingTime.String()
-	} else {
-		status["mode"] = "lazy"
-		status["display"] = "● 节能模式 (Lazy Mode)"
-
-		if !lm.lastStartTime.IsZero() {
-			timeSinceEnd := now.Sub(lm.lastStartTime.Add(lm.cooldown))
-			if timeSinceEnd < 0 {
-				status["cooldown_remaining"] = (-timeSinceEnd).String()
-			} else {
-				status["status"] = "ready_to_activate"
-			}
-		}
-	}
-
+	status["mode"] = "active"
+	status["display"] = "● 持续索引模式 (Full-speed Mode)"
 	return status
 }
 

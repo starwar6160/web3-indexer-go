@@ -96,3 +96,56 @@ ci:
 		-e TRIVY_CACHE_DIR=/tmp/trivy-cache \
 		-v $(PWD):/app \
 		web3-indexer-ci:local
+
+# Anvil 快捷命令
+.PHONY: anvil-status anvil-reset anvil-inject anvil-inject-defi anvil-verify anvil-pro
+anvil-status:
+	@echo "📊 Anvil 状态检查..."
+	@echo "当前高度: $$(shell scripts/get-anvil-height.sh)"
+	@curl -s http://127.0.0.1:8545 -X POST \
+	  -H "Content-Type: application/json" \
+	  -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest", false],"id":1}' \
+	  | jq '{number: .result.number, hash: .result.hash, transactions: .result.transactions | length}'
+
+anvil-reset:
+	@echo "🚨 重置 Anvil 和 Demo2 数据库..."
+	@PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo \
+	  -c "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;"
+	@echo "✅ 数据库已清空，下次启动将从创世块开始"
+
+anvil-inject:
+	@echo "💉 注入基础 Synthetic Transfers..."
+	@PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo \
+	  -c "INSERT INTO transfers (block_number, tx_hash, log_index, from_address, to_address, amount, token_address) VALUES \
+	  (60390, '0xabcd0001', 99999, '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266', '0x70997970c51812dc3a010c7d01b50e0d17dc79ee', '1000000000000000000', '0x0000000000000000000000000000000000000000'), \
+	  (60389, '0xabcd0002', 99999, '0x70997970c51812dc3a010c7d01b50e0d17dc79ee', '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc', '2000000000000000000', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'), \
+	  (60388, '0xabcd0003', 99999, '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc', '0x90f79bf6eb2c4f870365e785982e1f101e93b906', '3000000000000000000', '0xdac17f958d2ee523a2206206994597c13d831ec7') \
+	  ON CONFLICT (block_number, log_index) DO NOTHING;"
+	@echo "✅ 已注入 3 笔基础 Synthetic Transfers"
+	@PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo \
+	  -t -c "SELECT COUNT(*) as total FROM transfers;"
+	@echo "💡 访问 http://localhost:8092 查看效果"
+
+anvil-inject-defi:
+	@echo "🏭 注入 DeFi 高频交易（套利/Flashloan/MEV）..."
+	@PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo \
+	  -f scripts/inject-defi-transfers.sql
+	@echo ""
+	@echo "✅ DeFi 模拟数据已注入！"
+	@echo ""
+	@echo "📊 交易类型分布："
+	@echo "   🔄 Swap: 60% (普通交易)"
+	@echo "   🦈 Arbitrage: 20% (套利，大额)"
+	@echo "   ⚡ Flashloan: 10% (闪电贷，巨额)"
+	@echo "   🦈 MEV: 10% (夹子攻击)"
+	@echo ""
+	@PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo \
+	  -t -c "SELECT COUNT(*) as total FROM transfers WHERE block_number >= 60400;"
+	@echo "💡 刷新 http://localhost:8092 查看效果"
+
+anvil-verify:
+	@bash scripts/verify-web-ui.sh
+
+anvil-pro:
+	@echo "🏭 启动 Anvil Pro 实验室..."
+	@bash scripts/start-anvil-pro-lab.sh

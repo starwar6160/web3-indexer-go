@@ -6,11 +6,13 @@ import (
 	"log"
 	"math"
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"web3-indexer-go/internal/config"
 	"web3-indexer-go/internal/monitor"
 
 	"github.com/ethereum/go-ethereum"
@@ -35,6 +37,55 @@ type EnhancedRPCClientPool struct {
 	currentSyncBatch  int
 	batchMutex        sync.Mutex
 	quotaMonitor      *monitor.QuotaMonitor // RPC 额度监控器
+	rpcURLs           []string              // Store URLs for RPS calculation
+	cfg               *config.Config        // Config for RPS calculation
+}
+
+// CalculateOptimalRPS 根据环境自动计算最优 RPS
+// 决策优先级：内部安全策略（URL + 高度） > 外部配置（环境变量） > 系统默认值
+func CalculateOptimalRPS(rpcURL string, currentLag int64, userConfigRPS int) float64 {
+	var policyRPS float64
+
+	// 1. 基于 URL 的硬核判定（最优先）
+	isLocal := strings.Contains(rpcURL, "localhost") ||
+		strings.Contains(rpcURL, "127.0.0.1")
+
+	if isLocal {
+		policyRPS = 500.0 // 本地 Anvil 开启无限火力
+	} else if strings.Contains(rpcURL, "infura.io") ||
+		strings.Contains(rpcURL, "quiknode.pro") {
+		policyRPS = 15.0 // 商业节点安全水位
+	} else if strings.Contains(rpcURL, "public.com") {
+		policyRPS = 5.0 // 公共节点保守策略
+	} else {
+		policyRPS = 10.0 // 自定义节点默认策略
+	}
+
+	// 2. 基于高度落后的动态修正
+	// 如果落后太多，允许在安全范围内加速
+	if currentLag > 1000 && !isLocal {
+		policyRPS *= 2.0 // 追赶模式翻倍
+		log.Printf("🚀 Catch-up mode activated: lag=%d, boosted_rps=%.2f", currentLag, policyRPS)
+	}
+
+	// 3. 外部参数作为次级参考
+	if userConfigRPS > 0 {
+		configured := float64(userConfigRPS)
+		if isLocal {
+			// 本地模式完全信任用户输入
+			log.Printf("🔓 Local mode: unlimited user config (rps=%.2f)", configured)
+			return configured
+		}
+		// 生产环境下，取政策上限和用户设置的最小值
+		result := math.Min(policyRPS, configured)
+		log.Printf("🛡️ Production mode: user_rps=%.2f, policy_limit=%.2f, final_rps=%.2f",
+			configured, policyRPS, result)
+		return result
+	}
+
+	log.Printf("🎯 Using policy-based RPS: %.2f (type=%s)", policyRPS,
+		map[bool]string{true: "local", false: "remote"}[isLocal])
+	return policyRPS
 }
 
 // NewEnhancedRPCClientPool creates an enhanced RPC client pool with testnet-specific configurations
@@ -48,7 +99,8 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 		return nil, fmt.Errorf("no RPC URLs provided")
 	}
 
-	// Determine if we are in a local environment (e.g., Anvil)
+	// 🧠 智能计算最优 RPS（首次调用时 lag=0，使用默认配置）
+	// 注意：这里暂时使用默认值，后续会在 main() 中通过 SetRateLimit 调整
 	isLocal := false
 	for _, url := range urls {
 		if strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1") || strings.Contains(url, "anvil") {
@@ -57,15 +109,19 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 		}
 	}
 
-	// Determine rate limits based on network type
 	var globalRPS float64
+	forceRPS := os.Getenv("FORCE_RPS") == "true"
+
 	if isLocal {
-		globalRPS = 10000.0 // Virtually unlimited for local nodes
-	} else if isTestnet {
-		globalRPS = 1.0 // Conservative rate for testnet to preserve quotas
+		globalRPS = 500.0 // 本地 Anvil 开启火力
+	} else if isTestnet && !forceRPS {
+		globalRPS = 15.0 // 测试网商业节点安全水位
 	} else {
-		globalRPS = 20.0 // Higher rate for local/anvil
+		globalRPS = 20.0 // 主网或强制模式
 	}
+
+	log.Printf("🧠 Smart Rate Limiter initialized: %.2f RPS (local=%v, testnet=%v)",
+		globalRPS, isLocal, isTestnet)
 
 	pool := &EnhancedRPCClientPool{
 		clients:           make([]*rpcNode, 0, len(urls)),
@@ -76,6 +132,7 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 		maxSyncBatch:      maxSyncBatch,
 		lastResetTime:     time.Now(),
 		quotaMonitor:      monitor.NewQuotaMonitor(),
+		rpcURLs:           urls, // Store URLs for RPS calculation
 	}
 
 	// Initialize individual node rate limiters
@@ -84,7 +141,7 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 		var nodeRPS float64
 		if isLocal {
 			nodeRPS = 5000.0
-		} else if isTestnet {
+		} else if isTestnet && !forceRPS {
 			nodeRPS = 1.0
 		} else {
 			nodeRPS = 10.0

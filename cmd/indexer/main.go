@@ -100,6 +100,33 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 	return new(big.Int).Add(blockNum, big.NewInt(1)), nil
 }
 
+// runSequencerWithSelfHealing 启动 Sequencer 并在崩溃后自动重启
+func runSequencerWithSelfHealing(ctx context.Context, sequencer *engine.Sequencer, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("🛑 [SELF-HEAL] Sequencer supervisor stopped")
+			return
+		default:
+			slog.Info("🔄 [SELF-HEAL] Starting Sequencer...")
+			recovery.WithRecoveryNamed("sequencer_run", func() {
+				sequencer.Run(ctx)
+			})
+
+			// 如果 Sequencer 崩溃退出，等待 3 秒后重启
+			slog.Warn("⚠️ [SELF-HEAL] Sequencer crashed, restarting in 3s...")
+			select {
+			case <-ctx.Done():
+				slog.Info("🛑 [SELF-HEAL] Sequencer supervisor cancelled during restart delay")
+				return
+			case <-time.After(3 * time.Second):
+				slog.Info("♻️ [SELF-HEAL] Sequencer restarting...")
+			}
+		}
+	}
+}
+
 func main() {
 	resetDB := flag.Bool("reset", false, "Reset database")
 	startFrom := flag.String("start-from", "", "Force start from: 'latest' or specific block number")
@@ -250,10 +277,24 @@ func main() {
 
 		wg.Add(1)
 		slog.Info("⛓️ Engine Components Ignited", "start_block", startBlock.String())
-		go recovery.WithRecoveryNamed("sequencer_run", func() { defer wg.Done(); sequencer.Run(ctx) })
+
+		// 🚀 自愈 Sequencer：崩溃后自动重启
+		go runSequencerWithSelfHealing(ctx, sequencer, &wg)
+
 		go recovery.WithRecoveryNamed("tail_follow", func() { sm.StartTailFollow(ctx, startBlock) })
 
-		// 仿真器 (仅 demo)
+		// 🏭 Pro Simulator：工业级持续交易模拟器
+		if cfg.DemoMode || cfg.ChainID == 31337 {
+			proSim := engine.NewProSimulator(cfg.RPCURLs[0], true, 2) // 2 TPS
+			wg.Add(1)
+			go recovery.WithRecoveryNamed("pro_simulator", func() {
+				defer wg.Done()
+				slog.Info("🏭 [PRO_SIM] Starting industrial simulator", "tps", 2, "rpc_url", cfg.RPCURLs[0])
+				proSim.Start()
+			})
+		}
+
+		// 仿真器 (仅 demo，已废弃，保留 Pro Simulator)
 		if cfg.DemoMode {
 			emuCfg := emulator.LoadConfig()
 			if emuCfg.Enabled {
