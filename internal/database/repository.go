@@ -33,6 +33,11 @@ func NewRepository(databaseURL string) (*Repository, error) {
 	return &Repository{db: db}, nil
 }
 
+// NewRepositoryFromDB 从现有 DB 连接创建 Repository
+func NewRepositoryFromDB(db *sqlx.DB) *Repository {
+	return &Repository{db: db}
+}
+
 func (r *Repository) Close() error {
 	return r.db.Close()
 }
@@ -133,6 +138,32 @@ func (r *Repository) RecordSyncError(ctx context.Context, chainID int64, errorMs
 	`
 	_, err := r.db.ExecContext(ctx, query, chainID, errorMsg)
 	return err
+}
+
+// PruneFutureData 删除所有高于指定高度的数据（用于处理 Anvil 重启导致的穿越问题）
+func (r *Repository) PruneFutureData(ctx context.Context, chainHead int64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. 删除过时的转账记录
+	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", chainHead); err != nil {
+		return err
+	}
+
+	// 2. 删除过时的区块记录
+	if _, err := tx.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", chainHead); err != nil {
+		return err
+	}
+
+	// 3. 更新同步检查点
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", chainHead); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // UpdateTokenSymbol 更新代币符号（用于 Metadata Enricher 回填）
