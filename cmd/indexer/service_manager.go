@@ -21,10 +21,10 @@ type ServiceManager struct {
 	chainID    int64
 }
 
-func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int, rps, burst, concurrency int) *ServiceManager {
+func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int, rps, burst, concurrency int, enableSimulator bool, networkMode string) *ServiceManager {
 	// ✨ 使用工业级限流器创建 Fetcher
 	fetcher := engine.NewFetcherWithLimiter(rpcPool, concurrency, rps, burst)
-	processor := engine.NewProcessor(db, rpcPool, retryQueueSize, chainID)
+	processor := engine.NewProcessor(db, rpcPool, retryQueueSize, chainID, enableSimulator, networkMode)
 	reconciler := engine.NewReconciler(db, rpcPool, engine.GetMetrics())
 
 	return &ServiceManager{

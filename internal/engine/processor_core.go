@@ -64,13 +64,15 @@ type Processor struct {
 	checkpointBatch           int
 	blocksSinceLastCheckpoint int
 
-	chainID int64
+	chainID         int64
+	enableSimulator bool
+	networkMode     string
 
 	// 🎨 Metadata Enricher (异步元数据解析器)
 	enricher *MetadataEnricher
 }
 
-func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int64) *Processor {
+func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int64, enableSimulator bool, networkMode string) *Processor {
 	p := &Processor{
 		db:                        db,
 		client:                    client,
@@ -81,6 +83,8 @@ func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int
 		checkpointBatch:           100, // 默认每 100 块持久化一次
 		blocksSinceLastCheckpoint: 0,
 		chainID:                   chainID,
+		enableSimulator:           enableSimulator,
+		networkMode:               networkMode,
 	}
 
 	// 🎨 初始化元数据丰富器（仅用于生产网络，Anvil 不需要）

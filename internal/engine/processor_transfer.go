@@ -12,19 +12,22 @@ import (
 
 // getTokenSymbol 从代币地址映射到符号
 func getTokenSymbol(tokenAddr common.Address) string {
-	// Sepolia 热门代币地址映射
+	// Sepolia 热门代币地址映射 (Instant Coloring Gene)
 	tokenMap := map[string]string{
 		"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "USDC",
 		"0xff34b3d4aee8ddcd6f9afffb6fe49bd371b8a357": "DAI",
 		"0x7b79995e5f793a07bc00c21412e50ecae098e7f9": "WETH",
 		"0xa3382dffca847b84592c05ab05937a1a38623bc":  "UNI",
+		"0x4200000000000000000000000000000000000006": "WETH",
+		"0x7af963cf6d228e964f296a96f3ad97a1ee1bb303": "LINK",
+		"0x0000000000000000000000000000000000000000": "ETH",
 	}
 
 	hexAddr := strings.ToLower(tokenAddr.Hex())
 	if symbol, ok := tokenMap[hexAddr]; ok {
 		return symbol
 	}
-	return "Other" // 其他代币归类为 "Other"
+	return "" // 返回空，触发异步抓取逻辑
 }
 
 // ExtractTransfer 从区块日志中提取 ERC20 Transfer 事件
@@ -49,17 +52,17 @@ func (p *Processor) ExtractTransfer(vLog types.Log) *models.Transfer {
 		TokenAddress: strings.ToLower(vLog.Address.Hex()),
 	}
 
-	// 🎨 使用 Metadata Enricher 获取代币符号（异步 + 缓存）
-	if p.enricher != nil {
+	// 🎨 元数据解析逻辑：优先使用基因映射，其次异步抓取
+	staticSymbol := getTokenSymbol(vLog.Address)
+	if staticSymbol != "" {
+		transfer.Symbol = staticSymbol
+	} else if p.enricher != nil {
 		tokenAddr := common.HexToAddress(transfer.TokenAddress)
 		transfer.Symbol = p.enricher.GetSymbol(tokenAddr)
-	} else {
-		// 回退到硬编码映射（用于 Anvil 或没有 enricher 的情况）
-		transfer.Symbol = getTokenSymbol(vLog.Address)
 	}
 	
-	// 🛡️ 防御性：确保 symbol 不为空
-	if transfer.Symbol == "" || transfer.Symbol == "Other" {
+	// 🛡️ 防御性：确保 symbol 不为空（如果基因和 enricher 都没拿到）
+	if transfer.Symbol == "" {
 		transfer.Symbol = transfer.TokenAddress[:10] + "..."
 	}
 

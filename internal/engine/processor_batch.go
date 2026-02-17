@@ -61,64 +61,66 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 			}
 		}
 
-		// Fallback: Scan transactions for direct calls to watched addresses (only if no real log found)
+		// Fallback: Scan transactions for direct calls to watched addresses (ONLY in anvil mode)
 		blockNum := block.Number()
-		syntheticIdx := 10000 // high base to avoid conflict with real log_index
-		for _, tx := range block.Transactions() {
-			if tx.To() != nil {
-				txToLow := strings.ToLower(tx.To().Hex())
-				isMatched := false
-				for addr := range p.watchedAddresses {
-					if strings.ToLower(addr.Hex()) == txToLow {
+		if p.networkMode == "anvil" {
+			syntheticIdx := 10000 // high base to avoid conflict with real log_index
+			for _, tx := range block.Transactions() {
+				if tx.To() != nil {
+					txToLow := strings.ToLower(tx.To().Hex())
+					isMatched := false
+					for addr := range p.watchedAddresses {
+						if strings.ToLower(addr.Hex()) == txToLow {
+							isMatched = true
+							break
+						}
+					}
+					if len(p.watchedAddresses) == 0 {
 						isMatched = true
-						break
 					}
-				}
-				if len(p.watchedAddresses) == 0 {
-					isMatched = true
-				}
-				if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
-					Logger.Info("🎯 [Batch] 发现直接调用监控合约的交易（无真实日志，使用合成）",
-						slog.String("tx_hash", tx.Hash().Hex()),
-						slog.String("to", txToLow),
-						slog.String("block", blockNum.String()),
-					)
-					// 尝试从 Data 中提取金额和接收者
-					input := tx.Data()
-					syntheticAmount := big.NewInt(1000)
-					syntheticTo := txToLow
-					if len(input) >= 68 {
-						syntheticTo = common.BytesToAddress(input[16:36]).Hex()
-						syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
-					}
+					if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
+						Logger.Info("🎯 [Batch] 发现直接调用监控合约的交易（无真实日志，使用合成）",
+							slog.String("tx_hash", tx.Hash().Hex()),
+							slog.String("to", txToLow),
+							slog.String("block", blockNum.String()),
+						)
+						// 尝试从 Data 中提取金额和接收者
+						input := tx.Data()
+						syntheticAmount := big.NewInt(1000)
+						syntheticTo := txToLow
+						if len(input) >= 68 {
+							syntheticTo = common.BytesToAddress(input[16:36]).Hex()
+							syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
+						}
 
-					// 尝试获取发送者
-					fromAddr := "0xunknown"
-					signer := types.LatestSignerForChainID(big.NewInt(chainID))
-					if sender, err := types.Sender(signer, tx); err == nil {
-						fromAddr = sender.Hex()
-					}
+						// 尝试获取发送者
+						fromAddr := "0xunknown"
+						signer := types.LatestSignerForChainID(big.NewInt(chainID))
+						if sender, err := types.Sender(signer, tx); err == nil {
+							fromAddr = sender.Hex()
+						}
 
-					syntheticTransfer := models.Transfer{
-						BlockNumber: models.BigInt{Int: blockNum},
-						TxHash:      tx.Hash().Hex(),
-						// #nosec G115 - syntheticIdx is a local loop counter
-						LogIndex:     uint(syntheticIdx),
-						From:         strings.ToLower(fromAddr),
-						To:           strings.ToLower(syntheticTo),
-						Amount:       models.NewUint256FromBigInt(syntheticAmount),
-						TokenAddress: txToLow,
+						syntheticTransfer := models.Transfer{
+							BlockNumber: models.BigInt{Int: blockNum},
+							TxHash:      tx.Hash().Hex(),
+							// #nosec G115 - syntheticIdx is a local loop counter
+							LogIndex:     uint(syntheticIdx),
+							From:         strings.ToLower(fromAddr),
+							To:           strings.ToLower(syntheticTo),
+							Amount:       models.NewUint256FromBigInt(syntheticAmount),
+							TokenAddress: txToLow,
+						}
+						validTransfers = append(validTransfers, syntheticTransfer)
+						syntheticIdx++
 					}
-					validTransfers = append(validTransfers, syntheticTransfer)
-					syntheticIdx++
 				}
 			}
 		}
 
-		// 🚀 Anvil 模式：强制生成 Synthetic Transfer（让空链也有数据）
+		// 🚀 模拟模式：强制生成 Synthetic Transfer（让空链也有数据）
 		// 记录当前 block 的 transfer 数量（在添加 synthetic 之前）
 		transfersBeforeThisBlock := len(validTransfers)
-		if chainID == 31337 {
+		if p.enableSimulator && p.networkMode == "anvil" {
 			Logger.Info("🔍 [ANVIL-BATCH] Checking if synthetic transfer needed",
 				slog.String("block", blockNum.String()),
 				slog.Int("existing_transfers", transfersBeforeThisBlock),

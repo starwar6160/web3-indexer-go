@@ -172,91 +172,93 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		}
 	}
 
-	// Fallback: Scan transactions for direct calls to watched addresses (in case logs are missing/filtered)
-	Logger.Debug("fallback_scanning_transactions",
-		slog.String("block", blockNum.String()),
-		slog.Int("tx_count", len(data.Block.Transactions())),
-	)
-	syntheticIdx := uint(10000) // high base to avoid conflict with real log_index
-	for _, tx := range data.Block.Transactions() {
-		if tx.To() != nil {
-			txToLow := strings.ToLower(tx.To().Hex())
-			
-			// 🚀 工业级放开：如果没有关注地址，则把每一笔交易都视为“发现匹配交易”
-			isMatched := (len(p.watchedAddresses) == 0)
-			if !isMatched {
-				for addr := range p.watchedAddresses {
-					if strings.ToLower(addr.Hex()) == txToLow {
-						isMatched = true
-						break
+	// Fallback: Scan transactions for direct calls to watched addresses (ONLY in anvil mode)
+	if p.networkMode == "anvil" {
+		Logger.Debug("fallback_scanning_transactions",
+			slog.String("block", blockNum.String()),
+			slog.Int("tx_count", len(data.Block.Transactions())),
+		)
+		syntheticIdx := uint(10000) // high base to avoid conflict with real log_index
+		for _, tx := range data.Block.Transactions() {
+			if tx.To() != nil {
+				txToLow := strings.ToLower(tx.To().Hex())
+				
+				// 🚀 工业级放开：如果没有关注地址，则把每一笔交易都视为“发现匹配交易”
+				isMatched := (len(p.watchedAddresses) == 0)
+				if !isMatched {
+					for addr := range p.watchedAddresses {
+						if strings.ToLower(addr.Hex()) == txToLow {
+							isMatched = true
+							break
+						}
 					}
 				}
-			}
 
-			if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
-				toAddr := txToLow
-				Logger.Info("🎯 发现匹配交易",
-					slog.String("stage", "PROCESSOR"),
-					slog.String("tx_hash", tx.Hash().Hex()),
-					slog.String("to", txToLow),
-				)
-
-				// 构造一个合成的 Transfer 事件 (尝试从交易中提取真实地址)
-				input := tx.Data()
-				syntheticAmount := big.NewInt(1000) // 默认值
-				if len(input) >= 68 {
-					// 提取第 4-36 字节作为 To 地址 (ERC20 transfer 参数)
-					toAddr = common.BytesToAddress(input[16:36]).Hex()
-					// 提取最后 32 字节作为金额
-					syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
-				}
-
-				// 尝试获取发送者 (使用正确的 EIP155 Signer)
-				fromAddr := "[Contract_Call]"
-				signer := types.LatestSignerForChainID(big.NewInt(p.chainID))
-				if sender, err := types.Sender(signer, tx); err == nil {
-					fromAddr = sender.Hex()
-				}
-
-				syntheticTransfer := &models.Transfer{
-					BlockNumber:  models.BigInt{Int: blockNum},
-					TxHash:       tx.Hash().Hex(),
-					LogIndex:     syntheticIdx,
-					From:         strings.ToLower(fromAddr),
-					To:           strings.ToLower(toAddr),
-					Amount:       models.NewUint256FromBigInt(syntheticAmount),
-					TokenAddress: txToLow,
-				}
-				syntheticIdx++
-
-				_, err = dbTx.NamedExecContext(ctx, `
-					INSERT INTO transfers
-					(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
-					VALUES
-					(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
-					ON CONFLICT (block_number, log_index) DO NOTHING
-				`, syntheticTransfer)
-				if err == nil {
-					transfers = append(transfers, *syntheticTransfer)
-					Logger.Info("✅ Synthetic Transfer saved to DB",
+				if isMatched && !txWithRealLogs[tx.Hash().Hex()] {
+					toAddr := txToLow
+					Logger.Info("🎯 发现匹配交易",
 						slog.String("stage", "PROCESSOR"),
 						slog.String("tx_hash", tx.Hash().Hex()),
+						slog.String("to", txToLow),
 					)
+
+					// 构造一个合成的 Transfer 事件 (尝试从交易中提取真实地址)
+					input := tx.Data()
+					syntheticAmount := big.NewInt(1000) // 默认值
+					if len(input) >= 68 {
+						// 提取第 4-36 字节作为 To 地址 (ERC20 transfer 参数)
+						toAddr = common.BytesToAddress(input[16:36]).Hex()
+						// 提取最后 32 字节作为金额
+						syntheticAmount = new(big.Int).SetBytes(input[len(input)-32:])
+					}
+
+					// 尝试获取发送者 (使用正确的 EIP155 Signer)
+					fromAddr := "[Contract_Call]"
+					signer := types.LatestSignerForChainID(big.NewInt(p.chainID))
+					if sender, err := types.Sender(signer, tx); err == nil {
+						fromAddr = sender.Hex()
+					}
+
+					syntheticTransfer := &models.Transfer{
+						BlockNumber:  models.BigInt{Int: blockNum},
+						TxHash:       tx.Hash().Hex(),
+						LogIndex:     syntheticIdx,
+						From:         strings.ToLower(fromAddr),
+						To:           strings.ToLower(toAddr),
+						Amount:       models.NewUint256FromBigInt(syntheticAmount),
+						TokenAddress: txToLow,
+					}
+					syntheticIdx++
+
+					_, err = dbTx.NamedExecContext(ctx, `
+						INSERT INTO transfers
+						(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol)
+						VALUES
+						(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol)
+						ON CONFLICT (block_number, log_index) DO NOTHING
+					`, syntheticTransfer)
+					if err == nil {
+						transfers = append(transfers, *syntheticTransfer)
+						Logger.Info("✅ Synthetic Transfer saved to DB",
+							slog.String("stage", "PROCESSOR"),
+							slog.String("tx_hash", tx.Hash().Hex()),
+						)
+					}
 				}
 			}
 		}
 	}
 
-	// 🚀 Anvil 模式：强制生成 Synthetic Transfer（让空链也有数据）
+	// 🚀 模拟模式：强制生成 Synthetic Transfer（让空链也有数据）
 	// 诊断：如果这个区块没有任何 Transfer（real + synthetic），则伪造一个
-	if p.chainID == 31337 {
+	if p.enableSimulator && p.networkMode == "anvil" {
 		Logger.Info("🔍 [ANVIL] Checking if synthetic transfer needed",
 			slog.String("block", blockNum.String()),
 			slog.Int("existing_transfers", len(transfers)),
 		)
 	}
 
-	if len(transfers) == 0 && p.chainID == 31337 {
+	if len(transfers) == 0 && p.enableSimulator && p.networkMode == "anvil" {
 		// 生成一个模拟的 ETH 转账
 		mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Anvil Account #0
 		mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"   // Anvil Account #1
@@ -310,7 +312,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	}
 
 	if shouldUpdateCheckpoint {
-		if err := p.updateCheckpointInTx(ctx, dbTx, 1, checkpointTarget); err != nil {
+		if err := p.updateCheckpointInTx(ctx, dbTx, p.chainID, checkpointTarget); err != nil {
 			return fmt.Errorf("failed to update checkpoint for block %s: %w", checkpointTarget.String(), err)
 		}
 		p.blocksSinceLastCheckpoint = 0
