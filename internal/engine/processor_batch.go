@@ -83,6 +83,13 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
 
+	// 🚀 物理直连：将处理完的转账数据灌入内存热池
+	if p.hotBuffer != nil {
+		for _, t := range validTransfers {
+			p.hotBuffer.Add(t)
+		}
+	}
+
 	p.broadcastBatchEvents(blocks, validTransfers)
 	p.updateBatchMetrics(blocks)
 
@@ -182,6 +189,7 @@ func (p *Processor) processBatchSynthetic(block *types.Block, chainID int64, val
 
 		mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Anvil Account #0
 		mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"   // Anvil Account #1
+		// #nosec G115 - block number is safe in this context
 		mockAmount := big.NewInt(blockNum.Int64() % 1000000000)
 
 		anvilTransfer := models.Transfer{
