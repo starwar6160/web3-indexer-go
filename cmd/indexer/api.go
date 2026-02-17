@@ -489,7 +489,7 @@ func calculateLatency(ctx context.Context, db *sqlx.DB, latestChain, latestIndex
 }
 
 // calculateTPS 计算 Transactions Per Second
-func calculateTPS(ctx context.Context, db *sqlx.DB) float64 {
+func calculateTPS(_ context.Context, _ *sqlx.DB) float64 {
 	// 🚀 工业级对齐：直接从 Metrics 的 5s 滑动窗口获取
 	return engine.GetMetrics().GetWindowTPS()
 }
