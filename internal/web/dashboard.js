@@ -202,7 +202,17 @@ async function fetchStatus() {
         document.getElementById('totalTransfers').textContent = data?.total_transfers || '0';
         document.getElementById('tps').textContent = data?.tps || '0';
         document.getElementById('bps').textContent = data?.bps || '0';
-        document.getElementById('syncLag').textContent = data?.sync_lag || '0';
+        
+        // 🚀 Sync Lag & Time-Travel Alert
+        const syncLagEl = document.getElementById('syncLag');
+        if (data?.time_travel) {
+            syncLagEl.innerHTML = `<span style="color: #f43f5e; font-weight: bold; animation: pulse 2s infinite;">⚠️ RE-ALIGN REQ [${data.sync_lag}]</span>`;
+            addLog('🚨 CRITICAL: DB is ahead of Chain! Alignment required.', 'error');
+        } else {
+            syncLagEl.textContent = data?.sync_lag || '0';
+            syncLagEl.style.color = '#667eea';
+        }
+
         document.getElementById('latency').textContent = data?.e2e_latency_display || '0s';
         document.getElementById('totalVisitors').textContent = data?.total_visitors || '0';
         document.getElementById('adminIP').textContent = data?.admin_ip || 'None';

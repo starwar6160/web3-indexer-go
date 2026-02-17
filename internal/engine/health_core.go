@@ -69,8 +69,20 @@ func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
 
 	// 3. 计算延迟 (Sync Lag)
 	var syncLag int64
+	var timeTravel bool
 	if latestChainBlock != nil && h.sequencer != nil {
-		syncLag = latestChainBlock.Int64() - h.sequencer.GetExpectedBlock().Int64()
+		dbHeight := h.sequencer.GetExpectedBlock().Int64()
+		rpcHeight := latestChainBlock.Int64()
+		syncLag = rpcHeight - dbHeight
+
+		// 🚨 穿越判定：如果数据库跑到了链的前面
+		if dbHeight > rpcHeight {
+			timeTravel = true
+			Logger.Warn("🚨 CRITICAL: Time-travel detected! DB is ahead of Chain.",
+				"db_height", dbHeight,
+				"rpc_height", rpcHeight,
+				"diff", dbHeight-rpcHeight)
+		}
 	}
 
 	latestBlockStr := "0"
@@ -83,6 +95,7 @@ func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
 		"latest_chain_block": latestBlockStr,
 		"indexed_block":      expectedBlock,
 		"sync_lag":           syncLag,
+		"time_travel":        timeTravel, // 🚀 暴露给 UI 的穿越标志
 		"buffer_size":        bufferSize,
 		"rpc_nodes": map[string]int{
 			"healthy": h.rpcPool.GetHealthyNodeCount(),
