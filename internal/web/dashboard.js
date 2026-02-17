@@ -161,13 +161,39 @@ function updateBlocksTable(block) {
     if (table.rows.length > 10) table.deleteRow(10);
 }
 
-function formatAmount(amt) {
-    if (!amt) return '0';
+function formatAmount(amt, decimals = 18) {
+    if (!amt) return '0.00';
+    
+    // 处理科学计数法或过大的数字
     const s = amt.toString();
-    if (s.length > 20) {
-        return s.substring(0, 6) + '...' + s.substring(s.length - 6);
+    if (s.length > 30 || s.includes('e')) {
+        // 使用 BigInt 处理大数
+        try {
+            const amount = BigInt(s);
+            const divisor = BigInt(10 ** decimals);
+            const integerPart = amount / divisor;
+            const fractionalPart = amount % divisor;
+            
+            let fractionStr = fractionalPart.toString().padStart(decimals, '0');
+            // 只保留 4 位小数，去除末尾零
+            fractionStr = fractionStr.substring(0, 4).replace(/0+$/, '');
+            if (fractionStr === '') fractionStr = '00';
+            
+            return `${integerPart}.${fractionStr}`;
+        } catch (e) {
+            // BigInt 解析失败，回退到截断显示
+            return s.substring(0, 10) + '...';
+        }
     }
-    return s;
+    
+    // 小数字直接返回
+    if (s.length <= 18) {
+        const num = parseFloat(s) / Math.pow(10, decimals);
+        return num.toFixed(4);
+    }
+    
+    // 中等长度数字，截断显示
+    return s.substring(0, 6) + '...' + s.substring(s.length - 6);
 }
 
 function updateTransfersTable(tx) {
@@ -178,18 +204,18 @@ function updateTransfersTable(tx) {
     const to = tx.to || '0xunknown';
     const symbol = tx.symbol || '';
     const token = tx.token_address || '0xunknown';
-    const displayAmount = formatAmount(tx.amount || tx.value);
+    const displayAmount = formatAmount(tx.amount || tx.value, 18); // 默认 18 位精度
     
     // 🎨 Token Badge 渲染逻辑
-    const tokenDisplay = symbol ? 
+    const tokenDisplay = symbol && symbol !== token.substring(0, 10) ? 
         `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
-        `<span class="address">${token.substring(0, 10)}...</span>`;
+        `<span class="address" title="${token}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
     
     const row = `<tr>
         <td class="stat-value">${tx.block_number || '0'}</td>
         <td class="address">${from.substring(0, 10)}...</td>
         <td class="address">${to.substring(0, 10)}...</td>
-        <td class="stat-value" style="color: #667eea;" title="${tx.amount || tx.value}">${displayAmount}</td>
+        <td class="stat-value" style="color: #667eea; font-family: 'Courier New', monospace;" title="${tx.amount || tx.value}">${displayAmount}</td>
         <td>${tokenDisplay}</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
@@ -236,18 +262,18 @@ async function fetchData() {
                 const to = t.to_address || '0x...';
                 const symbol = t.symbol || '';
                 const token = t.token_address || '0x...';
-                const displayAmount = formatAmount(t.amount || '0');
+                const displayAmount = formatAmount(t.amount || '0', 18); // 默认 18 位精度
                 
                 // 🎨 Token Badge 渲染逻辑
-                const tokenDisplay = symbol ? 
+                const tokenDisplay = symbol && symbol !== token.substring(0, 10) ? 
                     `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
-                    `<span class="address">${token.substring(0, 10)}...</span>`;
+                    `<span class="address" title="${token}">${token.substring(0, 8)}...${token.substring(34)}</span>`;
                 
                 return `<tr>
                     <td class="stat-value">${t.block_number || '0'}</td>
                     <td class="address">${from.substring(0, 10)}...</td>
                     <td class="address">${to.substring(0, 10)}...</td>
-                    <td class="stat-value" title="${t.amount || '0'}">${displayAmount}</td>
+                    <td class="stat-value" style="color: #667eea; font-family: 'Courier New', monospace;" title="${t.amount || '0'}">${displayAmount}</td>
                     <td>${tokenDisplay}</td>
                 </tr>`;
             }).join('');
