@@ -119,8 +119,51 @@ h1 { color: #333; font-size: 28px; margin-bottom: 10px; }
     border-color: #9ca3af;
 }
 
-.token-unknown {
-    background: #f3f4f6;
-    color: #6b7280;
-    border-color: #d1d5db;
+/* 📊 Gas Guzzlers Leaderboard Styles */
+#gas-leaderboard {
+    margin-top: 10px;
+}
+
+.gas-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #333;
+}
+
+.gas-item:last-child {
+    border-bottom: none;
+}
+
+.gas-rank {
+    color: #666;
+    font-size: 11px;
+    font-weight: bold;
+    margin-right: 8px;
+    min-width: 20px;
+}
+
+.gas-label {
+    color: #22d3ee;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gas-stats {
+    text-align: right;
+}
+
+.gas-amount {
+    color: #e2e8f0;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+.gas-fee {
+    color: #64748b;
+    font-size: 10px;
 }

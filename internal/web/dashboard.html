@@ -141,7 +141,12 @@
     </div>
     <div class="container">
         <header>
-            <h1>{{ .Title }}</h1>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1>{{ .Title }}</h1>
+                <span class="status-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">
+                    {{ .Version }}
+                </span>
+            </div>
             <p class="header-subtitle">Real-time blockchain indexing with Go | Industrial Grade Architecture</p>
         </header>
 
@@ -223,6 +228,14 @@
                 </div>
                 <p style="font-size: 10px; color: #666; margin-top: 10px;">Identifies IPs with >90% traffic dominance as
                     non-human/dev and excludes them from persistent stats.</p>
+            </div>
+
+            <div class="card" style="flex: 1; border: 1px solid #f43f5e;">
+                <h2 style="color: #f43f5e;">🔥 Gas Guzzlers</h2>
+                <p style="color: #ccc; font-size: 13px; margin-bottom: 10px;">Top Gas Spenders in Latest Block</p>
+                <div id="gas-leaderboard" style="font-size: 12px;">
+                    <div style="color: #666; font-style: italic;">Analyzing network traffic...</div>
+                </div>
             </div>
 
             <div class="card" style="flex: 1; border: 1px solid #ff9800;">
@@ -313,8 +326,8 @@
             </table>
         </div>
     </div>
-    <script src="/static/dashboard.js?v=20260217v3"></script>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260217v3">
+    <script src="/static/dashboard.js?v=202602171624"></script>
+    <link rel="stylesheet" href="/static/dashboard.css?v=202602171624">
 </body>
 
 </html>

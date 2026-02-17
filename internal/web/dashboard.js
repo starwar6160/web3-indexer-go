@@ -55,6 +55,8 @@ function connectWS() {
                 // 🚀 Optimistic UI: If we see a transfer, the block is definitely processed
                 optimisticUpdateBlockStatus(tx.block_number);
                 addLog(`Transfer detected: ${tx.tx_hash.substring(0,10)}...`, 'success');
+            } else if (msg.type === 'gas_leaderboard') {
+                updateGasLeaderboard(msg.data);
             } else if (msg.type === 'log') {
                 addLog(msg.data.message, msg.data.level);
             }
@@ -244,7 +246,8 @@ function renderActivityIcon(type) {
         'TRANSFER':       '💸 <span style="color: #3b82f6;">Transfer</span>',
         'CONTRACT_EVENT': '📜 <span style="color: #94a3b8;">Contract Log</span>',
         'ETH_TRANSFER':   '⛽ <span style="color: #6366f1;">ETH Transfer</span>',
-        'DEPLOY':         '🏗️ <span style="color: #f43f5e;">Deployment</span>'
+        'DEPLOY':         '🏗️ <span style="color: #f43f5e;">Deployment</span>',
+        'FAUCET_CLAIM':   '🚰 <span style="color: #06b6d4; font-weight: bold;">Faucet Claim</span>'
     };
     return icons[type] || '⚡ <span style="color: #64748b;">Activity</span>';
 }
@@ -276,6 +279,28 @@ function updateTransfersTable(tx) {
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
     if (table.rows.length > 10) table.deleteRow(10);
+}
+
+function updateGasLeaderboard(data) {
+    const list = document.getElementById('gas-leaderboard');
+    if (!data || data.length === 0) return;
+    
+    list.innerHTML = data.map((item, index) => {
+        const label = item.label || (item.address.substring(0, 10) + '...');
+        const gasM = (item.total_gas / 1e6).toFixed(2);
+        return `
+            <div class="gas-item">
+                <div style="display: flex; align-items: center; overflow: hidden;">
+                    <span class="gas-rank">#${index + 1}</span>
+                    <span class="gas-label" title="${item.address}">${label}</span>
+                </div>
+                <div class="gas-stats">
+                    <div class="gas-amount">${gasM}M Gas</div>
+                    <div class="gas-fee">${item.total_fee} ETH</div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 async function fetchData() {
