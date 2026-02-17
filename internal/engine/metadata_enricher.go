@@ -265,8 +265,8 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 			// 即使数据库表不存在或写入失败，也不应导致整个同步逻辑回滚
 			if me.db != nil {
 				if err := me.db.SaveTokenMetadata(meta, addrHex); err != nil {
-					me.logger.Warn("⚠️ [MetadataEnricher] L2 persistence failed (non-blocking)", 
-						"address", addrHex[:10], 
+					me.logger.Warn("⚠️ [MetadataEnricher] L2 persistence failed (non-blocking)",
+						"address", addrHex[:10],
 						"err", err)
 				}
 			}

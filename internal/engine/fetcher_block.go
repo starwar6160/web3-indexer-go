@@ -127,7 +127,7 @@ func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
 		if tokens == 0 {
 			tokens = 1 // 即使空块也消耗 1 令牌，维持 2.0 BPS 的心跳
 		}
-		
+
 		if err := f.throughput.WaitN(ctx, tokens); err != nil {
 			return
 		}

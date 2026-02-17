@@ -14,7 +14,7 @@ type RepositoryAdapterWrapper struct {
 	DB *sqlx.DB
 }
 
-func (r *RepositoryAdapterWrapper) UpdateTokenSymbol(_, _ string) error { return nil }
+func (r *RepositoryAdapterWrapper) UpdateTokenSymbol(_, _ string) error         { return nil }
 func (r *RepositoryAdapterWrapper) UpdateTokenDecimals(_ string, _ uint8) error { return nil }
 func (r *RepositoryAdapterWrapper) SaveTokenMetadata(_ models.TokenMetadata, _ string) error {
 	return nil
