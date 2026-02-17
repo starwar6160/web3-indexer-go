@@ -51,22 +51,18 @@ trap 'log_error "预检失败在步骤 $STEP"; exit 1' ERR
 check_rpc_connectivity() {
     log_step "RPC 连通性与额度预检"
 
-    # 加载 .env.testnet 获取 RPC URL
-    if [ ! -f ".env.testnet" ]; then
-        log_error ".env.testnet 文件不存在"
-        exit 1
-    fi
+    log_info "使用配置文件: $ENV_PATH"
 
     # 尝试从多个源获取 RPC URL
-    if [ -f ".env.testnet" ]; then
-        log_info "使用 .env.testnet 中的配置"
-        # 避免直接 source 整个文件导致变量冲突，只提取 RPC_URLS
-        RPC_URLS=$(grep "RPC_URLS=" .env.testnet | cut -d'=' -f2- | tr -d '"')
-    elif [ -n "${RPC_URLS:-}" ]; then
-        log_info "使用环境变量 RPC_URLS"
-    else
-        log_warn "未找到 RPC URL 配置，尝试使用默认值"
-        RPC_URLS="https://rpc.sepolia.org"
+    RPC_URLS=$(grep "RPC_URLS=" "$ENV_PATH" | cut -d'=' -f2- | tr -d '"')
+    
+    if [ -z "$RPC_URLS" ]; then
+        if [ -n "${RPC_URLS:-}" ]; then
+            log_info "使用环境变量 RPC_URLS"
+        else
+            log_warn "未找到 RPC URL 配置，尝试使用默认值"
+            RPC_URLS="https://rpc.sepolia.org"
+        fi
     fi
 
     # 取第一个 RPC URL 进行测试
@@ -138,7 +134,7 @@ check_start_block_logic() {
     log_step "起始高度解析逻辑验证"
 
     # 检查 .env.testnet 中的 START_BLOCK 配置
-    if grep -q "START_BLOCK=latest" .env.testnet; then
+    if grep -q "START_BLOCK=latest" "$ENV_PATH"; then
         log_success "START_BLOCK=latest 配置正确"
 
         # 验证代码中是否有处理 latest 的逻辑
@@ -149,7 +145,7 @@ check_start_block_logic() {
             exit 1
         fi
     else
-        START_BLOCK=$(grep "START_BLOCK=" .env.testnet | cut -d'=' -f2)
+        START_BLOCK=$(grep "START_BLOCK=" "$ENV_PATH" | cut -d'=' -f2)
         log_warn "START_BLOCK=$START_BLOCK（建议使用 latest）"
     fi
 
@@ -170,9 +166,9 @@ check_rate_limiting() {
     log_step "单步限流抓取配置验证"
 
     # 检查 .env.testnet 中的限流配置（只取第一个匹配项，去除空白）
-    RPC_RATE_LIMIT=$(grep "RPC_RATE_LIMIT=" .env.testnet | head -n1 | cut -d'=' -f2 | tr -d '[:space:]')
-    FETCH_CONCURRENCY=$(grep "FETCH_CONCURRENCY=" .env.testnet | head -n1 | cut -d'=' -f2 | tr -d '[:space:]')
-    MAX_SYNC_BATCH=$(grep "MAX_SYNC_BATCH=" .env.testnet | head -n1 | cut -d'=' -f2 | tr -d '[:space:]')
+    RPC_RATE_LIMIT=$(grep "RPC_RATE_LIMIT=" "$ENV_PATH" | head -n1 | cut -d'=' -f2 | tr -d '[:space:]')
+    FETCH_CONCURRENCY=$(grep "FETCH_CONCURRENCY=" "$ENV_PATH" | head -n1 | cut -d'=' -f2 | tr -d '[:space:]')
+    MAX_SYNC_BATCH=$(grep "MAX_SYNC_BATCH=" "$ENV_PATH" | head -n1 | cut -d'=' -f2 | tr -d '[:space:]')
 
     log_info "当前配置："
     log_info "  RPC_RATE_LIMIT=$RPC_RATE_LIMIT req/sec"
@@ -216,13 +212,13 @@ check_observability() {
     fi
 
     # 检查端口配置
-    API_PORT=$(grep "API_PORT=" .env.testnet | cut -d'=' -f2 || echo "8081")
+    API_PORT=$(grep "API_PORT=" "$ENV_PATH" | cut -d'=' -f2 || echo "8081")
     log_info "API 端口: $API_PORT"
     log_info "Dashboard: http://localhost:$API_PORT"
     log_info "Metrics: http://localhost:$API_PORT/metrics"
 
     # 检查日志级别
-    LOG_LEVEL=$(grep "LOG_LEVEL=" .env.testnet | cut -d'=' -f2)
+    LOG_LEVEL=$(grep "LOG_LEVEL=" "$ENV_PATH" | cut -d'=' -f2)
     log_info "日志级别: $LOG_LEVEL"
 
     if [ "$LOG_LEVEL" = "debug" ]; then
@@ -242,6 +238,16 @@ main() {
     echo "  追求 6 个 9 持久性 · 小步快跑验证"
     echo "============================================"
     echo -e "${NC}"
+
+    # 定位 .env.testnet 文件
+    if [ -f ".env.testnet" ]; then
+        ENV_PATH=".env.testnet"
+    elif [ -f "configs/env/.env.testnet" ]; then
+        ENV_PATH="configs/env/.env.testnet"
+    else
+        log_error ".env.testnet 文件不存在 (检查了根目录和 configs/env/)"
+        exit 1
+    fi
 
     check_rpc_connectivity
     check_db_isolation

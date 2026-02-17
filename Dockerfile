@@ -25,7 +25,7 @@ FROM alpine:latest
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates postgresql-client
+RUN apk add --no-cache ca-certificates postgresql-client curl
 
 # Copy binary from builder
 COPY --from=builder /app/bin/indexer .
@@ -35,7 +35,7 @@ COPY migrations ./migrations
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1
+  CMD curl -f http://localhost:8080/api/status || exit 1
 
 # Run the indexer
 CMD ["./indexer"]

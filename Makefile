@@ -75,6 +75,17 @@ a1-pre-flight:
 	@echo "🔍 Running Sepolia pre-flight checks..."
 	@./scripts/infra/check-a1-pre-flight.sh
 
+# --- 生产级环境清理与重启 ---
+.PHONY: reset-8091-live
+reset-8091-live: stop-dev build
+	@echo "🚨 [ENVIRONMENT RESET] Cleaning Sepolia (8091) environment..."
+	@docker exec $(DB_CONTAINER) psql -U $(DB_USER) -d $(DEMO1_DB) \
+	  -c "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;"
+	@echo "✅ Database cleaned. Starting fresh Sepolia indexer with SECURITY LOCK..."
+	@NETWORK_MODE=sepolia ENABLE_SIMULATOR=false CHAIN_ID=11155111 PORT=8081 \
+	  ./bin/$(BINARY_NAME) --start-from latest &
+	@echo "🚀 Sepolia indexer is running in background (Port 8081). Check logs/ for progress."
+
 # --- 网关管理指令 ---
 gateway-config:
 	@chmod +x scripts/gen-nginx-config.sh

@@ -129,15 +129,14 @@ func (me *MetadataEnricher) batchWorker() {
 			return
 		case <-ticker.C:
 			// 收集一批地址
+		collectLoop:
 			for len(batch) < me.batchSize {
 				select {
 				case addr := <-me.queue:
 					batch = append(batch, addr)
 				default:
-					if len(batch) > 0 {
-						break
-					}
-					// 队列为空，等待下一个周期
+					// 队列为空，退出收集循环
+					break collectLoop
 				}
 			}
 
