@@ -34,7 +34,8 @@ func TestSequencerStartup(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool, 500, 11155111)
+	// 创建Processor和Metrics
+	processor := NewProcessor(db, rpcPool, 500, 11155111, false, "sepolia")
 	metrics := GetMetrics()
 
 	// 创建Sequencer
@@ -68,7 +69,7 @@ func TestSequencerBlockProcessing(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool, 500, 1)
+	processor := NewProcessor(db, rpcPool, 500, 1, false, "mainnet")
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)
@@ -110,7 +111,7 @@ func TestSequencerBuffering(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool, 500, 1)
+	processor := NewProcessor(db, rpcPool, 500, 1, false, "mainnet")
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)
@@ -185,7 +186,7 @@ func TestSequencerWithRealRPC(t *testing.T) {
 	require.NoError(t, err, "RPC connection failed")
 
 	// 创建Processor和Metrics
-	processor := NewProcessor(db, rpcPool, 500, 11155111)
+	processor := NewProcessor(db, rpcPool, 500, 11155111, false, "mainnet")
 	metrics := GetMetrics()
 
 	// 创建Sequencer
@@ -218,7 +219,7 @@ func TestSequencerGoroutinePanic(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool, 500, 1)
+	processor := NewProcessor(db, rpcPool, 500, 1, false, "mainnet")
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)
@@ -270,7 +271,7 @@ func TestSequencerContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 	defer rpcPool.Close()
 
-	processor := NewProcessor(db, rpcPool, 500, 1)
+	processor := NewProcessor(db, rpcPool, 500, 1, false, "mainnet")
 	metrics := GetMetrics()
 
 	startBlock := big.NewInt(100)
