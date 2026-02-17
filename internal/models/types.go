@@ -220,6 +220,7 @@ type Transfer struct {
 	From         string  `db:"from_address"`
 	To           string  `db:"to_address"`
 	TokenAddress string  `db:"token_address"`
-	Symbol       string  `db:"symbol"` // ✅ 新增：代币符号（如 USDC, USDT）
-	Amount       Uint256 `db:"amount"` // 使用 Uint256 保证金融级精度
+	Symbol       string  `db:"symbol"`        // ✅ 代币符号（如 USDC, USDT）
+	Type         string  `db:"activity_type"` // ✅ 活动类型（如 TRANSFER, SWAP, MINT）
+	Amount       Uint256 `db:"amount"`        // 使用 Uint256 保证金融级精度
 }
