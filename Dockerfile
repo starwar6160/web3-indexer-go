@@ -22,20 +22,28 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bin/indexer ./cmd
 # Stage 2: Runtime stage
 FROM alpine:latest
 
-WORKDIR /app
-
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates postgresql-client curl
+RUN apk add --no-cache ca-certificates postgresql-client curl tzdata
+
+# Create non-root user
+RUN adduser -D -g '' appuser
+
+WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/bin/indexer .
-
-# Copy migrations (if needed for initialization)
+# Copy migrations
 COPY migrations ./migrations
+
+# Set ownership
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8080/api/status || exit 1
 
 # Run the indexer
-CMD ["./indexer"]
+ENTRYPOINT ["./indexer"]

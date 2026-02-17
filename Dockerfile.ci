@@ -17,6 +17,12 @@ RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/i
 WORKDIR /app
 COPY . .
 
+# Create non-root user for local CI security (DS-0002)
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+
 RUN go mod download
+
+# Optional: switch to user, but some CI scripts might need sudo/apt
+USER appuser
 
 CMD ["/bin/bash", "./scripts/ci-local.sh"]

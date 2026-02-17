@@ -1,0 +1,13 @@
+.git
+.github
+.pytest_cache
+venv
+logs/
+bin/
+*.log
+indexer.log
+configs/docker/*.log
+configs/prometheus/data
+configs/grafana/data
+vendor/
+node_modules/
