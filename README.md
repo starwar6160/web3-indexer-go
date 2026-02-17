@@ -8,6 +8,7 @@
 ### 🚀 Live Demos
 *   **Production (Sepolia)**: [https://demo1.st6160.click/](https://demo1.st6160.click/)
 *   **Local Lab (Anvil)**: [https://demo2.st6160.click/](https://demo2.st6160.click/)
+*   **Engineering Journey**: [Read the 10-Day Sprint Log](./DEVELOPMENT.md) 🚀
 
 An ultra-reliable, cost-efficient Ethereum event indexer built with **Go**, **PostgreSQL**, and **Docker**. Designed for teams that need production-grade blockchain data pipelines without the infrastructure overhead.
 

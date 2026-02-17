@@ -5,6 +5,7 @@
 ### 🚀 在线演示
 *   **生产环境 (Sepolia)**: [https://demo1.st6160.click/](https://demo1.st6160.click/)
 *   **本地实验室 (Anvil)**: [https://demo2.st6160.click/](https://demo2.st6160.click/)
+*   **研发历程**: [查看十日研发征程日志](./DEVELOPMENT_ZH.md) 🚀
 
 基于 **Go**、**PostgreSQL** 和 **Docker** 构建的高可靠、低成本以太坊事件索引器。为需要生产级区块链数据管道、又不想承担基础设施运维负担的团队设计。
 
