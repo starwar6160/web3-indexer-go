@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"web3-indexer-go/internal/models"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/jmoiron/sqlx"
 )
@@ -28,6 +30,70 @@ func (r *repositoryAdapter) UpdateTokenSymbol(tokenAddress, symbol string) error
 func (r *repositoryAdapter) UpdateTokenDecimals(_ string, _ uint8) error {
 	// 预留方法，当前 schema 没有 decimals 字段
 	return nil
+}
+
+func (r *repositoryAdapter) SaveTokenMetadata(meta models.TokenMetadata, address string) error {
+	query := `
+		INSERT INTO token_metadata (address, symbol, decimals, name, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (address) DO UPDATE SET
+			symbol = EXCLUDED.symbol,
+			decimals = EXCLUDED.decimals,
+			name = EXCLUDED.name,
+			updated_at = NOW()
+	`
+	_, err := r.db.Exec(query, strings.ToLower(address), meta.Symbol, meta.Decimals, meta.Name)
+	return err
+}
+
+func (r *repositoryAdapter) LoadAllMetadata() (map[string]models.TokenMetadata, error) {
+	var rows []struct {
+		Address  string `db:"address"`
+		Symbol   string `db:"symbol"`
+		Decimals uint8  `db:"decimals"`
+		Name     string `db:"name"`
+	}
+
+	err := r.db.Select(&rows, "SELECT address, symbol, decimals, name FROM token_metadata")
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]models.TokenMetadata)
+	for _, row := range rows {
+		result[strings.ToLower(row.Address)] = models.TokenMetadata{
+			Symbol:   row.Symbol,
+			Decimals: row.Decimals,
+			Name:     row.Name,
+		}
+	}
+	return result, nil
+}
+
+func (r *repositoryAdapter) GetMaxStoredBlock(ctx context.Context) (int64, error) {
+	var dbMax int64
+	err := r.db.GetContext(ctx, &dbMax, "SELECT COALESCE(MAX(number), 0) FROM blocks")
+	return dbMax, err
+}
+
+func (r *repositoryAdapter) PruneFutureData(ctx context.Context, chainHead int64) error {
+	// Directly execute delete queries
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // nolint:errcheck // Rollback is standard practice, error is usually non-critical during cleanup
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", chainHead); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", chainHead); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", chainHead); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // TransferEventHash defined in signatures.go
@@ -154,6 +220,19 @@ func (p *Processor) SetWatchedAddresses(addresses []string) {
 // GetRPCClient returns the RPC client used by the processor
 func (p *Processor) GetRPCClient() RPCClient {
 	return p.client
+}
+
+// GetSymbol returns the token symbol, triggering enrichment if missing
+func (p *Processor) GetSymbol(addr common.Address) string {
+	if p.enricher != nil {
+		return p.enricher.GetSymbol(addr)
+	}
+	return addr.Hex()[:10] + "..."
+}
+
+// GetRepoAdapter returns the underlying repository adapter for the guard
+func (p *Processor) GetRepoAdapter() DBUpdater {
+	return &repositoryAdapter{db: p.db}
 }
 
 // ProcessBlockWithRetry 带重试的区块处理
