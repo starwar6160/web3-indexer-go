@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"math/big"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -15,6 +15,18 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
+
+// secureIntn 返回 [0, n) 之间的安全随机整数
+func secureIntn(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	val, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(val.Int64())
+}
 
 // Anvil 默认私钥列表
 var privateKeys = []string{
@@ -57,19 +69,19 @@ func main() {
 
 	for range ticker.C {
 		go func() {
-			acc := accounts[rand.Intn(len(accounts))]
+			acc := accounts[secureIntn(len(accounts))]
 			acc.Mu.Lock()
 			defer acc.Mu.Unlock()
 
 			ctx := context.Background()
 			gasPrice, _ := client.SuggestGasPrice(ctx)
 
-			action := rand.Intn(5)
+			action := secureIntn(5)
 			var tx *types.Transaction
 
 			switch action {
 			case 0: // ⛽ Native ETH
-				tx = types.NewTransaction(acc.Nonce, accounts[rand.Intn(len(accounts))].Address, big.NewInt(1e15), 21000, gasPrice, nil)
+				tx = types.NewTransaction(acc.Nonce, accounts[secureIntn(len(accounts))].Address, big.NewInt(1e15), 21000, gasPrice, nil)
 			case 1: // 💸 Transfer
 				data := common.FromHex("0xa9059cbb00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79ee0000000000000000000000000000000000000000000000000000000000000001")
 				tx = types.NewTransaction(acc.Nonce, common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), big.NewInt(0), 100000, gasPrice, data)
@@ -81,8 +93,10 @@ func main() {
 				tx = types.NewContractCreation(acc.Nonce, big.NewInt(0), 500000, gasPrice, data)
 			case 4: // 🍔 Gas Guzzler (Complex Data)
 				data := make([]byte, 2000)
-				rand.Read(data)
-				tx = types.NewTransaction(acc.Nonce, accounts[rand.Intn(len(accounts))].Address, big.NewInt(0), 1000000, gasPrice, data)
+				if _, err := rand.Read(data); err != nil {
+					return
+				}
+				tx = types.NewTransaction(acc.Nonce, accounts[secureIntn(len(accounts))].Address, big.NewInt(0), 1000000, gasPrice, data)
 			}
 
 			signedTx, _ := types.SignTx(tx, types.LatestSignerForChainID(chainID), acc.Key)
