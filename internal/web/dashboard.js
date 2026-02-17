@@ -176,14 +176,21 @@ function updateTransfersTable(tx) {
     if (table.querySelector('.loading')) table.innerHTML = '';
     const from = tx.from || '0xunknown';
     const to = tx.to || '0xunknown';
+    const symbol = tx.symbol || '';
     const token = tx.token_address || '0xunknown';
     const displayAmount = formatAmount(tx.amount || tx.value);
+    
+    // 🎨 Token Badge 渲染逻辑
+    const tokenDisplay = symbol ? 
+        `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
+        `<span class="address">${token.substring(0, 10)}...</span>`;
+    
     const row = `<tr>
         <td class="stat-value">${tx.block_number || '0'}</td>
         <td class="address">${from.substring(0, 10)}...</td>
         <td class="address">${to.substring(0, 10)}...</td>
         <td class="stat-value" style="color: #667eea;" title="${tx.amount || tx.value}">${displayAmount}</td>
-        <td class="address">${token.substring(0, 10)}...</td>
+        <td>${tokenDisplay}</td>
     </tr>`;
     table.insertAdjacentHTML('afterbegin', row);
     if (table.rows.length > 10) table.deleteRow(10);
@@ -227,14 +234,21 @@ async function fetchData() {
             table.innerHTML = txData.transfers.map(t => {
                 const from = t.from_address || '0x...';
                 const to = t.to_address || '0x...';
+                const symbol = t.symbol || '';
                 const token = t.token_address || '0x...';
                 const displayAmount = formatAmount(t.amount || '0');
+                
+                // 🎨 Token Badge 渲染逻辑
+                const tokenDisplay = symbol ? 
+                    `<span class="token-badge token-${symbol.toLowerCase()}">${symbol}</span>` : 
+                    `<span class="address">${token.substring(0, 10)}...</span>`;
+                
                 return `<tr>
                     <td class="stat-value">${t.block_number || '0'}</td>
                     <td class="address">${from.substring(0, 10)}...</td>
                     <td class="address">${to.substring(0, 10)}...</td>
                     <td class="stat-value" title="${t.amount || '0'}">${displayAmount}</td>
-                    <td class="address">${token.substring(0, 10)}...</td>
+                    <td>${tokenDisplay}</td>
                 </tr>`;
             }).join('');
         }

@@ -34,3 +34,57 @@ h1 { color: #333; font-size: 28px; margin-bottom: 10px; }
 .status-live { color: #28a745; font-weight: bold; }
 .status-connecting { color: #ffc107; }
 .status-down { color: #dc3545; }
+
+/* 🎨 Token Badge Styles - Industrial Grade Color Coding */
+.token-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+    border: 1px solid;
+    font-family: 'Courier New', monospace;
+}
+
+/* Token-specific colors */
+.token-usdc {
+    background: #d1fae5;
+    color: #065f46;
+    border-color: #34d399;
+}
+
+.token-usdt {
+    background: #ccfbf1;
+    color: #115e59;
+    border-color: #2dd4bf;
+}
+
+.token-wbtc {
+    background: #ffedd5;
+    color: #9a3412;
+    border-color: #fb923c;
+}
+
+.token-weth {
+    background: #dbeafe;
+    color: #1e40af;
+    border-color: #60a5fa;
+}
+
+.token-dai {
+    background: #fef3c7;
+    color: #92400e;
+    border-color: #fbbf24;
+}
+
+.token-eth {
+    background: #e5e7eb;
+    color: #374151;
+    border-color: #9ca3af;
+}
+
+.token-unknown {
+    background: #f3f4f6;
+    color: #6b7280;
+    border-color: #d1d5db;
+}
