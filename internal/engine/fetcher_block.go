@@ -60,24 +60,33 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		logsByBlock[vLog.BlockNumber] = append(logsByBlock[vLog.BlockNumber], vLog)
 	}
 
-	// Step 3: Fetch Headers for blocks that have logs
+	// Step 3: Fetch Full Blocks (with transactions) for blocks that have logs
 	for bNum, blockLogs := range logsByBlock {
 		bn := new(big.Int).SetUint64(bNum)
-		header, err := f.fetchHeaderWithRetry(ctx, bn)
+		
+		// 🚀 修复：使用 BlockByNumber 获取完整区块（包含交易），而不是只用 Header
+		block, err := f.pool.BlockByNumber(ctx, bn)
 		if err != nil {
+			Logger.Warn("⚠️ [FETCHER] Failed to fetch full block",
+				"block", bn,
+				"err", err)
 			f.sendResult(ctx, BlockData{Number: bn, Err: err})
 			continue
 		}
 
-		// 🚀 防御性检查：确保 header 不为 nil
-		if header == nil {
-			slog.Warn("⚠️ [FETCHER] Received nil header for block with logs",
+		// 🚀 防御性检查：确保 block 不为 nil
+		if block == nil {
+			slog.Warn("⚠️ [FETCHER] Received nil block for block with logs",
 				"block", bn,
 				"skip", true)
 			continue
 		}
 
-		block := types.NewBlockWithHeader(header)
+		Logger.Debug("📡 [FETCHER_RAW_CHECK]",
+			slog.String("block", bn.String()),
+			slog.Int("tx_count", block.Transactions().Len()),
+			slog.Uint64("gas_used", block.GasUsed()))
+
 		f.sendResult(ctx, BlockData{Number: bn, Block: block, Logs: blockLogs})
 	}
 
@@ -90,20 +99,25 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 			continue // Already sent in Step 3
 		}
 
-	// Fetch header for the very last block in range to update UI time
+	// Fetch full block for the very last block in range to update UI time and tx count
 		// For others, we can be lazy and send nil Block to just move the pointer
 		var block *types.Block
 		if bn.Cmp(end) == 0 {
-			header, err := f.fetchHeaderWithRetry(ctx, bn)
-			if err == nil && header != nil {
-				block = types.NewBlockWithHeader(header)
-			}
-			// 🚀 防御性：如果 fetch 失败，记录警告但不发送 nil block
-			if header == nil {
-				slog.Warn("⚠️ [FETCHER] Failed to fetch header for last block",
+			// 🚀 修复：使用 BlockByNumber 获取完整区块（包含交易）
+			var err error
+			block, err = f.pool.BlockByNumber(ctx, bn)
+			if err != nil {
+				slog.Warn("⚠️ [FETCHER] Failed to fetch full block for last block",
 					"block", bn,
-					"skip", true)
-				continue // 跳过这个块
+					"err", err,
+					"skip", false) // 继续发送，但 block 为 nil
+			}
+			
+			// 🚀 防御性：如果 fetch 失败，仍然发送但 block 为 nil
+			if block == nil {
+				slog.Warn("⚠️ [FETCHER] Sending nil block for last block",
+					"block", bn,
+					"skip", false)
 			}
 		}
 
