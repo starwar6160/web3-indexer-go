@@ -28,8 +28,26 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// 允许跨域（生产环境需限制）
-	CheckOrigin: func(_ *http.Request) bool { return true },
+	// 🚀 工业级安全保护：限制跨域请求，防止 CSRF/WebSocket Hijacking
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // 允许非浏览器请求
+		}
+
+		// 允许本地开发环境
+		if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+			return true
+		}
+
+		// 允许指定的演示域名 (横滨实验室官方域名)
+		if strings.Contains(origin, "st6160.click") {
+			return true
+		}
+
+		slog.Warn("🚫 [Security] Blocked unauthorized WebSocket origin", "origin", origin)
+		return false
+	},
 }
 
 // Client 代表一个连接的前端用户
