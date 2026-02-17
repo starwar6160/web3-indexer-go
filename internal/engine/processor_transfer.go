@@ -92,13 +92,22 @@ func (p *Processor) ProcessLog(vLog types.Log) *models.Transfer {
 		Type:         activityType,
 	}
 
+	// 🚀 核心：识别已知实体（如领水）
+	fromLabel := GetAddressLabel(activity.From)
+	if fromLabel != "" {
+		activity.Symbol = fromLabel
+		activity.Type = "FAUCET_CLAIM"
+	}
+
 	// 🎨 元数据解析逻辑
 	staticSymbol := getTokenSymbol(vLog.Address)
-	if staticSymbol != "" {
-		activity.Symbol = staticSymbol
-	} else if p.enricher != nil {
-		tokenAddr := common.HexToAddress(activity.TokenAddress)
-		activity.Symbol = p.enricher.GetSymbol(tokenAddr)
+	if activity.Symbol == "" {
+		if staticSymbol != "" {
+			activity.Symbol = staticSymbol
+		} else if p.enricher != nil {
+			tokenAddr := common.HexToAddress(activity.TokenAddress)
+			activity.Symbol = p.enricher.GetSymbol(tokenAddr)
+		}
 	}
 
 	if activity.Symbol == "" {

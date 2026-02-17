@@ -64,11 +64,13 @@ func RenderDashboard(w http.ResponseWriter, r *http.Request) {
 		Environment string
 		PostgresDS  string
 		GrafanaHost string
+		Version     string
 	}{
 		Title:       title,
 		Environment: envName,
 		PostgresDS:  dsName,
 		GrafanaHost: grafanaHost,
+		Version:     "v2.2.0-intelligence-engine",
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

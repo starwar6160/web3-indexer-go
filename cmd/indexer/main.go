@@ -41,6 +41,7 @@ var (
 	cfg               *config.Config
 	selfHealingEvents atomic.Uint64
 	forceFrom         string
+	Version           = "v2.2.0-intelligence-engine" // 🚀 工业级版本号
 )
 
 func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, forceFrom string, resetDB bool) (*big.Int, error) {

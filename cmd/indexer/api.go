@@ -38,7 +38,8 @@ type Transfer struct {
 	ToAddress    string  `db:"to_address" json:"to_address"`
 	Amount       string  `db:"amount" json:"amount"`
 	TokenAddress string  `db:"token_address" json:"token_address"`
-	Symbol       string  `db:"symbol" json:"symbol"` // ✅ 新增：代币符号
+	Symbol       string  `db:"symbol" json:"symbol"`        // ✅ 代币符号
+	Type         string  `db:"activity_type" json:"type"` // ✅ 新增：活动类型
 }
 
 // Server 包装 HTTP 服务
@@ -452,6 +453,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 
 	status := map[string]interface{}{
+		"version":            "v2.2.0-intelligence-engine", // 🚀 同步版本号
 		"state":              "active",
 		"latest_block":       latestBlockStr,
 		"latest_indexed":     latestIndexedBlock,
