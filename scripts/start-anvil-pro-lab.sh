@@ -29,16 +29,14 @@ sleep 1
 echo "✅ 端口 8092 已清理"
 echo ""
 
-# 3. 重置数据库（可选）
-read -p "是否重置数据库？(y/N) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    make anvil-reset
-    echo ""
-fi
+# 3. 强制重置数据库 (仿真内存数据库体验)
+echo "3️⃣ 强制重置数据库 (In-Memory Simulation)..."
+make anvil-reset
+make doctor
+echo ""
 
 # 4. 启动 Indexer（后台）
-echo "3️⃣ 启动 Indexer (后台)..."
+echo "4️⃣ 启动 Indexer (后台)..."
 export PORT=8092
 export RPC_URLS="http://127.0.0.1:8545"
 export CHAIN_ID=31337
