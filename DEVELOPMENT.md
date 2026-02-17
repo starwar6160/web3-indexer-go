@@ -51,21 +51,20 @@ This log documents the rapid evolution of the Web3 Indexer from a blank reposito
     * **Activity Categorization**: Implemented logic to identify **Swap, Approve, Mint, and Deploy** events.
     * **Transaction Sniffing**: Added scanning of raw transactions to capture **Native ETH Transfers** and **Contract Deployments**, providing a complete picture of network activity.
 
-### **Phase 7: Industrial Hardening & Performance (Final Quality Gate)**
+### **Phase 8: Data Consistency & Quota Intelligence (The Economic Shield)**
 
-* **Feb 17 (Night): Stress Testing & Vulnerability Shielding**
-* **Task**: Resolve final security vulnerabilities and validate high-TPS performance.
+* **Feb 17 (Late Night): Anti-Time-Travel & On-Demand Lifecycle**
+* **Task**: Implement surgical data alignment and user-centric resource management.
 * **Solve**: 
-    * **Zero Root Execution**: Hardened `Dockerfile` to use a non-root `appuser`, preventing container escape risks.
-    * **Vulnerability Patch**: Upgraded `gnark-crypto` to v0.19.2 to mitigate memory allocation OOM attacks.
-    * **Sequencer Testing**: Implemented unit tests for out-of-order block reordering logic, ensuring mathematical correctness of the sequencing engine.
-    * **High-TPS Benchmarking**: Created `tools/stress_tester.go` to simulate 1000+ TPS load, validating the 5600U environment's throughput limits.
+    * **Linearity Sentry**: Developed a `ConsistencyGuard` that performs a forced alignment check on every system wake-up. If the database is found to be in the "future" (due to Anvil reset), the system automatically prunes stale records.
+    * **Visual Recovery**: Added real-time progress reporting to the Cyberpunk Sleeping Overlay, showing `CHECKING` and `REPAIRING` statuses.
+    * **On-Demand "Pull" Mode**: Integrated `LazyManager` with WebSocket heartbeats and Page Visibility API, ensuring 0 CU/hour consumption when no active users are present.
+    * **Sliding Window TPS**: Replaced historical average with a 10s sliding window for high-precision real-time throughput visualization.
 
 ---
 
 ### 📈 **Future Roadmap**
 - [ ] **Object Reuse**: Integrate `sync.Pool` for `Transfer` models to reduce GC pressure under 2000+ TPS.
-- [ ] **Advanced Multicall**: Support dynamic batch size adjustment based on RPC latency.
 - [ ] **Cross-Chain Expansion**: Adapt the Intelligence Engine for Base/Arbitrum L2s.
 
 
