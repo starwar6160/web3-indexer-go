@@ -125,10 +125,25 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 
 	ctx := r.Context()
 
-	// 🔥 Anvil 优化：每次 API 调用强制刷新高度，消除数字倒挂
-	if chainID == 31337 {
+	// 🔥 原子状态更新：Latest (on Chain) = max(Fetcher_Current, RPC_Latest)
+	// 解决指标更新滞后问题：Dashboard 显示的高度可能落后于 TailFollow 实际调度的高度
+	//
+	// 策略：
+	// 1. 优先使用 HeightOracle（TailFollow 推送）
+	// 2. 如果为 0（冷启动），则从 RPC 拉取
+	// 3. Anvil 环境：每次强制刷新（消除缓存）
+	snap := engine.GetHeightOracle().Snapshot()
+	latestChainInt64 := snap.ChainHead
+
+	// 冷启动或 Anvil 环境：强制从 RPC 获取最新高度
+	if latestChainInt64 == 0 || chainID == 31337 {
 		if tip, err := rpcPool.GetLatestBlockNumber(ctx); err == nil && tip != nil {
-			engine.GetHeightOracle().SetChainHead(tip.Int64())
+			rpcHeight := tip.Int64()
+			// 只更新 RPC 高度更高时（避免回退）
+			if rpcHeight > latestChainInt64 {
+				engine.GetHeightOracle().SetChainHead(rpcHeight)
+				latestChainInt64 = rpcHeight
+			}
 		}
 	}
 
@@ -140,9 +155,9 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	// HeightOracle.ChainHead() is written exclusively by TailFollow (every 500ms),
 	// which is the most authoritative and up-to-date source.
 	// HeightOracle.IndexedHead() is written by Processor after each checkpoint commit.
-	snap := engine.GetHeightOracle().Snapshot()
-
-	latestChainInt64 := snap.ChainHead
+	// Re-read snapshot after potential update
+	snap = engine.GetHeightOracle().Snapshot()
+	latestChainInt64 = snap.ChainHead
 	latestIndexedBlockInt64 := snap.IndexedHead
 	latestIndexedBlock := fmt.Sprintf("%d", latestIndexedBlockInt64)
 

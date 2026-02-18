@@ -228,18 +228,38 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		return
 	}
 
-	// 🚀 Dynamic Speed Control: Enforce strict 1.0 TPS serial sync for Sepolia
+	// 🚀 Dynamic Speed Control: 环境感知性能配置
+	// 获取性能配置文件（自动检测 Anvil/生产环境）
+	perfProfile := engine.GetPerformanceProfile(cfg.RPCURLs, cfg.ChainID)
+	perfProfile.ApplyToConfig(cfg)
+
+	// 应用性能配置
 	concurrency := cfg.FetchConcurrency
-	tpsLimit := 1000.0 // Default for local Anvil
-	if cfg.IsTestnet {
-		concurrency = 1 // Force serial to prevent TPS bursts
-		tpsLimit = 1.0  // 极度保守：每秒 1 笔交易，绝对保住额度
+	tpsLimit := cfg.RPCRateLimit
+	batchSize := cfg.MaxSyncBatch
+
+	if perfProfile.EnableAggressiveBatch {
+		// 🔥 横滨实验室极限性能配置
+		concurrency = perfProfile.FetchConcurrency
+		tpsLimit = int(perfProfile.TPSLimit)
+		batchSize = perfProfile.BatchSize
+		slog.Info("🔥 YOKOHAMA LAB PROFILE ACTIVATED",
+			"concurrency", concurrency,
+			"tps_limit", tpsLimit,
+			"batch_size", batchSize,
+			"channel_buffer", perfProfile.ChannelBufferSize,
+		)
+	} else if cfg.IsTestnet {
+		// 🛡️ Sepolia 生产环境：极度保守
+		concurrency = 1
+		tpsLimit = 1
+		batchSize = 1
 		slog.Info("🛡️ Quota protection ACTIVE: Enforcing 1.0 TPS strict serial sync")
 	}
 
-	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, concurrency, cfg.EnableSimulator, cfg.NetworkMode, cfg.EnableRecording, cfg.RecordingPath)
+	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, tpsLimit, tpsLimit*2, concurrency, cfg.EnableSimulator, cfg.NetworkMode, cfg.EnableRecording, cfg.RecordingPath)
 	configureTokenFiltering(sm)
-	sm.fetcher.SetThroughputLimit(tpsLimit)
+	sm.fetcher.SetThroughputLimit(float64(tpsLimit))
 
 	// 🚀 启动期基础设施对齐 (自愈)
 	if err := sm.Processor.AlignInfrastructure(ctx, rpcPool); err != nil {
@@ -475,9 +495,12 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 
 	// 🚀 工业级优化：本地 Anvil 实验室使用超高频轮询（100ms）
 	tickerInterval := 500 * time.Millisecond
+	// 🔥 横滨实验室滑动时间窗口：Anvil 环境下，调度更激进的范围
+	schedulingWindow := big.NewInt(10) // 默认调度窗口：10 个块
 	if cfg.ChainID == 31337 {
 		tickerInterval = 100 * time.Millisecond
-		slog.Info("🔥 Anvil TailFollow: 100ms hyper-frequency update")
+		schedulingWindow = big.NewInt(100) // Anvil：100 个块窗口
+		slog.Info("🔥 Anvil TailFollow: 100ms hyper-frequency, 100-block sliding window")
 	}
 	ticker := time.NewTicker(tickerInterval)
 
@@ -499,9 +522,16 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 				// This also keeps Metrics.lastChainHeight in sync via SetChainHead().
 				engine.GetHeightOracle().SetChainHead(tip.Int64())
 
+				// 🔥 滑动时间窗口批处理：调度 lastScheduled+1 到 tip+schedulingWindow
+				// 这确保了即使 Anvil 高速出块，Fetcher 也能获取足够大的批次
 				nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
-				slog.Info("🐕 [TailFollow] Scheduling new range", "from", nextBlock.String(), "to", tip.String())
-				if err := fetcher.Schedule(ctx, nextBlock, tip); err != nil {
+				aggressiveTip := new(big.Int).Add(tip, schedulingWindow)
+
+				slog.Info("🐕 [TailFollow] Scheduling new range",
+					"from", nextBlock.String(),
+					"to", aggressiveTip.String(),
+					"window", schedulingWindow.Int64())
+				if err := fetcher.Schedule(ctx, nextBlock, aggressiveTip); err != nil {
 					slog.Error("🐕 [TailFollow] Failed to schedule", "err", err)
 				}
 				lastScheduled.Set(tip)

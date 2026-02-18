@@ -47,8 +47,8 @@ func GetPolicy(rpcURLs []string, chainID int64) IndexerPolicy {
 	}
 }
 
-// isLocalAnvil 检测是否为本地 Anvil 环境
-func isLocalAnvil(rpcURL string) bool {
+// IsLocalAnvil 检测是否为本地 Anvil 环境（导出供其他包使用）
+func IsLocalAnvil(rpcURL string) bool {
 	lowerURL := strings.ToLower(rpcURL)
 	anvilSignals := []string{
 		"localhost",
@@ -64,4 +64,9 @@ func isLocalAnvil(rpcURL string) bool {
 		}
 	}
 	return false
+}
+
+// isLocalAnvil 内部使用的别名（保持向后兼容）
+func isLocalAnvil(rpcURL string) bool {
+	return IsLocalAnvil(rpcURL)
 }
