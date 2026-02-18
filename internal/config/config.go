@@ -36,6 +36,11 @@ type Config struct {
 	EnableRecording    bool          // 🚀 新增：是否开启 LZ4 录制
 	RecordingPath      string        // 🚀 新增：录制文件路径
 
+	// 🛡️ Deadlock watchdog config
+	DeadlockWatchdogEnabled    bool   // 死锁看门狗开关
+	DeadlockStallThresholdSec  int64  // 闲置阈值（秒）
+	DeadlockCheckIntervalSec   int64  // 检查间隔（秒）
+
 	// 代币过滤配置
 	WatchedTokenAddresses []string // 监控的 ERC20 合约地址
 	TokenFilterMode       string   // "whitelist" 或 "all"
@@ -96,6 +101,11 @@ func Load() *Config {
 	retryQueueSize := int(getEnvAsInt64("RETRY_QUEUE_SIZE", 500))
 	maxSyncBatch := int(getEnvAsInt64("MAX_SYNC_BATCH", 20)) // 提高至 20 块，对抗 1.0 TPS 限制
 
+	// 🛡️ Deadlock watchdog 配置
+	deadlockWatchdogEnabled := strings.ToLower(os.Getenv("DEADLOCK_WATCHDOG_ENABLED")) == trueVal
+	deadlockStallThresholdSec := getEnvAsInt64("DEADLOCK_STALL_THRESHOLD_SECONDS", 120)
+	deadlockCheckIntervalSec := getEnvAsInt64("DEADLOCK_CHECK_INTERVAL_SECONDS", 30)
+
 	// Check if we're connecting to a testnet
 	isTestnet := false
 	for _, url := range rpcUrls {
@@ -152,10 +162,14 @@ func Load() *Config {
 		EnableEnergySaving:    energySaving,
 		EnableRecording:       strings.ToLower(os.Getenv("ENABLE_RECORDING")) == trueVal,
 		RecordingPath:         getEnv("RECORDING_PATH", "trajectory.lz4"),
-		WatchedTokenAddresses: watchedTokens,
-		TokenFilterMode:       getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
-		Port:                  getEnv("PORT", "8080"),
-		AppTitle:              getEnv("APP_TITLE", "🚀 Web3 Indexer Dashboard"),
+		// 🛡️ Deadlock watchdog: 环境隔离，仅在 Anvil/Demo 模式生效
+		DeadlockWatchdogEnabled:   deadlockWatchdogEnabled && (chainID == 31337 || demoMode),
+		DeadlockStallThresholdSec: deadlockStallThresholdSec,
+		DeadlockCheckIntervalSec:  deadlockCheckIntervalSec,
+		WatchedTokenAddresses:     watchedTokens,
+		TokenFilterMode:           getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
+		Port:                      getEnv("PORT", "8080"),
+		AppTitle:                  getEnv("APP_TITLE", "🚀 Web3 Indexer Dashboard"),
 	}
 
 	// 🚨 优先级锁定：优先信任显式传入的 RPC_URLS 环境变量
