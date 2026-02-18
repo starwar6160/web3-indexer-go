@@ -125,6 +125,30 @@ ci:
 		-v $(PWD):/app \
 		web3-indexer-ci:local
 
+# --- Security & Vulnerability Management ---
+.PHONY: check-security fix-crypto check-vulnerability
+
+check-security:
+	@echo "🛡️  执行官方漏洞扫描 (govulncheck)..."
+	@go install golang.org/x/vuln/cmd/govulncheck@latest 2>/dev/null || true
+	@govulncheck ./...
+	@echo ""
+	@echo "🔍 执行 GoSec 静态代码安全扫描..."
+	@which gosec >/dev/null 2>&1 || go install github.com/securego/gosec/v2/cmd/gosec@latest
+	@gosec -stdout -no-fail -tests=false ./...
+	@echo ""
+	@echo "✅ Security scan completed"
+
+fix-crypto:
+	@echo "🚀  强制升级加密库以修复 CVE-2025-47914..."
+	go get golang.org/x/crypto@v0.45.0
+	go mod tidy
+	@echo "✅ Crypto library upgraded to v0.45.0"
+
+check-vulnerability:
+	@echo "🔍 执行 Trivy 漏洞扫描..."
+	@bash scripts/infra/vulnerability-scan.sh
+
 # Anvil 快捷命令
 .PHONY: anvil-status anvil-reset anvil-inject anvil-inject-defi anvil-verify anvil-pro
 anvil-status:
