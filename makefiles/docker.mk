@@ -87,3 +87,36 @@ stop-all:
 	-@COMPOSE_PROJECT_NAME=web3-demo2 docker compose -p $(PROJECT_NAME) -f configs/docker/docker-compose.yml down 2>/dev/null || true
 	-@docker compose -p $(PROJECT_NAME) -f $(INFRA_COMPOSE) down 2>/dev/null || true
 	@echo "✅ All containers stopped."
+
+# --- Anvil Disk Management ---
+.PHONY: check-disk-space anvil-emergency-cleanup anvil-disk-usage
+
+check-disk-space:
+	@echo "💾 Checking disk space..."
+	@bash scripts/infra/disk-monitor.sh
+
+anvil-emergency-cleanup:
+	@echo "🚨 Running Anvil emergency cleanup..."
+	@bash scripts/infra/anvil-emergency-cleanup.sh
+
+anvil-disk-usage:
+	@echo "📊 Anvil container disk usage breakdown:"
+	@echo "Container Virtual Size:"
+	@docker ps --filter "name=anvil" --format "table {{.Names}}\t{{.Size}}" 2>/dev/null || echo "No Anvil containers running"
+	@echo ""
+	@echo "Internal tmpfs Usage:"
+	@$(eval ANVIL_CONTAINER := $(shell docker ps --format '{{.Names}}' | grep anvil | head -1))
+	@if [ -n "$(ANVIL_CONTAINER)" ]; then \
+		docker exec $(ANVIL_CONTAINER) du -sh /home/foundry/.foundry/anvil/tmp 2>/dev/null || echo "Container not accessible"; \
+		docker exec $(ANVIL_CONTAINER) df -h /home/foundry/.foundry/anvil/tmp 2>/dev/null || echo "tmpfs not found"; \
+	else \
+		echo "No Anvil container found"; \
+	fi
+	@echo ""
+	@echo "Snapshot Count:"
+	@if [ -n "$(ANVIL_CONTAINER)" ]; then \
+		docker exec $(ANVIL_CONTAINER) find /home/foundry/.foundry/anvil/tmp -name "anvil-state-*" -type d 2>/dev/null | wc -l || echo "0"; \
+	else \
+		echo "N/A"; \
+	fi
+
