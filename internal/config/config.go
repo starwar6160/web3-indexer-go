@@ -37,9 +37,16 @@ type Config struct {
 	RecordingPath      string        // 🚀 新增：录制文件路径
 
 	// 🛡️ Deadlock watchdog config
-	DeadlockWatchdogEnabled    bool   // 死锁看门狗开关
-	DeadlockStallThresholdSec  int64  // 闲置阈值（秒）
-	DeadlockCheckIntervalSec   int64  // 检查间隔（秒）
+	DeadlockWatchdogEnabled   bool  // 死锁看门狗开关
+	DeadlockStallThresholdSec int64 // 闲置阈值（秒）
+	DeadlockCheckIntervalSec  int64 // 检查间隔（秒）
+
+	// 🔥 Anvil Lab Mode config
+	ForceAlwaysActive bool // 强制禁用休眠（实验室环境）
+
+	// 📐 Height verification config (advanced_metrics)
+	StrictHeightCheck bool  // 当 Synced > On-Chain 时触发警告并强制刷新
+	DriftTolerance    int64 // 允许 indexedHead 超过 chainHead 的最大块数（RPC 节点传播延迟容忍）
 
 	// 代币过滤配置
 	WatchedTokenAddresses []string // 监控的 ERC20 合约地址
@@ -106,6 +113,9 @@ func Load() *Config {
 	deadlockStallThresholdSec := getEnvAsInt64("DEADLOCK_STALL_THRESHOLD_SECONDS", 120)
 	deadlockCheckIntervalSec := getEnvAsInt64("DEADLOCK_CHECK_INTERVAL_SECONDS", 30)
 
+	// 🔥 Anvil Lab Mode 配置
+	forceAlwaysActive := strings.ToLower(os.Getenv("FORCE_ALWAYS_ACTIVE")) == trueVal
+
 	// Check if we're connecting to a testnet
 	isTestnet := false
 	for _, url := range rpcUrls {
@@ -138,34 +148,38 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		DatabaseURL:           getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
-		RPCURLs:               rpcUrls,
-		WSSURL:                getEnv("WSS_URL", ""),
-		ChainID:               chainID,
-		StartBlock:            startBlock,
-		StartBlockStr:         startBlockStr,
-		LogLevel:              getEnv("LOG_LEVEL", "info"),
-		LogFormat:             getEnv("LOG_FORMAT", "json"),
-		RPCTimeout:            time.Duration(rpcTimeoutSeconds) * time.Second,
-		RPCRateLimit:          rpcRateLimit,
-		FetchConcurrency:      fetchConcurrency,
-		FetchBatchSize:        fetchBatchSize,
-		MaxGasPrice:           maxGasPrice,
-		GasSafetyMargin:       gasSafetyMargin,
-		CheckpointBatch:       checkpointBatch,
-		RetryQueueSize:        retryQueueSize,
-		DemoMode:              demoMode,
-		EnableSimulator:       enableSimulator,
-		NetworkMode:           networkMode,
-		IsTestnet:             isTestnet,
-		MaxSyncBatch:          maxSyncBatch,
-		EnableEnergySaving:    energySaving,
-		EnableRecording:       strings.ToLower(os.Getenv("ENABLE_RECORDING")) == trueVal,
-		RecordingPath:         getEnv("RECORDING_PATH", "trajectory.lz4"),
-		// 🛡️ Deadlock watchdog: 环境隔离，仅在 Anvil/Demo 模式生效
-		DeadlockWatchdogEnabled:   deadlockWatchdogEnabled && (chainID == 31337 || demoMode),
+		DatabaseURL:        getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
+		RPCURLs:            rpcUrls,
+		WSSURL:             getEnv("WSS_URL", ""),
+		ChainID:            chainID,
+		StartBlock:         startBlock,
+		StartBlockStr:      startBlockStr,
+		LogLevel:           getEnv("LOG_LEVEL", "info"),
+		LogFormat:          getEnv("LOG_FORMAT", "json"),
+		RPCTimeout:         time.Duration(rpcTimeoutSeconds) * time.Second,
+		RPCRateLimit:       rpcRateLimit,
+		FetchConcurrency:   fetchConcurrency,
+		FetchBatchSize:     fetchBatchSize,
+		MaxGasPrice:        maxGasPrice,
+		GasSafetyMargin:    gasSafetyMargin,
+		CheckpointBatch:    checkpointBatch,
+		RetryQueueSize:     retryQueueSize,
+		DemoMode:           demoMode,
+		EnableSimulator:    enableSimulator,
+		NetworkMode:        networkMode,
+		IsTestnet:          isTestnet,
+		MaxSyncBatch:       maxSyncBatch,
+		EnableEnergySaving: energySaving,
+		EnableRecording:    strings.ToLower(os.Getenv("ENABLE_RECORDING")) == trueVal,
+		RecordingPath:      getEnv("RECORDING_PATH", "trajectory.lz4"),
+		// 🛡️ Deadlock watchdog: enabled for all networks
+		DeadlockWatchdogEnabled:   deadlockWatchdogEnabled,
 		DeadlockStallThresholdSec: deadlockStallThresholdSec,
 		DeadlockCheckIntervalSec:  deadlockCheckIntervalSec,
+		// 🔥 Anvil Lab Mode
+		ForceAlwaysActive: forceAlwaysActive,
+		StrictHeightCheck:  strings.ToLower(os.Getenv("STRICT_HEIGHT_CHECK")) != "false", // default true
+		DriftTolerance:     getEnvAsInt64("DRIFT_TOLERANCE", 5),
 		WatchedTokenAddresses:     watchedTokens,
 		TokenFilterMode:           getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
 		Port:                      getEnv("PORT", "8080"),
