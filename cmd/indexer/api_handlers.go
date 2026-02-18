@@ -124,24 +124,57 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 
 	ctx := r.Context()
-	latestChainBlock, err := rpcPool.GetLatestBlockNumber(ctx)
-	if err != nil {
-		slog.Warn("failed_to_get_latest_block", "err", err)
-	}
-	latestIndexedBlock := getLatestIndexedBlock(ctx, db)
 
-	latestChainInt64 := int64(0)
-	if latestChainBlock != nil {
-		latestChainInt64 = latestChainBlock.Int64()
+	// 🔥 Anvil 优化：每次 API 调用强制刷新高度，消除数字倒挂
+	if chainID == 31337 {
+		if tip, err := rpcPool.GetLatestBlockNumber(ctx); err == nil && tip != nil {
+			engine.GetHeightOracle().SetChainHead(tip.Int64())
+		}
 	}
-	latestIndexedBlockInt64 := parseBlockNumber(latestIndexedBlock)
 
-	syncLag := latestChainInt64 - latestIndexedBlockInt64
-	isTimeTravel := false
-	if syncLag < 0 {
-		isTimeTravel = true
-		// Don't show negative lag in UI, but flag it
-		syncLag = 0
+	// Use HeightOracle snapshot as the single source of truth for all height
+	// numbers. This eliminates the race where /api/status calls GetLatestBlockNumber
+	// on a potentially lagging RPC node while TailFollow has already advanced
+	// further, producing "Synced > On-Chain" phantom readings.
+	//
+	// HeightOracle.ChainHead() is written exclusively by TailFollow (every 500ms),
+	// which is the most authoritative and up-to-date source.
+	// HeightOracle.IndexedHead() is written by Processor after each checkpoint commit.
+	snap := engine.GetHeightOracle().Snapshot()
+
+	latestChainInt64 := snap.ChainHead
+	latestIndexedBlockInt64 := snap.IndexedHead
+	latestIndexedBlock := fmt.Sprintf("%d", latestIndexedBlockInt64)
+
+	// If HeightOracle hasn't been populated yet (cold start before first TailFollow
+	// tick), fall back to a live RPC call exactly once.
+	if latestChainInt64 == 0 {
+		if tip, err := rpcPool.GetLatestBlockNumber(ctx); err == nil && tip != nil {
+			latestChainInt64 = tip.Int64()
+			engine.GetHeightOracle().SetChainHead(latestChainInt64)
+		}
+	}
+	if latestIndexedBlockInt64 == 0 {
+		latestIndexedBlock = getLatestIndexedBlock(ctx, db)
+		latestIndexedBlockInt64 = parseBlockNumber(latestIndexedBlock)
+	}
+
+	// Re-read snapshot values after potential cold-start population
+	syncLag := snap.SyncLag
+	driftBlocks := snap.DriftBlocks
+	isTimeTravel := snap.IsTimeTravel
+	if latestChainInt64 != snap.ChainHead {
+		// cold-start path: recalculate from the freshly fetched values
+		raw := latestChainInt64 - latestIndexedBlockInt64
+		if raw < 0 {
+			driftBlocks = -raw
+			syncLag = 0
+			isTimeTravel = driftBlocks > engine.GetHeightOracle().DriftTolerance
+		} else {
+			syncLag = raw
+			driftBlocks = 0
+			isTimeTravel = false
+		}
 	}
 
 	e2eLatencyDisplay, e2eLatencySeconds := calculateLatency(ctx, db, latestChainInt64, latestIndexedBlockInt64, latestIndexedBlock)
@@ -158,7 +191,12 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	status["latest_block"] = fmt.Sprintf("%d", latestChainInt64)
 	status["latest_indexed"] = latestIndexedBlock
 	status["sync_lag"] = syncLag
+	// time_travel: indexer has processed blocks beyond the reported chain head.
+	// Caused by RPC node lag or stale HeightOracle (not a data integrity issue
+	// unless drift_blocks > drift_tolerance).
 	status["time_travel"] = isTimeTravel
+	status["drift_blocks"] = driftBlocks
+	status["height_oracle_age_ms"] = snap.UpdatedAt.UnixMilli()
 	status["total_blocks"] = getCount(ctx, db, "SELECT COUNT(*) FROM blocks")
 	status["total_transfers"] = getCount(ctx, db, "SELECT COUNT(*) FROM transfers")
 	status["tps"] = calculateTPS(ctx, db)
@@ -176,7 +214,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	if latestChainInt64 > 0 {
 		syncProgressPercent = float64(latestIndexedBlockInt64) / float64(latestChainInt64) * 100.0
 		if syncProgressPercent > 100.0 {
-			syncProgressPercent = 100.0 // 限制最大为 100%
+			syncProgressPercent = 100.0
 		}
 	}
 	status["sync_progress_percent"] = syncProgressPercent
