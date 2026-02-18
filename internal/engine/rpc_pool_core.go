@@ -4,116 +4,140 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/big"
+	"os"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/core/types"
+	"web3-indexer-go/internal/config"
+	"web3-indexer-go/internal/monitor"
+
 	"github.com/ethereum/go-ethereum/ethclient"
 	"golang.org/x/time/rate"
 )
 
-// RPCClientPool 多RPC节点池，支持轮询和故障转移
-type RPCClientPool struct {
-	clients     []*rpcNode // 所有节点
-	size        int32      // 节点数量
-	index       int32      // 当前轮询索引
-	mu          sync.RWMutex
-	rateLimiter *rate.Limiter // 令牌桶限速器
+// EnhancedRPCClientPool extends the basic RPC pool with advanced rate limiting and monitoring
+type EnhancedRPCClientPool struct {
+	clients           []*rpcNode
+	size              int32
+	index             int32
+	mu                sync.RWMutex
+	globalRateLimiter *rate.Limiter
+	nodeRateLimiters  map[string]*rate.Limiter
+	requestCount      int64
+	lastResetTime     time.Time
+	metrics           *Metrics
+	isTestnetMode     bool
+	maxSyncBatch      int
+	currentSyncBatch  int
+	batchMutex        sync.Mutex
+	quotaMonitor      *monitor.QuotaMonitor // RPC 额度监控器
+	rpcURLs           []string              // Store URLs for RPS calculation
+	cfg               *config.Config        // Config for RPS calculation
 }
 
-// LowLevelRPCClient defines the subset of ethclient.Client methods used by rpcNode
-type LowLevelRPCClient interface {
-	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
-	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
-	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
-	BlockNumber(ctx context.Context) (uint64, error)
-	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
-	Close()
+// NewEnhancedRPCClientPool creates an enhanced RPC client pool
+func NewEnhancedRPCClientPool(urls []string, isTestnet bool, maxSyncBatch int) (*EnhancedRPCClientPool, error) {
+	return NewEnhancedRPCClientPoolWithTimeout(urls, isTestnet, maxSyncBatch, 10*time.Second)
 }
 
-// rpcNode 单个RPC节点封装
-type rpcNode struct {
-	url        string
-	client     LowLevelRPCClient
-	isHealthy  bool
-	lastError  time.Time
-	failCount  int
-	retryAfter time.Time // 下次允许尝试的时间
-	weight     int       // 节点权重 (e.g., Alchemy=3, Infura=1)
-}
-
-// NewRPCClientPool 创建RPC客户端池
-func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
-	return NewRPCClientPoolWithTimeout(urls, 10*time.Second)
-}
-
-// NewRPCClientPoolWithTimeout 创建带自定义超时的RPC节点池
-func NewRPCClientPoolWithTimeout(urls []string, timeout time.Duration) (*RPCClientPool, error) {
+// NewEnhancedRPCClientPoolWithTimeout creates an enhanced RPC client pool with custom timeout
+func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncBatch int, timeout time.Duration) (*EnhancedRPCClientPool, error) {
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("no RPC URLs provided")
 	}
 
-	pool := &RPCClientPool{
-		clients:     make([]*rpcNode, 0, len(urls)),
-		rateLimiter: rate.NewLimiter(rate.Limit(20), 40), // 默认 20 RPS, 40 Burst
+	isLocal := false
+	for _, url := range urls {
+		if strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1") || strings.Contains(url, "anvil") {
+			isLocal = true
+			break
+		}
+	}
+
+	const envTrue = "true"
+	var globalRPS float64
+	forceRPS := os.Getenv("FORCE_RPS") == envTrue
+
+	if isLocal {
+		globalRPS = 500.0
+	} else if isTestnet && !forceRPS {
+		globalRPS = 15.0
+	} else {
+		globalRPS = 20.0
+	}
+
+	pool := &EnhancedRPCClientPool{
+		clients:           make([]*rpcNode, 0, len(urls)),
+		globalRateLimiter: rate.NewLimiter(rate.Limit(globalRPS), int(globalRPS*2)),
+		nodeRateLimiters:  make(map[string]*rate.Limiter),
+		metrics:           GetMetrics(),
+		isTestnetMode:     isTestnet && !isLocal,
+		maxSyncBatch:      maxSyncBatch,
+		lastResetTime:     time.Now(),
+		quotaMonitor:      monitor.NewQuotaMonitor(),
+		rpcURLs:           urls,
 	}
 
 	for _, url := range urls {
-		// 使用标准方法创建 ethclient
+		pool.nodeRateLimiters[url] = rate.NewLimiter(rate.Limit(globalRPS), int(globalRPS*2))
 		client, err := ethclient.Dial(url)
 		if err != nil {
 			log.Printf("Warning: failed to connect to %s: %v", url, err)
 			continue
 		}
 
-		// 创建节点对象，初始状态为不健康，需要通过健康检查
 		node := &rpcNode{
 			url:       url,
 			client:    client,
-			isHealthy: false, // 初始状态为不健康
+			isHealthy: false,
+			weight:    1,
 		}
 
-		// 立即进行健康检查
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		_, err = client.HeaderByNumber(ctx, nil) // 获取最新块头来验证连接
+		_, err = client.HeaderByNumber(ctx, nil)
 		cancel()
 
-		if err != nil {
-			log.Printf("Health check failed for %s: %v", url, err)
-			node.isHealthy = false
-			node.lastError = time.Now()
-		} else {
-			log.Printf("Health check passed for %s", url)
-			node.isHealthy = true
-		}
-
+		node.isHealthy = (err == nil)
 		pool.clients = append(pool.clients, node)
-	}
-
-	if len(pool.clients) == 0 {
-		log.Printf("Warning: no RPC nodes connected initially, will retry later")
-		// 返回空池，但允许后续重试
-		pool.size = 0
-		return pool, nil
 	}
 
 	// #nosec G115 - Number of RPC nodes is very small
 	pool.size = int32(len(pool.clients))
-	healthyCount := 0
-	for _, node := range pool.clients {
-		if node.isHealthy {
-			healthyCount++
-		}
-	}
-	log.Printf("RPC Pool initialized with %d/%d nodes healthy (timeout: %v)", healthyCount, len(pool.clients), timeout)
 	return pool, nil
 }
 
-// Close 关闭所有客户端连接
-func (p *RPCClientPool) Close() {
+// NewRPCClientPool creates a basic RPC pool
+func NewRPCClientPool(urls []string) (*RPCClientPool, error) {
+	return NewRPCClientPoolWithTimeout(urls, 10*time.Second)
+}
+
+// NewRPCClientPoolWithTimeout creates a basic RPC pool with custom timeout
+func NewRPCClientPoolWithTimeout(urls []string, _ time.Duration) (*RPCClientPool, error) {
+	pool := &RPCClientPool{
+		clients: make([]*rpcNode, 0, len(urls)),
+	}
+
+	for _, url := range urls {
+		client, err := ethclient.Dial(url)
+		if err != nil {
+			continue
+		}
+		node := &rpcNode{
+			url:       url,
+			client:    client,
+			isHealthy: true,
+		}
+		pool.clients = append(pool.clients, node)
+	}
+
+	// #nosec G115 - Number of RPC nodes is very small
+	pool.size = int32(len(pool.clients))
+	return pool, nil
+}
+
+// Close closes all client connections
+func (p *EnhancedRPCClientPool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -122,57 +146,41 @@ func (p *RPCClientPool) Close() {
 			node.client.Close()
 		}
 	}
-	log.Printf("RPC Pool closed")
 }
 
-// getNextHealthyNode 获取下一个健康节点（轮询+指数退避）
-func (p *RPCClientPool) getNextHealthyNode() *rpcNode {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	size := int(p.size)
-	if size == 0 {
-		return nil
-	}
-
-	// 轮询查找健康节点
-	startIdx := int(atomic.AddInt32(&p.index, 1)) % size
-	for i := 0; i < size; i++ {
-		idx := (startIdx + i) % size
-		node := p.clients[idx]
-
-		if node.isHealthy {
-			return node
-		}
-
-		// 检查指数退避是否结束
-		if time.Now().After(node.retryAfter) {
-			// 尝试将其视为可用的
-			return node
-		}
-	}
-
-	return nil
-}
-
-// markNodeUnhealthy 标记节点为不健康状态，并应用指数退避
-func (p *RPCClientPool) markNodeUnhealthy(node *rpcNode) {
+// SetRateLimit updates the global and per-node rate limits
+func (p *EnhancedRPCClientPool) SetRateLimit(rps float64, burst int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	node.isHealthy = false
-	node.lastError = time.Now()
-	node.failCount++
-
-	// 指数退避：1s, 2s, 4s, 8s, 16s, 32s, max 60s
-	backoffSec := 1 << (node.failCount - 1)
-	if backoffSec > 60 {
-		backoffSec = 60
+	p.globalRateLimiter = rate.NewLimiter(rate.Limit(rps), burst)
+	for _, url := range p.rpcURLs {
+		p.nodeRateLimiters[url] = rate.NewLimiter(rate.Limit(rps), burst)
 	}
-	node.retryAfter = node.lastError.Add(time.Duration(backoffSec) * time.Second)
+}
 
-	// 记录详细的节点错误日志
-	LogRPCRequestFailed("node_unhealthy", node.url, fmt.Errorf("fail_count: %d, retry_after: %v", node.failCount, node.retryAfter.Format("15:04:05")))
+// IsTestnetMode returns whether the pool is in testnet mode
+func (p *EnhancedRPCClientPool) IsTestnetMode() bool {
+	return p.isTestnetMode
+}
 
-	log.Printf("RPC node %s marked unhealthy (fail count: %d, retry after %ds)", node.url, node.failCount, backoffSec)
+// GetHealthyNodeCount returns the number of healthy nodes
+func (p *EnhancedRPCClientPool) GetHealthyNodeCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	count := 0
+	for _, node := range p.clients {
+		if node.isHealthy {
+			count++
+		}
+	}
+	return count
+}
+
+// GetTotalNodeCount returns the total number of nodes
+func (p *EnhancedRPCClientPool) GetTotalNodeCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.clients)
 }
