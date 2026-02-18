@@ -174,22 +174,31 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		latestIndexedBlockInt64 = parseBlockNumber(latestIndexedBlock)
 	}
 
-	// Re-read snapshot values after potential cold-start population
-	syncLag := snap.SyncLag
-	driftBlocks := snap.DriftBlocks
-	isTimeTravel := snap.IsTimeTravel
-	if latestChainInt64 != snap.ChainHead {
-		// cold-start path: recalculate from the freshly fetched values
-		raw := latestChainInt64 - latestIndexedBlockInt64
-		if raw < 0 {
-			driftBlocks = -raw
-			syncLag = 0
-			isTimeTravel = driftBlocks > engine.GetHeightOracle().DriftTolerance
-		} else {
-			syncLag = raw
-			driftBlocks = 0
-			isTimeTravel = false
-		}
+	// 🔥 原子 Lag 计算：避免使用过时的快照值
+	// 公式：SyncLag = max(0, LatestChain - LatestIndexed)
+	// 不使用任何中间变量，直接从数据库实时查询
+	var totalBlocksInDB int64
+	err := db.GetContext(ctx, &totalBlocksInDB, "SELECT COUNT(*) FROM blocks")
+	if err != nil {
+		totalBlocksInDB = 0
+	}
+
+	// 实时计算 SyncLag（原子操作）
+	rawSyncLag := latestChainInt64 - latestIndexedBlockInt64
+	var syncLag int64
+	var driftBlocks int64
+	var isTimeTravel bool
+
+	if rawSyncLag < 0 {
+		// 时间旅行：Indexed > Chain（可能因为 RPC 节点滞后）
+		driftBlocks = -rawSyncLag
+		syncLag = 0
+		isTimeTravel = driftBlocks > engine.GetHeightOracle().DriftTolerance
+	} else {
+		// 正常情况
+		syncLag = rawSyncLag
+		driftBlocks = 0
+		isTimeTravel = false
 	}
 
 	e2eLatencyDisplay, e2eLatencySeconds := calculateLatency(ctx, db, latestChainInt64, latestIndexedBlockInt64, latestIndexedBlock)
@@ -211,8 +220,8 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	// unless drift_blocks > drift_tolerance).
 	status["time_travel"] = isTimeTravel
 	status["drift_blocks"] = driftBlocks
-	status["height_oracle_age_ms"] = snap.UpdatedAt.UnixMilli()
-	status["total_blocks"] = getCount(ctx, db, "SELECT COUNT(*) FROM blocks")
+	// 🔥 实时查询总块数（避免使用过时的缓存值）
+	status["total_blocks"] = totalBlocksInDB
 	status["total_transfers"] = getCount(ctx, db, "SELECT COUNT(*) FROM transfers")
 	status["tps"] = calculateTPS(ctx, db)
 	status["is_catching_up"] = syncLag > 10
@@ -224,21 +233,38 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	status["e2e_latency_seconds"] = e2eLatencySeconds
 	status["e2e_latency_display"] = e2eLatencyDisplay
 
-	// 🎯 同步进度百分比计算
+	// 🎯 同步进度百分比计算（原子操作）
+	// 规则：分母必须 >= 分子，否则百分比无意义。
+	// 当 indexedHead > chainHead（时间旅行）时，进度视为 100%（已追上）。
+	// 当 chainHead == 0（冷启动）时，进度为 0%。
 	syncProgressPercent := 0.0
-	if latestChainInt64 > 0 {
-		syncProgressPercent = float64(latestIndexedBlockInt64) / float64(latestChainInt64) * 100.0
-		if syncProgressPercent > 100.0 {
+	if latestChainInt64 > 0 && latestIndexedBlockInt64 > 0 {
+		if latestIndexedBlockInt64 >= latestChainInt64 {
 			syncProgressPercent = 100.0
+		} else {
+			syncProgressPercent = float64(latestIndexedBlockInt64) / float64(latestChainInt64) * 100.0
 		}
 	}
 	status["sync_progress_percent"] = syncProgressPercent
+
+	// f5: Standby 模式下标记数据为 stale，让前端区分缓存数据和实时数据。
+	// oracle_age_ms > 5000 表示 TailFollow 已超过 5 秒未更新链高度。
+	oracleAgeMs := time.Since(snap.UpdatedAt).Milliseconds()
+	if snap.UpdatedAt.IsZero() {
+		oracleAgeMs = -1 // 尚未初始化
+	}
+	status["height_oracle_age_ms"] = oracleAgeMs
+	status["data_is_stale"] = oracleAgeMs < 0 || oracleAgeMs > 5000
 
 	if lazyManager != nil {
 		lazyStatus := lazyManager.GetStatus()
 		if mode, ok := lazyStatus["mode"].(string); ok {
 			status["state"] = mode
 			status["lazy_indexer"] = lazyStatus
+			// Standby 模式下数据必然是 stale 的
+			if mode == engine.ModeSleep {
+				status["data_is_stale"] = true
+			}
 		}
 	}
 

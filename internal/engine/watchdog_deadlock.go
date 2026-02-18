@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"math/big"
 	"time"
 )
 
@@ -26,6 +27,7 @@ type DeadlockWatchdog struct {
 	gapThreshold   int64         // 触发自愈的最小 block gap（可通过 SetGapThreshold 调整）
 
 	sequencer   *Sequencer
+	fetcher     *Fetcher // used to reschedule the gap range after healing
 	repo        RepositoryAdapter
 	rpcPool     RPCClient
 	lazyManager *LazyManager
@@ -67,6 +69,14 @@ func NewDeadlockWatchdog(
 		metrics:        metrics,
 		enabled:        false, // 默认禁用，需要调用 Enable()
 	}
+}
+
+// SetFetcher wires the Fetcher so the watchdog can reschedule the gap range
+// after a successful self-heal. Without this, UpdateSyncCursor moves the
+// cursor in sync_checkpoints but the blocks table stays at the old watermark
+// because no fetch jobs are queued for the skipped range.
+func (dw *DeadlockWatchdog) SetFetcher(f *Fetcher) {
+	dw.fetcher = f
 }
 
 // SetGapThreshold overrides the block-gap size that triggers self-healing.
@@ -224,6 +234,27 @@ func (dw *DeadlockWatchdog) checkAndHeal(ctx context.Context) error {
 	// 🔧 Step 3/3: Buffer 清理
 	Logger.Info("🔧 DeadlockWatchdog: Step 3/3: Buffer cleanup")
 	dw.sequencer.ClearBuffer()
+
+	// 🔧 Step 4/3 (补充): 重新调度 [dbHeight+1, rpcHeight] 范围的抓取任务。
+	// UpdateSyncCursor 只移动了 sync_checkpoints 游标，但 blocks 表里没有
+	// 对应行，GetMaxStoredBlock 仍会返回旧水位线（如 33490）。
+	// 必须让 Fetcher 实际抓取这段范围，才能让 DB 水位线追上来。
+	if dw.fetcher != nil && dbHeight < rpcHeight.Int64()-1 {
+		fetchFrom := new(big.Int).SetInt64(dbHeight + 1)
+		fetchTo := new(big.Int).Set(rpcHeight)
+		Logger.Info("🔧 DeadlockWatchdog: Step 4/4: Rescheduling gap fetch",
+			slog.Int64("from", fetchFrom.Int64()),
+			slog.Int64("to", fetchTo.Int64()),
+			slog.Int64("blocks", fetchTo.Int64()-fetchFrom.Int64()+1))
+		go func() {
+			if err := dw.fetcher.Schedule(ctx, fetchFrom, fetchTo); err != nil {
+				Logger.Error("❌ DeadlockWatchdog: Gap reschedule failed",
+					slog.String("error", err.Error()))
+			}
+		}()
+	} else if dw.fetcher == nil {
+		Logger.Warn("⚠️ DeadlockWatchdog: No fetcher wired — gap range not rescheduled. Call SetFetcher() after construction.")
+	}
 
 	// ✅ 自愈成功
 	event.Success = true

@@ -165,8 +165,30 @@ func (lm *LazyManager) StartMonitor(ctx context.Context) {
 				lm.mu.Lock()
 				// 🛡️ 强制活跃模式下跳过休眠判定
 				if !lm.isAlwaysActive && lm.isActive && time.Since(lm.lastHeartbeat) > lm.timeout {
+					// 🔥 强制同步检查：如果有显著 SyncLag，禁止进入休眠
+					// Data completeness beats quota saving.
+					snap := GetHeightOracle().Snapshot()
+					currentLag := snap.ChainHead - snap.IndexedHead
+					if currentLag < 0 {
+						currentLag = 0 // 时间旅行场景
+					}
+
+					// 🔥 横滨实验室强化：任何 Lag > 10 都禁止休眠
+					if currentLag > 10 {
+						lm.logger.Warn("🚫 ECO_SLEEP_BLOCKED: SyncLag too large, staying active",
+							"sync_lag", currentLag,
+							"chain_head", snap.ChainHead,
+							"indexed_head", snap.IndexedHead,
+							"min_lag_to_sleep", 10)
+						lm.mu.Unlock()
+						continue
+					}
+
 					lm.isActive = false
-					lm.logger.Info("💤 INACTIVITY DETECTED: Entering sleep mode to save RPC quota")
+					lm.logger.Info("💤 INACTIVITY DETECTED: Entering sleep mode to save RPC quota",
+						"sync_lag", currentLag,
+						"chain_head", snap.ChainHead,
+						"indexed_head", snap.IndexedHead)
 
 					sm := lm.stateManager
 					if lm.OnStatus != nil {

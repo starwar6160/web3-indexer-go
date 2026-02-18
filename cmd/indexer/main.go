@@ -297,15 +297,20 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	// 🔥 设置 ServiceManager 的 lazyManager 引用（用于区块链活动通知）
 	sm.lazyManager = lazyManager
 
-	// 🔥 Anvil 实验室环境：强制锁定为活跃状态，屏蔽休眠
-	// 优先级：ChainID 检测（自动）> FORCE_ALWAYS_ACTIVE（手动）
-	labModeEnabled := cfg.ChainID == 31337 || cfg.ForceAlwaysActive
-	if labModeEnabled {
+	// 🔥 横滨实验室环境强制旁路：彻底禁用 Eco-Mode 和配额限制
+	if cfg.ChainID == 31337 || engine.IsLocalAnvil(cfg.RPCURLs[0]) {
 		lazyManager.SetAlwaysActive(true)
-		slog.Info("🔥 Lab Mode ACTIVATED: Eco-Mode disabled", "chain_id", cfg.ChainID, "force", cfg.ForceAlwaysActive)
+		slog.Info("🔥 YOKOHAMA LAB BYPASS: Eco-Mode and Quota Enforcement disabled indefinitely",
+			"chain_id", cfg.ChainID,
+			"rpc", cfg.RPCURLs[0])
+
+		// 🔥 设置无限配额
+		sm.fetcher.SetThroughputLimit(100000.0)
+		slog.Info("🔥 YOKOHAMA LAB BYPASS: Quota set to unlimited (100k TPS)")
 	}
 
 	// 🔥 更新 Prometheus 指标
+	labModeEnabled := cfg.ChainID == 31337 || cfg.ForceAlwaysActive
 	engine.GetMetrics().SetLabMode(labModeEnabled)
 
 	lazyManager.StartMonitor(ctx)
@@ -459,6 +464,7 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 		watchdog.SetGapThreshold(500)
 	}
 
+	watchdog.SetFetcher(sm.fetcher)
 	watchdog.Enable()
 
 	watchdog.OnHealingTriggered = func(event engine.HealingEvent) {
