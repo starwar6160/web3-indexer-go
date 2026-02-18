@@ -55,6 +55,7 @@ type Metrics struct {
 	SyncLag            prometheus.Gauge // 新增：同步滞后
 	E2ELatency         prometheus.Gauge // 新增：秒级 E2E 延迟
 	RealtimeTPS        prometheus.Gauge // 新增：实时 TPS
+	DiskFree           prometheus.Gauge // 🚀 新增：磁盘剩余空间百分比
 
 	// 📊 Deterministic Telemetry
 	tpsMonitor *monitor.TPSMonitor
@@ -69,6 +70,13 @@ type Metrics struct {
 	// 实时性能指标 (用于 Dashboard)
 	totalTxProcessed     uint64
 	totalBlocksProcessed uint64
+
+	// 🎬 Replay Metrics
+	ReplayProgress prometheus.Gauge
+
+	// 📊 内部缓存用于计算 Lag
+	lastChainHeight atomic.Int64
+	lastSyncHeight  atomic.Int64
 }
 
 var (
@@ -234,6 +242,11 @@ func NewMetrics() *Metrics {
 			Name: "indexer_token_transfer_count_total",
 			Help: "Total number of token transfers by token symbol",
 		}, []string{"symbol"}),
+
+		ReplayProgress: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_replay_progress_percentage",
+			Help: "Current replay progress percentage (0-100)",
+		}),
 	}
 }
 
@@ -251,4 +264,11 @@ func (m *Metrics) GetTotalTransfersProcessed() uint64 {
 func (m *Metrics) RecordTokenTransfer(symbol string, amount float64) {
 	m.TokenTransferVolume.WithLabelValues(symbol).Add(amount)
 	m.TokenTransferCount.WithLabelValues(symbol).Inc()
+}
+
+// UpdateReplayProgress 更新回放百分比进度
+func (m *Metrics) UpdateReplayProgress(percentage float64) {
+	if m != nil && m.ReplayProgress != nil {
+		m.ReplayProgress.Set(percentage)
+	}
 }

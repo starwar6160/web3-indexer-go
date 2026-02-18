@@ -119,6 +119,8 @@ func (m *Metrics) RecordStartTime() {
 // UpdateCurrentSyncHeight updates the current sync height gauge
 func (m *Metrics) UpdateCurrentSyncHeight(height int64) {
 	m.CurrentSyncHeight.Set(float64(height))
+	m.lastSyncHeight.Store(height)
+	m.recalculateLag()
 }
 
 // GetSnapshot 获取用于计算 TPS 的快照
@@ -129,11 +131,25 @@ func (m *Metrics) GetSnapshot() (sent, confirmed, failed, selfHealed uint64) {
 // UpdateChainHeight 更新链头高度指标
 func (m *Metrics) UpdateChainHeight(height int64) {
 	m.CurrentChainHeight.Set(float64(height))
+	m.lastChainHeight.Store(height)
+	m.recalculateLag()
 }
 
-// UpdateSyncLag 更新同步滞后指标
+// UpdateSyncLag 更新同步滞后指标 (手动强制更新)
 func (m *Metrics) UpdateSyncLag(lag int64) {
 	m.SyncLag.Set(float64(lag))
+}
+
+func (m *Metrics) recalculateLag() {
+	chain := m.lastChainHeight.Load()
+	sync := m.lastSyncHeight.Load()
+	if chain > 0 && sync > 0 {
+		lag := chain - sync
+		if lag < 0 {
+			lag = 0
+		}
+		m.SyncLag.Set(float64(lag))
+	}
 }
 
 // UpdateE2ELatency 更新 E2E 延迟指标 (秒)
@@ -159,4 +175,9 @@ func (m *Metrics) GetWindowTPS() float64 {
 		return m.tpsMonitor.GetTPS()
 	}
 	return 0.0
+}
+
+// UpdateDiskFree updates the disk free percentage gauge
+func (m *Metrics) UpdateDiskFree(freePercent float64) {
+	m.DiskFree.Set(freePercent)
 }

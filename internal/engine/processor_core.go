@@ -84,16 +84,26 @@ func (r *repositoryAdapter) PruneFutureData(ctx context.Context, chainHead int64
 	}
 	defer tx.Rollback() // nolint:errcheck // Rollback is standard practice, error is usually non-critical during cleanup
 
-	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", chainHead); err != nil {
+	headStr := fmt.Sprintf("%d", chainHead)
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", headStr); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", chainHead); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", headStr); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", chainHead); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", headStr); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (r *repositoryAdapter) UpdateSyncCursor(ctx context.Context, height int64) error {
+	headStr := fmt.Sprintf("%d", height)
+	if _, err := r.db.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", headStr); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TransferEventHash defined in signatures.go
@@ -134,6 +144,12 @@ type Processor struct {
 
 	// 🎨 Metadata Enricher (异步元数据解析器)
 	enricher *MetadataEnricher
+
+	// 🚀 HotBuffer (内存热数据池)
+	hotBuffer *HotBuffer
+
+	// 🚀 DataSink (多路分发支持)
+	sink DataSink
 }
 
 func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int64, enableSimulator bool, networkMode string) *Processor {
@@ -149,6 +165,7 @@ func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int
 		chainID:                   chainID,
 		enableSimulator:           enableSimulator,
 		networkMode:               networkMode,
+		hotBuffer:                 NewHotBuffer(50000), // 默认 5 万条热数据
 	}
 
 	// 🎨 初始化元数据丰富器（仅用于生产网络，Anvil 不需要）
@@ -233,6 +250,21 @@ func (p *Processor) GetSymbol(addr common.Address) string {
 // GetRepoAdapter returns the underlying repository adapter for the guard
 func (p *Processor) GetRepoAdapter() DBUpdater {
 	return &repositoryAdapter{db: p.db}
+}
+
+// GetHotBuffer returns the HotBuffer instance
+func (p *Processor) GetHotBuffer() *HotBuffer {
+	return p.hotBuffer
+}
+
+// SetSink sets the data sink for the processor
+func (p *Processor) SetSink(sink DataSink) {
+	p.sink = sink
+}
+
+// GetSink returns the current data sink
+func (p *Processor) GetSink() DataSink {
+	return p.sink
 }
 
 // ProcessBlockWithRetry 带重试的区块处理

@@ -8,17 +8,23 @@ import (
 	"time"
 )
 
+const (
+	ModeActive = "active"
+	ModeSleep  = "sleep"
+)
+
 // LazyManager manages the indexing state based on activity
 type LazyManager struct {
-	mu            sync.RWMutex
-	isActive      bool
-	lastHeartbeat time.Time
-	timeout       time.Duration
-	fetcher       *Fetcher
-	rpcPool       RPCClient
-	logger        *slog.Logger
-	guard         *ConsistencyGuard                   // 🛡️ Linearity Guard
-	OnStatus      func(status map[string]interface{}) // 🚀 Callback for status changes
+	mu             sync.RWMutex
+	isActive       bool
+	isAlwaysActive bool // 🚀 新增：强制活跃模式（用于实验室环境）
+	lastHeartbeat  time.Time
+	timeout        time.Duration
+	fetcher        *Fetcher
+	rpcPool        RPCClient
+	logger         *slog.Logger
+	guard          *ConsistencyGuard                   // 🛡️ Linearity Guard
+	OnStatus       func(status map[string]interface{}) // 🚀 Callback for status changes
 }
 
 // NewLazyManager creates a new LazyManager instance with a heartbeat timeout
@@ -39,10 +45,26 @@ func NewLazyManager(fetcher *Fetcher, rpcPool RPCClient, timeout time.Duration, 
 	return lm
 }
 
+// SetAlwaysActive 开启强制活跃模式，屏蔽休眠逻辑
+func (lm *LazyManager) SetAlwaysActive(enabled bool) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	lm.isAlwaysActive = enabled
+	if enabled {
+		lm.isActive = true
+		lm.fetcher.Resume()
+		lm.logger.Info("🔥 LAB_MODE: Hibernation disabled. Engine is roaring.")
+	}
+}
+
 // Trigger (Heartbeat) activates indexing if currently inactive
 func (lm *LazyManager) Trigger() {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
+
+	if lm.isAlwaysActive {
+		return // 强制活跃模式下忽略触发
+	}
 
 	lm.lastHeartbeat = time.Now()
 	if !lm.isActive {
@@ -85,7 +107,8 @@ func (lm *LazyManager) StartMonitor(ctx context.Context) {
 				return
 			case <-ticker.C:
 				lm.mu.Lock()
-				if lm.isActive && time.Since(lm.lastHeartbeat) > lm.timeout {
+				// 🛡️ 强制活跃模式下跳过休眠判定
+				if !lm.isAlwaysActive && lm.isActive && time.Since(lm.lastHeartbeat) > lm.timeout {
 					lm.isActive = false
 					lm.logger.Info("💤 INACTIVITY DETECTED: Entering sleep mode to save RPC quota")
 					lm.fetcher.Pause()
@@ -119,13 +142,20 @@ func (lm *LazyManager) StartMonitor(ctx context.Context) {
 // getStatusLocked returns status without acquiring lock (internal use)
 func (lm *LazyManager) getStatusLocked() map[string]interface{} {
 	status := make(map[string]interface{})
+	if lm.isAlwaysActive {
+		status["mode"] = ModeActive
+		status["display"] = "🔥 引擎咆哮中 (Engine Roaring)"
+		status["is_lab_mode"] = true
+		return status
+	}
+
 	if lm.isActive {
 		remaining := lm.timeout - time.Since(lm.lastHeartbeat)
-		status["mode"] = "active"
+		status["mode"] = ModeActive
 		status["display"] = "● 活跃中 (Active)"
 		status["sleep_in"] = int(remaining.Seconds())
 	} else {
-		status["mode"] = "sleep"
+		status["mode"] = ModeSleep
 		status["display"] = "● 睡眠中 (Saving Quota)"
 	}
 	return status
