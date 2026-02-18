@@ -130,6 +130,7 @@ func (s *SyntheticTransferInjector) generateMockTransfer(seqNum int64) *Synthesi
 	}
 
 	transfer := &SynthesizedTransfer{
+		// #nosec G115 - Synthetic hash generation for test/Anvil mode
 		TxHash:       common.BytesToHash([]byte{0x00, byte(seqNum)}), // 伪造交易哈希
 		BlockNumber:  currentBlock.Number.Uint64(),
 		BlockHash:    currentBlock.Hash(),
