@@ -1,6 +1,38 @@
 # --- 极速调试流 (Local Development) ---
 
-.PHONY: b1 b2 repair stop-dev
+.PHONY: b1 b2 repair stop-dev dev-stable verify-no-sleep
+
+# 🚀 Dev Stable Mode: Never Hibernate for 5600U Infinite Processing
+dev-stable:
+	@echo "🔥 Starting LOCAL STABLE (8082) in NEVER HIBERNATE mode..."
+	@echo "🛑 Clearing port 8082..."
+	-@docker stop web3-demo2-app 2>/dev/null || true
+	-@fuser -k 8082/tcp 2>/dev/null || true
+	@echo ""
+	@echo "Configuration:"
+	@echo "  • Chain: Anvil (31337)"
+	@echo "  • Mode: NEVER HIBERNATE 🔥"
+	@echo "  • RPS: Unlimited (500+)"
+	@echo "  • CPU: 100% available"
+	@echo "  • Memory: Hot-Vault retention"
+	@echo ""
+	@set -a; \
+	[ -f .env.demo2 ] && . ./.env.demo2; \
+	export DATABASE_URL=$$(echo $$DATABASE_URL | sed 's/@.*:5432/@127.0.0.1:15434/'); \
+	export PORT=8082; \
+	export CHAIN_ID=31337; \
+	export APP_TITLE="🔥 LOCAL STABLE - NEVER HIBERNATE (8082)"; \
+	export DEMO_MODE=true; \
+	export ENABLE_SIMULATOR=true; \
+	export RPC_RATE_LIMIT=500; \
+	export FETCH_CONCURRENCY=4; \
+	export IS_TESTNET=false; \
+	go run ./cmd/indexer
+
+# Verify No-Sleep Mode
+verify-no-sleep:
+	@echo "🔍 Verifying No-Sleep Mode..."
+	@bash scripts/verify-no-sleep.sh 8082
 
 # 调试模式 B1 (Sepolia / 8081)
 b1:
