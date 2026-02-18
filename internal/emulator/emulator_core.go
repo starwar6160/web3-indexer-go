@@ -10,8 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"web3-indexer-go/internal/engine"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -75,7 +73,7 @@ func NewEmulator(rpcURL, privKeyHex string, opts ...func(*Emulator)) (*Emulator,
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	nm, err := NewNonceManager(client, fromAddr, engine.Logger)
+	nm, err := NewNonceManager(client, fromAddr, slog.Default())
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +89,7 @@ func NewEmulator(rpcURL, privKeyHex string, opts ...func(*Emulator)) (*Emulator,
 		txAmount:        big.NewInt(100),
 		maxGasPrice:     500, // 默认 500 Gwei
 		gasSafetyMargin: 20,  // 默认 20%
-		logger:          engine.Logger,
+		logger:          slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(emu)
