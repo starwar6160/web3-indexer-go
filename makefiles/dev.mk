@@ -8,6 +8,7 @@ dev-stable:
 	@echo "🛑 Clearing port 8082..."
 	-@docker stop web3-demo2-app 2>/dev/null || true
 	-@fuser -k 8082/tcp 2>/dev/null || true
+	@sleep 1
 	@echo ""
 	@echo "Configuration:"
 	@echo "  • Chain: Anvil (31337)"
@@ -17,8 +18,8 @@ dev-stable:
 	@echo "  • Memory: Hot-Vault retention"
 	@echo ""
 	@set -a; \
-	[ -f .env.demo2 ] && . ./.env.demo2; \
-	export DATABASE_URL=$$(echo $$DATABASE_URL | sed 's/@.*:5432/@127.0.0.1:15434/'); \
+	if [ -f .env ]; then . ./.env; fi; \
+	export DATABASE_URL="postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_demo?sslmode=disable"; \
 	export PORT=8082; \
 	export CHAIN_ID=31337; \
 	export APP_TITLE="🔥 LOCAL STABLE - NEVER HIBERNATE (8082)"; \
