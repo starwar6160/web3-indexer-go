@@ -34,7 +34,24 @@ services:
     profiles: ["demo"]
     network_mode: host # 也可以改为 host
     entrypoint: ["anvil"]
-    command: ["--host", "0.0.0.0", "--port", "8545", "--block-time", "1"]
+    command: [
+      "--host", "0.0.0.0",
+      "--port", "8545",
+      "--block-time", "1"
+    ]
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    tmpfs:
+      - /home/foundry/.foundry/anvil/tmp:rw,size=100M,noexec,nosuid,nodev
+      - /tmp:rw,size=50M,noexec,nosuid,nodev
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 
 # 移除独立的 db 网络定义，因为我们现在复用宿主机的基础设施
