@@ -214,3 +214,38 @@ func getBlockNum(data BlockData) *big.Int {
 	}
 	return nil
 }
+
+// GetIdleTime 返回 Sequencer 的闲置时间（只读，用于看门狗检测）
+func (s *Sequencer) GetIdleTime() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return time.Since(s.lastProgressAt)
+}
+
+// GetExpectedBlock 返回当前期望的区块号（只读，用于看门狗检测）
+func (s *Sequencer) GetExpectedBlock() *big.Int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return new(big.Int).Set(s.expectedBlock)
+}
+
+// ResetExpectedBlock 强制重置期望区块（看门狗专用）
+// 同时重置闲置计时器，避免立即再次触发看门狗
+func (s *Sequencer) ResetExpectedBlock(block *big.Int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expectedBlock.Set(block)
+	s.lastProgressAt = time.Now() // 重置闲置计时器
+	Logger.Debug("🛡️ Sequencer: Expected block reset by watchdog",
+		slog.String("new_expected", block.String()))
+}
+
+// ClearBuffer 清空缓冲区（看门狗专用）
+func (s *Sequencer) ClearBuffer() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	oldSize := len(s.buffer)
+	s.buffer = make(map[string]BlockData)
+	Logger.Debug("🛡️ Sequencer: Buffer cleared by watchdog",
+		slog.Int("old_size", oldSize))
+}

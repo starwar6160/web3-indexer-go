@@ -69,12 +69,6 @@ func (s *Sequencer) drainBuffer(ctx context.Context) {
 	s.processBufferContinuationsLocked(ctx)
 }
 
-func (s *Sequencer) GetExpectedBlock() *big.Int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return new(big.Int).Set(s.expectedBlock)
-}
-
 func (s *Sequencer) GetBufferSize() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
