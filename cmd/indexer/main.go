@@ -160,7 +160,7 @@ func run() error {
 			slog.Error("❌ Replay mode requires -file parameter")
 			return fmt.Errorf("replay mode requires -file parameter")
 		}
-		db, err := connectDB(ctx)
+		db, err := connectDB(ctx, cfg.ChainID == 31337)
 		if err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		})
 	}
 
-	db, err := connectDB(ctx)
+	db, err := connectDB(ctx, cfg.ChainID == 31337)
 	if err != nil {
 		return
 	}
@@ -263,13 +263,27 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		slog.Error("linearity_check_failed", "err", err)
 	}
 
+	// 📐 Configure HeightOracle with drift policy from config.
+	engine.GetHeightOracle().StrictHeightCheck = true
+	engine.GetHeightOracle().DriftTolerance = 5
+	if cfg != nil {
+		engine.GetHeightOracle().StrictHeightCheck = cfg.StrictHeightCheck
+		engine.GetHeightOracle().DriftTolerance = cfg.DriftTolerance
+	}
+
 	// ✨ On-Demand Lifecycle: Stay active for 5 mins after any heartbeat (Web access)
 	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 5*time.Minute, guard)
 
-	// 🚀 环境感知：如果是 Anvil 实验室环境，强制锁定为活跃状态，屏蔽休眠
-	if cfg.ChainID == 31337 {
+	// 🔥 Anvil 实验室环境：强制锁定为活跃状态，屏蔽休眠
+	// 优先级：ChainID 检测（自动）> FORCE_ALWAYS_ACTIVE（手动）
+	labModeEnabled := cfg.ChainID == 31337 || cfg.ForceAlwaysActive
+	if labModeEnabled {
 		lazyManager.SetAlwaysActive(true)
+		slog.Info("🔥 Lab Mode ACTIVATED: Eco-Mode disabled", "chain_id", cfg.ChainID, "force", cfg.ForceAlwaysActive)
 	}
+
+	// 🔥 更新 Prometheus 指标
+	engine.GetMetrics().SetLabMode(labModeEnabled)
 
 	lazyManager.StartMonitor(ctx)
 
@@ -311,14 +325,32 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	initServices(ctx, sm, startBlock, lazyManager, rpcPool, wsHub)
 }
 
-func connectDB(ctx context.Context) (*sqlx.DB, error) {
+func connectDB(ctx context.Context, isLocalAnvil bool) (*sqlx.DB, error) {
 	dbCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	db, err := sqlx.ConnectContext(dbCtx, "pgx", cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("❌ Database connection failed", "err", err)
+		return nil, err
 	}
-	return db, err
+
+	if isLocalAnvil {
+		// 🔥 Anvil 实验室配置：激进连接池（无限火力）
+		db.SetMaxOpenConns(100)                 // 无限火力
+		db.SetMaxIdleConns(20)                  // 保持热连接
+		db.SetConnMaxLifetime(30 * time.Minute) // 更长生命周期
+		db.SetConnMaxIdleTime(5 * time.Minute)
+		slog.Info("🔥 Anvil database pool: 100 max connections (Lab Mode)")
+	} else {
+		// 🛡️ 生产环境：保守配置（安全第一）
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(10)
+		db.SetConnMaxLifetime(5 * time.Minute)
+		db.SetConnMaxIdleTime(1 * time.Minute)
+		slog.Info("🛡️ Production database pool: 25 connections, safety first")
+	}
+
+	return db, nil
 }
 
 func setupRPC() (engine.RPCClient, error) {
@@ -387,37 +419,37 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	sm.fetcher.Start(ctx, &wg)
 	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 1), nil, engine.GetMetrics())
 
-	// 🛡️ Deadlock Watchdog: 二阶状态审计看门狗（仅 Anvil 环境）
-	var watchdog *engine.DeadlockWatchdog
-	if cfg.ChainID == 31337 || cfg.DemoMode {
-		watchdog = engine.NewDeadlockWatchdog(
-			cfg.ChainID,
-			cfg.DemoMode,
-			sequencer,
-			sm.Processor.GetRepoAdapter(),
-			rpcPool,
-			lazyManager,
-			engine.GetMetrics(),
-		)
+	// 🛡️ Deadlock Watchdog: enabled for all networks (Anvil, Sepolia, production).
+	// Enable() is now unconditional; the old chainID==31337 gate has been removed.
+	watchdog := engine.NewDeadlockWatchdog(
+		cfg.ChainID,
+		cfg.DemoMode,
+		sequencer,
+		sm.Processor.GetRepoAdapter(),
+		rpcPool,
+		lazyManager,
+		engine.GetMetrics(),
+	)
 
-		// 启用看门狗
-		watchdog.Enable()
-
-		// 注册 WebSocket 回调（向前端推送自愈事件）
-		watchdog.OnHealingTriggered = func(event engine.HealingEvent) {
-			wsHub.Broadcast(web.WSEvent{
-				Type: "system_healing",
-				Data: event,
-			})
-		}
-
-		// 启动看门狗
-		watchdog.Start(ctx)
-
-		slog.Info("🛡️ DeadlockWatchdog initialized and started",
-			"chain_id", cfg.ChainID,
-			"demo_mode", cfg.DemoMode)
+	// Lower gap threshold for fast-block networks (Sepolia ~12s blocks).
+	if cfg.ChainID == 11155111 {
+		watchdog.SetGapThreshold(500)
 	}
+
+	watchdog.Enable()
+
+	watchdog.OnHealingTriggered = func(event engine.HealingEvent) {
+		wsHub.Broadcast(web.WSEvent{
+			Type: "system_healing",
+			Data: event,
+		})
+	}
+
+	watchdog.Start(ctx)
+
+	slog.Info("🛡️ DeadlockWatchdog initialized and started",
+		"chain_id", cfg.ChainID,
+		"demo_mode", cfg.DemoMode)
 
 	wg.Add(1)
 	go runSequencerWithSelfHealing(ctx, sequencer, &wg)
@@ -437,8 +469,15 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool engine.RPCClient, startBlock *big.Int) {
 	slog.Info("🐕 [TailFollow] Starting continuous tail follow", "start_block", startBlock.String())
 	lastScheduled := new(big.Int).Sub(startBlock, big.NewInt(1))
-	// 🚀 Industrial Grade optimization: Ultra-fast polling for local Anvil labs (500ms)
-	ticker := time.NewTicker(500 * time.Millisecond)
+
+	// 🚀 工业级优化：本地 Anvil 实验室使用超高频轮询（100ms）
+	tickerInterval := 500 * time.Millisecond
+	if cfg.ChainID == 31337 {
+		tickerInterval = 100 * time.Millisecond
+		slog.Info("🔥 Anvil TailFollow: 100ms hyper-frequency update")
+	}
+	ticker := time.NewTicker(tickerInterval)
+
 	tickCount := 0
 	for {
 		select {
@@ -453,8 +492,9 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 					slog.Warn("🐕 [TailFollow] Failed to get tip", "err", err)
 				}
 			} else if tip.Cmp(lastScheduled) > 0 {
-				// 🚀 Update chain height metric for UI sync
-				engine.GetMetrics().UpdateChainHeight(tip.Int64())
+				// 🚀 Update HeightOracle (single source of truth for chain head).
+				// This also keeps Metrics.lastChainHeight in sync via SetChainHead().
+				engine.GetHeightOracle().SetChainHead(tip.Int64())
 
 				nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
 				slog.Info("🐕 [TailFollow] Scheduling new range", "from", nextBlock.String(), "to", tip.String())
