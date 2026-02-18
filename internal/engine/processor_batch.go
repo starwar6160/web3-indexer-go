@@ -90,6 +90,14 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		}
 	}
 
+	// 🚀 物理分发：如果配置了 DataSink (如 LZ4 录制), 则进行分发
+	if p.sink != nil {
+		_ = p.sink.WriteBlocks(ctx, validBlocks) // nolint:errcheck // secondary sink failure shouldn't block main flow
+		if len(validTransfers) > 0 {
+			_ = p.sink.WriteTransfers(ctx, validTransfers) // nolint:errcheck // secondary sink failure shouldn't block main flow
+		}
+	}
+
 	p.broadcastBatchEvents(blocks, validTransfers)
 	p.updateBatchMetrics(blocks)
 

@@ -33,6 +33,8 @@ type Config struct {
 	IsTestnet          bool          // 是否为测试网模式
 	MaxSyncBatch       int           // 最大同步批次大小（用于控制请求频率）
 	EnableEnergySaving bool          // 是否开启节能模式（懒惰模式）
+	EnableRecording    bool          // 🚀 新增：是否开启 LZ4 录制
+	RecordingPath      string        // 🚀 新增：录制文件路径
 
 	// 代币过滤配置
 	WatchedTokenAddresses []string // 监控的 ERC20 合约地址
@@ -43,9 +45,13 @@ type Config struct {
 
 func Load() *Config {
 	// 🚀 工业级增强：递归寻找 .env 文件，解决从不同子目录启动时的路径问题
-	_ = godotenv.Load() // 尝试当前目录
-	_ = godotenv.Load("../.env") // 尝试上一级
-	_ = godotenv.Load("../../.env") // 尝试上两级
+	if err := godotenv.Load(); err != nil {
+		if err := godotenv.Load("../.env"); err != nil {
+			if err := godotenv.Load("../../.env"); err != nil {
+				log.Printf("Note: .env file not found in current or parent directories")
+			}
+		}
+	}
 
 	const trueVal = "true"
 
@@ -144,6 +150,8 @@ func Load() *Config {
 		IsTestnet:             isTestnet,
 		MaxSyncBatch:          maxSyncBatch,
 		EnableEnergySaving:    energySaving,
+		EnableRecording:       strings.ToLower(os.Getenv("ENABLE_RECORDING")) == trueVal,
+		RecordingPath:         getEnv("RECORDING_PATH", "trajectory.lz4"),
 		WatchedTokenAddresses: watchedTokens,
 		TokenFilterMode:       getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
 		Port:                  getEnv("PORT", "8080"),
