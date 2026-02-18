@@ -308,7 +308,7 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	}
 
 	setupParentAnchor(ctx, db, rpcPool, startBlock)
-	initServices(ctx, sm, startBlock)
+	initServices(ctx, sm, startBlock, lazyManager, rpcPool, wsHub)
 }
 
 func connectDB(ctx context.Context) (*sqlx.DB, error) {
@@ -382,10 +382,42 @@ func setupParentAnchor(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClien
 	}
 }
 
-func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int) {
+func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, lazyManager *engine.LazyManager, rpcPool engine.RPCClient, wsHub *web.Hub) {
 	var wg sync.WaitGroup
 	sm.fetcher.Start(ctx, &wg)
 	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 1), nil, engine.GetMetrics())
+
+	// 🛡️ Deadlock Watchdog: 二阶状态审计看门狗（仅 Anvil 环境）
+	var watchdog *engine.DeadlockWatchdog
+	if cfg.ChainID == 31337 || cfg.DemoMode {
+		watchdog = engine.NewDeadlockWatchdog(
+			cfg.ChainID,
+			cfg.DemoMode,
+			sequencer,
+			sm.Processor.GetRepoAdapter(),
+			rpcPool,
+			lazyManager,
+			engine.GetMetrics(),
+		)
+
+		// 启用看门狗
+		watchdog.Enable()
+
+		// 注册 WebSocket 回调（向前端推送自愈事件）
+		watchdog.OnHealingTriggered = func(event engine.HealingEvent) {
+			wsHub.Broadcast(web.WSEvent{
+				Type: "system_healing",
+				Data: event,
+			})
+		}
+
+		// 启动看门狗
+		watchdog.Start(ctx)
+
+		slog.Info("🛡️ DeadlockWatchdog initialized and started",
+			"chain_id", cfg.ChainID,
+			"demo_mode", cfg.DemoMode)
+	}
 
 	wg.Add(1)
 	go runSequencerWithSelfHealing(ctx, sequencer, &wg)
