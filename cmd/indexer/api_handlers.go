@@ -170,6 +170,17 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 	status["e2e_latency_seconds"] = e2eLatencySeconds
 	status["e2e_latency_display"] = e2eLatencyDisplay
+
+	// 🎯 同步进度百分比计算
+	syncProgressPercent := 0.0
+	if latestChainInt64 > 0 {
+		syncProgressPercent = float64(latestIndexedBlockInt64) / float64(latestChainInt64) * 100.0
+		if syncProgressPercent > 100.0 {
+			syncProgressPercent = 100.0 // 限制最大为 100%
+		}
+	}
+	status["sync_progress_percent"] = syncProgressPercent
+
 	if lazyManager != nil {
 		lazyStatus := lazyManager.GetStatus()
 		if mode, ok := lazyStatus["mode"].(string); ok {
