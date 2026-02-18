@@ -367,15 +367,55 @@ async function fetchStatus() {
         document.getElementById('totalTransfers').textContent = data?.total_transfers || '0';
         document.getElementById('tps').textContent = data?.tps || '0';
         document.getElementById('bps').textContent = data?.bps || '0';
-        
+
+        // 🎯 同步进度百分比显示（替换原有的 Total Blocks 显示）
+        if (data?.sync_progress_percent !== undefined) {
+            const progress = data.sync_progress_percent;
+            const progressEl = document.getElementById('totalBlocks');
+            const totalSyncedEl = document.getElementById('totalBlocks');
+
+            // 格式化百分比显示
+            let displayText = '';
+            let color = '#667eea';
+
+            if (progress >= 99.9) {
+                displayText = '100% ✅';
+                color = '#10b981'; // 绿色
+            } else if (progress >= 95.0) {
+                displayText = progress.toFixed(1) + '%';
+                color = '#f59e0b'; // 黄色
+            } else if (progress >= 90.0) {
+                displayText = progress.toFixed(1) + '%';
+                color = '#f97316'; // 橙色
+            } else {
+                displayText = progress.toFixed(1) + '%';
+                color = '#f43f5e'; // 红色
+            }
+
+            // 同时显示百分比和绝对数字（小字体）
+            const absoluteNumber = data?.total_blocks || '0';
+            totalSyncedEl.innerHTML = `
+                <span style="color: ${color}; font-weight: bold; font-size: 1.1em;">${displayText}</span>
+                <span style="color: #6b7280; font-size: 0.8em; margin-left: 8px;">(${absoluteNumber})</span>
+            `;
+        }
+
         // 🚀 Sync Lag & Time-Travel Alert
         const syncLagEl = document.getElementById('syncLag');
         if (data?.time_travel) {
             syncLagEl.innerHTML = `<span style="color: #f43f5e; font-weight: bold; animation: pulse 2s infinite;">⚠️ RE-ALIGN REQ [${data.sync_lag}]</span>`;
             addLog('🚨 CRITICAL: DB is ahead of Chain! Alignment required.', 'error');
         } else {
-            syncLagEl.textContent = data?.sync_lag || '0';
-            syncLagEl.style.color = '#667eea';
+            const lag = data?.sync_lag || 0;
+            syncLagEl.textContent = lag;
+            // 颜色根据 lag 大小变化
+            if (lag <= 5) {
+                syncLagEl.style.color = '#10b981'; // 绿色 - 实时
+            } else if (lag <= 20) {
+                syncLagEl.style.color = '#f59e0b'; // 黄色 - 轻微延迟
+            } else {
+                syncLagEl.style.color = '#f43f5e'; // 红色 - 严重滞后
+            }
         }
 
         document.getElementById('latency').textContent = data?.e2e_latency_display || '0s';
