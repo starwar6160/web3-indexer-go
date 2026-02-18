@@ -102,6 +102,12 @@ func (sm *ServiceManager) startMetricsReporter(ctx context.Context) {
 			stats := sm.db.Stats()
 			metrics.UpdateDBConnections(stats.OpenConnections)
 
+			// 🔥 上报数据库连接池详细状态（Anvil 优化）
+			maxOpen := sm.db.Stats().MaxOpenConnections
+			inUse := stats.InUse
+			idle := stats.Idle
+			metrics.UpdateDBPoolStats(maxOpen, idle, inUse)
+
 			// 🚀 存储空间监控
 			if free, err := engine.CheckStorageSpace("."); err == nil {
 				metrics.UpdateDiskFree(free)

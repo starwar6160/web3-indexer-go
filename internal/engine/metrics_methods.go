@@ -95,6 +95,22 @@ func (m *Metrics) UpdateDBConnections(count int) {
 	m.DBConnectionsActive.Set(float64(count))
 }
 
+// 🔥 UpdateDBPoolStats 更新数据库连接池详细状态
+func (m *Metrics) UpdateDBPoolStats(maxOpen, idle, inUse int) {
+	m.DBPoolMaxConns.Set(float64(maxOpen))
+	m.DBPoolIdleConns.Set(float64(idle))
+	m.DBPoolInUse.Set(float64(inUse))
+}
+
+// 🔥 SetLabMode 设置 Lab Mode 状态
+func (m *Metrics) SetLabMode(enabled bool) {
+	if enabled {
+		m.LabModeEnabled.Set(1)
+	} else {
+		m.LabModeEnabled.Set(0)
+	}
+}
+
 // RecordDBQuery records a database query
 func (m *Metrics) RecordDBQuery(operation string, duration time.Duration, success bool) {
 	labels := map[string]string{"operation": operation}

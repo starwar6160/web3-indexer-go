@@ -46,6 +46,12 @@ type Metrics struct {
 	DBQueriesTotal      *prometheus.CounterVec
 	DBQueryLatency      *prometheus.HistogramVec
 	DBErrors            *prometheus.CounterVec
+	DBPoolMaxConns      prometheus.Gauge // 🔥 新增：数据库连接池最大连接数
+	DBPoolIdleConns     prometheus.Gauge // 🔥 新增：数据库连接池空闲连接数
+	DBPoolInUse         prometheus.Gauge // 🔥 新增：数据库连接池使用中连接数
+
+	// 🔥 Anvil Lab Mode metrics
+	LabModeEnabled prometheus.Gauge // 新增：Lab Mode 是否启用
 
 	// System metrics
 	CheckpointUpdates  prometheus.Counter
@@ -201,6 +207,23 @@ func NewMetrics() *Metrics {
 			Name: "indexer_db_errors_total",
 			Help: "Total number of database errors by operation",
 		}, []string{"operation"}),
+		DBPoolMaxConns: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_db_pool_max_connections",
+			Help: "Maximum database connections configured",
+		}),
+		DBPoolIdleConns: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_db_pool_idle_connections",
+			Help: "Number of idle database connections",
+		}),
+		DBPoolInUse: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_db_pool_in_use",
+			Help: "Number of database connections currently in use",
+		}),
+
+		LabModeEnabled: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_lab_mode_enabled",
+			Help: "Whether Lab Mode (no hibernation) is enabled (1=enabled, 0=disabled)",
+		}),
 
 		CheckpointUpdates: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "indexer_checkpoint_updates_total",
