@@ -151,8 +151,21 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	wsHub := web.NewHub()
-	go wsHub.Run(ctx)
+	// 🔥 横滨实验室优化：使用带节流的 WebSocket Hub
+	// 避免高频 Anvil 环境下的 WS 连接震荡
+	var wsHub *web.Hub
+	if cfg.ChainID == 31337 {
+		// Anvil 环境：500ms 节流间隔，聚合高频事件
+		throttledHub := web.NewThrottledHub(500 * time.Millisecond)
+		go throttledHub.RunWithThrottling(ctx)
+		wsHub = throttledHub.Hub // 提取基础 Hub 供其他组件使用
+		slog.Info("🔥 Throttled WebSocket Hub activated for Anvil", "throttle", "500ms")
+	} else {
+		// 生产环境：使用标准 Hub
+		wsHub = web.NewHub()
+		go wsHub.Run(ctx)
+		slog.Info("📡 Standard WebSocket Hub activated for production")
+	}
 
 	// 🎬 处理回放模式
 	if *mode == "replay" {

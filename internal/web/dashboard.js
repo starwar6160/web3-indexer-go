@@ -374,21 +374,34 @@ async function fetchStatus() {
             const progressEl = document.getElementById('totalBlocks');
             const totalSyncedEl = document.getElementById('totalBlocks');
 
+            // 🔥 横滨实验室修复：只有在真正追平时才显示 100%
+            // 逻辑检查：如果 Sync Lag > 0，即使百分比很高，也不显示 100%
+            const syncLag = data?.sync_lag || 0;
+            const latestBlock = parseInt(data?.latest_block || '0');
+            const totalBlocks = parseInt(data?.total_blocks || '0');
+
+            // 真实的进度百分比计算
+            let realProgress = progress;
+            if (syncLag > 0 || latestBlock > totalBlocks) {
+                // 有滞后或未追平，强制显示真实进度（不是 100%）
+                realProgress = Math.min(progress, 99.5); // 最高 99.5%
+            }
+
             // 格式化百分比显示
             let displayText = '';
             let color = '#667eea';
 
-            if (progress >= 99.9) {
+            if (realProgress >= 99.9) {
                 displayText = '100% ✅';
                 color = '#10b981'; // 绿色
-            } else if (progress >= 95.0) {
-                displayText = progress.toFixed(1) + '%';
+            } else if (realProgress >= 95.0) {
+                displayText = realProgress.toFixed(1) + '%';
                 color = '#f59e0b'; // 黄色
-            } else if (progress >= 90.0) {
-                displayText = progress.toFixed(1) + '%';
+            } else if (realProgress >= 90.0) {
+                displayText = realProgress.toFixed(1) + '%';
                 color = '#f97316'; // 橙色
             } else {
-                displayText = progress.toFixed(1) + '%';
+                displayText = realProgress.toFixed(1) + '%';
                 color = '#f43f5e'; // 红色
             }
 

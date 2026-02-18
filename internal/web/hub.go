@@ -20,8 +20,8 @@ type WSEvent struct {
 }
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 30 * time.Second
+	writeWait      = 30 * time.Second // 🔥 横滨实验室：增加写入超时（10s → 30s）
+	pongWait       = 60 * time.Second // 🔥 增加 Pong 等待时间（30s → 60s）
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 512
 )
@@ -29,6 +29,8 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	// 🔥 横滨实验室优化：增加写入缓冲区（防止高频数据阻塞）
+	HandshakeTimeout: 10 * time.Second, // 握手超时 10 秒
 	// 🚀 工业级安全保护：限制跨域请求，防止 CSRF/WebSocket Hijacking
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -71,7 +73,7 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:  make(chan interface{}, 1024), // 增加缓冲区防止丢消息
+		broadcast:  make(chan interface{}, 10000), // 🔥 横滨实验室：超大缓冲区（1024 → 10000）
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		clients:    make(map[*Client]bool),
