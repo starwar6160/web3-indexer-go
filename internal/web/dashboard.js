@@ -1,7 +1,24 @@
 let idleTimer;
+let countdownInterval;
 const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+const WS_DISCONNECT_GRACE_PERIOD = 30 * 1000; // 30 seconds grace period for WebSocket disconnection
+let wsDisconnectedSince = null; // Track when WebSocket disconnected
 
 function resetIdleTimer() {
+    // 🛡️ WebSocket 断线宽限期：如果在 30 秒内重连成功，不触发休眠倒计时
+    const now = Date.now();
+    if (wsDisconnectedSince !== null) {
+        if (now - wsDisconnectedSince > WS_DISCONNECT_GRACE_PERIOD) {
+            // 超过宽限期，允许进入休眠
+            console.warn('⚠️ WebSocket disconnected for too long, allowing hibernation');
+            wsDisconnectedSince = null; // Reset flag
+        } else {
+            // 在宽限期内，WebSocket 刚重连，不重置休眠倒计时
+            console.log('✅ WebSocket reconnected within grace period, skipping idle timer reset');
+            return;
+        }
+    }
+
     if (document.visibilityState === 'visible') {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'HEARTBEAT', data: { status: 'active' } }));
@@ -9,17 +26,129 @@ function resetIdleTimer() {
         hideSleepOverlay();
     }
     clearTimeout(idleTimer);
-    idleTimer = setTimeout(showSleepOverlay, IDLE_TIMEOUT);
+    clearInterval(countdownInterval);
+    idleTimer = setTimeout(() => startIdleCountdown(), IDLE_TIMEOUT);
+}
+
+function startIdleCountdown() {
+    let secondsLeft = 60; // Show 60-second countdown before entering Eco-Mode
+
+    // Show countdown container
+    const countdownContainer = document.getElementById('idleCountdownContainer');
+    if (countdownContainer) {
+        countdownContainer.style.display = 'flex';
+    }
+
+    updateCountdownDisplay(secondsLeft);
+    addLog('⏰ Inactivity detected: Entering Eco-Mode in 60 seconds...', 'warn');
+
+    countdownInterval = setInterval(() => {
+        secondsLeft--;
+        updateCountdownDisplay(secondsLeft);
+
+        if (secondsLeft <= 0) {
+            clearInterval(countdownInterval);
+            showSleepOverlay();
+        }
+    }, 1000);
 }
 
 function showSleepOverlay() {
     document.body.classList.add('is-sleeping');
-    updateSystemState('HIBERNATING', 'status-down');
+    updateSystemState('Eco-Mode: Quota Protection Active', 'status-down');
+
+    // Hide countdown container when in Eco-Mode
+    const countdownContainer = document.getElementById('idleCountdownContainer');
+    if (countdownContainer) {
+        countdownContainer.style.display = 'none';
+    }
+
+    addLog('💤 Entering Eco-Mode to save RPC quota. Move mouse or click to wake up.', 'warn');
 }
 
 function hideSleepOverlay() {
     document.body.classList.remove('is-sleeping');
+    clearInterval(countdownInterval);
+    updateCountdownDisplay(0); // Reset countdown display
+
+    // Hide countdown container
+    const countdownContainer = document.getElementById('idleCountdownContainer');
+    if (countdownContainer) {
+        countdownContainer.style.display = 'none';
+    }
 }
+
+function updateCountdownDisplay(seconds) {
+    const countdownEl = document.getElementById('idleCountdown');
+    if (countdownEl) {
+        if (seconds > 0) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            countdownEl.textContent = `⏰ ${mins}:${secs.toString().padStart(2, '0')}`;
+            countdownEl.style.color = seconds < 20 ? '#f43f5e' : '#64748b'; // Red in last 20 seconds
+        } else {
+            countdownEl.textContent = '';
+        }
+    }
+}
+
+function startIdleCountdown() {
+    let secondsLeft = 60; // Show 60-second countdown before entering Eco-Mode
+
+    updateCountdownDisplay(secondsLeft);
+    addLog('⏰ Inactivity detected: Entering Eco-Mode in 60 seconds...', 'warn');
+
+    countdownInterval = setInterval(() => {
+        secondsLeft--;
+        updateCountdownDisplay(secondsLeft);
+
+        if (secondsLeft <= 0) {
+            clearInterval(countdownInterval);
+            showSleepOverlay();
+        }
+    }, 1000);
+}
+
+function showSleepOverlay() {
+    document.body.classList.add('is-sleeping');
+    updateSystemState('Eco-Mode: Quota Protection Active', 'status-down');
+    addLog('💤 Entering Eco-Mode to save RPC quota. Move mouse or click to wake up.', 'warn');
+}
+
+function hideSleepOverlay() {
+    document.body.classList.remove('is-sleeping');
+    clearInterval(countdownInterval);
+    updateCountdownDisplay(0); // Reset countdown display
+}
+
+function updateCountdownDisplay(seconds) {
+    const countdownEl = document.getElementById('idleCountdown');
+    if (countdownEl) {
+        if (seconds > 0) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            countdownEl.textContent = `⏰ Eco-Mode in ${mins}:${secs.toString().padStart(2, '0')}`;
+            countdownEl.style.color = seconds < 20 ? '#f43f5e' : '#64748b'; // Red in last 20 seconds
+        } else {
+            countdownEl.textContent = '';
+        }
+    }
+}
+
+// 🚀 Interaction Listeners
+['mousemove', 'mousedown', 'scroll', 'keypress', 'click'].forEach(evt => {
+    window.addEventListener(evt, () => {
+        // Throttle heartbeat to once every 10s to avoid spam
+        if (!window.lastHeartbeat || Date.now() - window.lastHeartbeat > 10000) {
+            resetIdleTimer();
+            window.lastHeartbeat = Date.now();
+        }
+    });
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resetIdleTimer();
+});
 
 // 🚀 Interaction Listeners
 ['mousemove', 'mousedown', 'scroll', 'keypress', 'click'].forEach(evt => {
@@ -62,9 +191,11 @@ function connectWS() {
     ws.onopen = () => {
         isWSConnected = true;
         reconnectInterval = 1000; // 成功后重置重连间隔
+        wsDisconnectedSince = null; // 🛡️ 重置断线时间戳
         updateSystemState('● LIVE', 'status-live', true);
         healthEl.textContent = '✅ Connected';
         healthEl.className = 'status-badge status-healthy';
+        addLog('🔗 WebSocket reconnected successfully', 'success');
         console.log('✅ WebSocket Connected');
         
         resetIdleTimer(); // Initial activity
@@ -152,13 +283,17 @@ function connectWS() {
 
     ws.onclose = (e) => {
         isWSConnected = false;
+        if (wsDisconnectedSince === null) {
+            wsDisconnectedSince = Date.now(); // 🛡️ 记录断线时间
+        }
         updateSystemState('DISCONNECTED', 'status-down');
         healthEl.textContent = '❌ Disconnected';
         healthEl.className = 'status-badge status-error';
-        
-        addLog(`WebSocket connection lost. Retrying...`, 'warn');
+
+        const gracePeriodSeconds = WS_DISCONNECT_GRACE_PERIOD / 1000;
+        addLog(`WebSocket connection lost. ${gracePeriodSeconds}s grace period before Eco-Mode...`, 'warn');
         console.warn(`❌ WebSocket Closed. Reconnecting in ${reconnectInterval/1000}s...`, e.reason);
-        
+
         setTimeout(() => {
             reconnectInterval = Math.min(reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
             connectWS();

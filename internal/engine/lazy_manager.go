@@ -144,7 +144,7 @@ func (lm *LazyManager) getStatusLocked() map[string]interface{} {
 	status := make(map[string]interface{})
 	if lm.isAlwaysActive {
 		status["mode"] = ModeActive
-		status["display"] = "🔥 引擎咆哮中 (Engine Roaring)"
+		status["display"] = "🔥 Lab Mode: Engine Roaring"
 		status["is_lab_mode"] = true
 		return status
 	}
@@ -152,11 +152,11 @@ func (lm *LazyManager) getStatusLocked() map[string]interface{} {
 	if lm.isActive {
 		remaining := lm.timeout - time.Since(lm.lastHeartbeat)
 		status["mode"] = ModeActive
-		status["display"] = "● 活跃中 (Active)"
+		status["display"] = "● Active (Eco-Mode Standby)"
 		status["sleep_in"] = int(remaining.Seconds())
 	} else {
 		status["mode"] = ModeSleep
-		status["display"] = "● 睡眠中 (Saving Quota)"
+		status["display"] = "● Eco-Mode: Quota Protection Active"
 	}
 	return status
 }
