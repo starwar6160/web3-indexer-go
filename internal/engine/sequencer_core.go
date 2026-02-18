@@ -116,14 +116,16 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 	}
 	s.mu.RUnlock()
 
-	if idleTime > 30*time.Second {
+	// 🛡️ 演示模式增强：60 秒阈值（从 30 秒延长）
+	if idleTime > 60*time.Second {
 		if bufferLen > 0 && !hasExpected {
 			gapEnd := new(big.Int).Sub(minBuffered, big.NewInt(1))
 			gapSize := new(big.Int).Sub(minBuffered, expectedCopy).Int64()
 			Logger.Error("🚨 CRITICAL_GAP_DETECTED", slog.String("missing_from", expectedStr), slog.String("missing_to", gapEnd.String()), slog.Int64("gap_size", gapSize), slog.Int("buffered_blocks", bufferLen), slog.Int("gap_fill_attempt", s.gapFillCount+1))
 
-			if s.fetcher != nil && s.gapFillCount < 10 {
-				Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill", slog.String("from", expectedStr), slog.String("to", gapEnd.String()))
+			// 🛡️ 演示期间：如果 gap-fill 失败 3 次，立即跳过（从 10 次减少）
+			if s.fetcher != nil && s.gapFillCount < 3 {
+				Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill", slog.String("from", expectedStr), slog.String("to", gapEnd.String()), slog.Int("attempt", s.gapFillCount+1))
 				go func() {
 					if serr := s.fetcher.Schedule(ctx, expectedCopy, gapEnd); serr != nil {
 						Logger.Warn("gap_refetch_schedule_failed", "err", serr)
@@ -131,11 +133,12 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 				}()
 				s.gapFillCount++
 			} else if bufferLen > 0 {
-				// 🚀 工业级演示增强：如果 gap-fill 失败多次或达到上限，执行“断层跳跃”
+				// 🚀 工业级演示增强：如果 gap-fill 失败多次或达到上限，执行"断层跳跃"
 				// 这将牺牲部分历史完整性，但能确保前端 UI 恢复实时跳动
 				Logger.Warn("🚧 DEMO_MODE_SKIP: Jumping over gap for visual continuity",
 					slog.String("skipped_from", expectedStr),
-					slog.String("jump_to", minBuffered.String()))
+					slog.String("jump_to", minBuffered.String()),
+					slog.Int("gap_fill_attempts", s.gapFillCount))
 
 				s.mu.Lock()
 				s.expectedBlock.Set(minBuffered)
@@ -146,8 +149,25 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 				s.lastProgressAt = time.Now()
 			}
 		} else {
-			Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", slog.String("expected", expectedStr), slog.Int("buffer_size", bufferLen), slog.Duration("idle_time", idleTime))
+			// 🚨 新增：如果 buffer 为空且超过 60 秒，说明 Processor 或 MetadataEnricher 阻塞
+			// 强制跳过当前块，避免演示期间完全卡死
+			Logger.Error("🚨 CRITICAL_STALL: Processor/MetadataEnricher blocked, forcing skip",
+				slog.String("stuck_at", expectedStr),
+				slog.Duration("idle_time", idleTime),
+				slog.Int("buffer_size", bufferLen))
+
+			s.mu.Lock()
+			// 跳到下一块
+			s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
+			s.gapFillCount = 0
+			s.mu.Unlock()
+
+			// 标记进度
+			s.lastProgressAt = time.Now()
 		}
+	} else if idleTime > 30*time.Second {
+		// 30 秒警告级别（从 Error 降为 Warn）
+		Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", slog.String("expected", expectedStr), slog.Int("buffer_size", bufferLen), slog.Duration("idle_time", idleTime))
 	}
 }
 

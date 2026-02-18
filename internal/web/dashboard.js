@@ -4,6 +4,9 @@ const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const WS_DISCONNECT_GRACE_PERIOD = 30 * 1000; // 30 seconds grace period for WebSocket disconnection
 let wsDisconnectedSince = null; // Track when WebSocket disconnected
 
+// 🛡️ 演示模式：禁用休眠遮罩（用于 8091 等演示环境）
+const DEMO_MODE_DISABLE_SLEEP = true;
+
 function resetIdleTimer() {
     // 🛡️ WebSocket 断线宽限期：如果在 30 秒内重连成功，不触发休眠倒计时
     const now = Date.now();
@@ -54,6 +57,12 @@ function startIdleCountdown() {
 }
 
 function showSleepOverlay() {
+    // 🛡️ 演示模式保护：如果启用了演示模式，强制不显示休眠遮罩
+    if (DEMO_MODE_DISABLE_SLEEP) {
+        console.log('🛡️ Demo Mode: Sleep overlay suppressed for visual continuity');
+        return;
+    }
+
     document.body.classList.add('is-sleeping');
     updateSystemState('Eco-Mode: Quota Protection Active', 'status-down');
 
@@ -209,10 +218,13 @@ function connectWS() {
         try {
             const raw = JSON.parse(event.data);
             let msg = raw;
-            
+
             // 🚀 Handle sleeping state from backend
+            // 🛡️ 演示模式保护：忽略后端的休眠信号
             if (raw.type === 'lazy_status' && raw.data.mode === 'sleep') {
-                showSleepOverlay();
+                if (!DEMO_MODE_DISABLE_SLEEP) {
+                    showSleepOverlay();
+                }
                 return;
             }
 
@@ -373,10 +385,13 @@ async function fetchStatus() {
         document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
 
         // 🚀 Sync overlay if backend reports sleep
-        if (data?.lazy_indexer?.mode === 'sleep') {
-            showSleepOverlay();
-        } else if (data?.lazy_indexer?.mode === 'active') {
-            hideSleepOverlay();
+        // 🛡️ 演示模式保护：忽略后端的休眠信号
+        if (!DEMO_MODE_DISABLE_SLEEP) {
+            if (data?.lazy_indexer?.mode === 'sleep') {
+                showSleepOverlay();
+            } else if (data?.lazy_indexer?.mode === 'active') {
+                hideSleepOverlay();
+            }
         }
     } catch (e) { 
         console.warn('Status Sync Warning:', e.message);
