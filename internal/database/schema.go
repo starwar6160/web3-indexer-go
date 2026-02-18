@@ -41,9 +41,9 @@ func InitSchema(ctx context.Context, db *sqlx.DB) error {
 
 	CREATE TABLE IF NOT EXISTS token_metadata (
 		address VARCHAR(42) PRIMARY KEY,
-		symbol VARCHAR(20) NOT NULL,
+		symbol VARCHAR(100) NOT NULL, -- 🛡️ Expanded from VARCHAR(20) to support long token symbols
 		decimals SMALLINT NOT NULL DEFAULT 18,
-		name TEXT,
+		name TEXT, -- Already TEXT type, sufficient for long names
 		is_verified BOOLEAN DEFAULT FALSE,
 		updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 	);

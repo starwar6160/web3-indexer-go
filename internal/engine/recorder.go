@@ -27,6 +27,11 @@ func NewDataRecorder(path string) (*DataRecorder, error) {
 		path = fmt.Sprintf("logs/sepolia_capture_%s.jsonl", timestamp)
 	}
 
+	// 🛡️ 确保 logs 目录存在（防止 Docker 容器启动时报错）
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		return nil, fmt.Errorf("failed_to_create_logs_dir: %w", err)
+	}
+
 	// #nosec G304 - Record files are stored in a safe local path
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {

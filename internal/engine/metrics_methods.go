@@ -178,6 +178,13 @@ func (m *Metrics) GetWindowTPS() float64 {
 }
 
 // UpdateDiskFree updates the disk free percentage gauge
+// 🛡️ Defensive: Check if metrics are initialized before updating
 func (m *Metrics) UpdateDiskFree(freePercent float64) {
+	if m == nil {
+		return // 🛡️ Prevent nil pointer dereference
+	}
+	if m.DiskFree == nil {
+		return // 🛡️ DiskFree gauge not initialized yet
+	}
 	m.DiskFree.Set(freePercent)
 }
