@@ -23,7 +23,7 @@ type Lz4Sink struct {
 
 func NewLz4Sink(path string) (*Lz4Sink, error) {
 	// #nosec G304 - 录制路径由系统配置控制
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}

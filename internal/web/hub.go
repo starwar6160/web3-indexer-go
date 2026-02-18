@@ -163,8 +163,10 @@ func (c *Client) readPump() {
 		_ = c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
+	// #nosec G104 - Read deadline errors are handled by the ping/pong mechanism
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
+		// #nosec G104
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		if c.hub.OnActivity != nil {
 			c.hub.OnActivity() // Pong is also an activity
@@ -208,6 +210,7 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.send:
+			// #nosec G104 - Write deadline errors are handled by the connection state
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})

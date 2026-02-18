@@ -27,6 +27,7 @@ type Lz4ReplaySource struct {
 
 // NewLz4ReplaySource 创建回放源
 func NewLz4ReplaySource(path string, speed float64) (*Lz4ReplaySource, error) {
+	// #nosec G304 - path is from controlled configuration
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

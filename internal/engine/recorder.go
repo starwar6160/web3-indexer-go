@@ -28,7 +28,7 @@ func NewDataRecorder(path string) (*DataRecorder, error) {
 	}
 
 	// #nosec G304 - Record files are stored in a safe local path
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}

@@ -7,9 +7,11 @@ import (
 )
 
 // Config holds emulator configuration.
+// #nosec G117 - PrivateKey is exported for YAML/JSON configuration loading
+// It should be loaded from environment variables in production, not hardcoded
 type Config struct {
 	Enabled       bool
-	PrivateKey    string
+	PrivateKey    string // Exported for config file support, use env vars in production
 	TxAmount      string
 	RPCURL        string
 	BlockInterval time.Duration

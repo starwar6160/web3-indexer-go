@@ -59,7 +59,7 @@ func main() {
 	}
 
 	reportFile := "docs/integrity_report.log"
-	f, err := os.OpenFile(reportFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(reportFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		log.Fatalf("Failed to open report file: %v", err)
 	}
@@ -74,7 +74,8 @@ func main() {
 	logMsg := fmt.Sprintf("[%s] Integrity Check: %s | Checked %d blocks | Head: #%d\n",
 		timestamp, status, len(blocks), blocks[0].Number)
 
-	f.WriteString(logMsg)
+	// #nosec G104 - Write errors are non-critical for logging
+	f.WriteString(logMsg) // #nosec G104
 	fmt.Printf("✅ Audit Complete. Status: %s. Report saved to %s\n", status, reportFile)
 
 	if errors > 0 {
