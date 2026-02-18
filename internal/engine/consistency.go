@@ -25,13 +25,19 @@ func (r *RepositoryAdapterWrapper) LoadAllMetadata() (map[string]models.TokenMet
 
 func (r *RepositoryAdapterWrapper) UpdateSyncCursor(ctx context.Context, height int64) error {
 	headStr := fmt.Sprintf("%d", height)
-	if _, err := r.DB.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", headStr); err != nil {
+	tx, err := r.DB.BeginTxx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	if _, err := r.DB.ExecContext(ctx, "UPDATE sync_status SET last_processed_block = $1, last_processed_timestamp = NOW()", headStr); err != nil {
+	defer tx.Rollback() // nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", headStr); err != nil {
 		return err
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_status SET last_processed_block = $1, last_processed_timestamp = NOW()", headStr); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *RepositoryAdapterWrapper) GetMaxStoredBlock(ctx context.Context) (int64, error) {

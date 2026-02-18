@@ -133,20 +133,23 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 				}()
 				s.gapFillCount++
 			} else if bufferLen > 0 {
-				// 🚀 工业级演示增强：如果 gap-fill 失败多次或达到上限，执行"断层跳跃"
-				// 这将牺牲部分历史完整性，但能确保前端 UI 恢复实时跳动
-				Logger.Warn("🚧 DEMO_MODE_SKIP: Jumping over gap for visual continuity",
+				// 跳块兜底：gap-fill 多次失败后跳过，保证 UI 不卡死。
+				// 跳过的区块范围会被记录为结构化日志，供运维人员通过 replay 补录。
+				// 注意：lastProgressAt 必须在修改 expectedBlock 之前重置，
+				// 否则看门狗在下一个 30s tick 时会立即对新的 expectedBlock 再次触发。
+				Logger.Error("🚧 GAP_SKIP: Abandoning gap after max fill attempts — blocks will be missing",
 					slog.String("skipped_from", expectedStr),
-					slog.String("jump_to", minBuffered.String()),
-					slog.Int("gap_fill_attempts", s.gapFillCount))
+					slog.String("skipped_to", new(big.Int).Sub(minBuffered, big.NewInt(1)).String()),
+					slog.String("resume_at", minBuffered.String()),
+					slog.Int("gap_fill_attempts", s.gapFillCount),
+					slog.String("action_required", "replay skipped range to restore data completeness"))
+
+				s.lastProgressAt = time.Now() // reset BEFORE lock to avoid immediate re-trigger
 
 				s.mu.Lock()
 				s.expectedBlock.Set(minBuffered)
-				s.gapFillCount = 0 // 重置尝试计数
+				s.gapFillCount = 0
 				s.mu.Unlock()
-
-				// 标记进度，防止在下一轮循环中再次触发 stall
-				s.lastProgressAt = time.Now()
 			}
 		} else {
 			// 🚨 新增：如果 buffer 为空且超过 60 秒，说明 Processor 或 MetadataEnricher 阻塞
@@ -156,14 +159,12 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 				slog.Duration("idle_time", idleTime),
 				slog.Int("buffer_size", bufferLen))
 
+			s.lastProgressAt = time.Now() // reset BEFORE lock to avoid immediate re-trigger
+
 			s.mu.Lock()
-			// 跳到下一块
 			s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
 			s.gapFillCount = 0
 			s.mu.Unlock()
-
-			// 标记进度
-			s.lastProgressAt = time.Now()
 		}
 	} else if idleTime > 30*time.Second {
 		// 30 秒警告级别（从 Error 降为 Warn）

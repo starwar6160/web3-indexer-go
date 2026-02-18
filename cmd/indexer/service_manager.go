@@ -19,6 +19,7 @@ type ServiceManager struct {
 	Processor  *engine.Processor
 	reconciler *engine.Reconciler
 	chainID    int64
+	lazyManager *engine.LazyManager // 🔥 新增：用于通知区块活动
 }
 
 func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int, rps, burst, concurrency int, enableSimulator bool, networkMode string, enableRecording bool, recordingPath string) *ServiceManager {
@@ -38,14 +39,17 @@ func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, ret
 
 	reconciler := engine.NewReconciler(db, rpcPool, engine.GetMetrics())
 
-	return &ServiceManager{
+	sm := &ServiceManager{
 		db:         db,
 		rpcPool:    rpcPool,
 		fetcher:    fetcher,
 		Processor:  processor,
 		reconciler: reconciler,
 		chainID:    chainID,
+		lazyManager: nil, // 稍后设置
 	}
+
+	return sm
 }
 
 // GetStartBlock 封装自愈逻辑
@@ -93,6 +97,9 @@ func (sm *ServiceManager) startMetricsReporter(ctx context.Context) {
 	metrics := engine.GetMetrics()
 	metrics.RecordStartTime()
 
+	// 🔥 上一次记录的区块号（用于检测是否有新块处理）
+	var lastProcessedBlock int64
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -111,6 +118,17 @@ func (sm *ServiceManager) startMetricsReporter(ctx context.Context) {
 			// 🚀 存储空间监控
 			if free, err := engine.CheckStorageSpace("."); err == nil {
 				metrics.UpdateDiskFree(free)
+			}
+
+			// 🔥 区块链活动检测（活动双重校验）
+			var currentMaxBlock int64
+			err := sm.db.GetContext(ctx, &currentMaxBlock, "SELECT COALESCE(MAX(number), 0) FROM blocks")
+			if err == nil && currentMaxBlock > lastProcessedBlock {
+				// 有新区块被处理！通知 LazyManager
+				if sm.lazyManager != nil {
+					sm.lazyManager.NotifyBlockProcessed(currentMaxBlock)
+				}
+				lastProcessedBlock = currentMaxBlock
 			}
 		}
 	}

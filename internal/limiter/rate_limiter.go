@@ -11,9 +11,12 @@ import (
 
 // 🛡️ 工业级硬编码保护
 const (
-	MaxSafetyRPS     = 3   // 绝对安全上限：每秒 3 次请求（生产环境）
-	LocalMaxRPS      = 500 // 本地开发环境上限
-	DefaultBurstSize = 1   // 允许 1 个并发突发
+	MaxSafetyRPS = 3   // 绝对安全上限：每秒 3 次请求（生产环境）
+	LocalMaxRPS  = 500 // 本地开发环境上限
+	// BurstMultiplier: burst = rps * BurstMultiplier.
+	// burst=1 (旧值) 强制每个请求等待 1/rps 秒，无法利用任何突发窗口追赶 lag。
+	// 10x 允许短时间内吸收突发请求，长期平均仍受 rps 约束。
+	BurstMultiplier = 10
 )
 
 // isLocalEnvironment 检测是否为本地开发环境
@@ -73,8 +76,12 @@ func NewRateLimiter(envRPS int) *RateLimiter {
 			"environment", map[bool]string{true: "local", false: "production"}[isLocal])
 	}
 
+	burst := rps * BurstMultiplier
+	if burst < 1 {
+		burst = 1
+	}
 	return &RateLimiter{
-		limiter: rate.NewLimiter(rate.Limit(rps), DefaultBurstSize),
+		limiter: rate.NewLimiter(rate.Limit(rps), burst),
 		maxRPS:  rps,
 	}
 }

@@ -8,21 +8,22 @@ import (
 
 // HealingEvent 表示自愈事件的详细信息（用于 WebSocket 推送）
 type HealingEvent struct {
-	TriggerReason string  `json:"trigger_reason"` // "space_time_tear"
-	DBWatermark   int64   `json:"db_watermark"`   // 数据库水位线
-	RPCHeight     int64   `json:"rpc_height"`     // RPC 实际高度
-	GapSize       int64   `json:"gap_size"`       // 断层大小
-	Success       bool    `json:"success"`        // 是否成功
-	Error         string  `json:"error,omitempty"` // 错误信息（如果失败）
+	TriggerReason string `json:"trigger_reason"`  // "space_time_tear"
+	DBWatermark   int64  `json:"db_watermark"`    // 数据库水位线
+	RPCHeight     int64  `json:"rpc_height"`      // RPC 实际高度
+	GapSize       int64  `json:"gap_size"`        // 断层大小
+	Success       bool   `json:"success"`         // 是否成功
+	Error         string `json:"error,omitempty"` // 错误信息（如果失败）
 }
 
 // DeadlockWatchdog 二阶状态审计看门狗，专门解决"时空撕裂"导致的死锁
 type DeadlockWatchdog struct {
-	enabled    bool
-	chainID    int64
-	demoMode   bool
+	enabled        bool
+	chainID        int64
+	demoMode       bool
 	stallThreshold time.Duration // 120秒闲置阈值
 	checkInterval  time.Duration // 30秒检查周期
+	gapThreshold   int64         // 触发自愈的最小 block gap（可通过 SetGapThreshold 调整）
 
 	sequencer   *Sequencer
 	repo        RepositoryAdapter
@@ -58,6 +59,7 @@ func NewDeadlockWatchdog(
 		demoMode:       demoMode,
 		stallThreshold: 120 * time.Second,
 		checkInterval:  30 * time.Second,
+		gapThreshold:   1000, // default: trigger self-healing when gap > 1000 blocks
 		sequencer:      sequencer,
 		repo:           repo,
 		rpcPool:        rpcPool,
@@ -67,20 +69,23 @@ func NewDeadlockWatchdog(
 	}
 }
 
-// Enable 启用看门狗
-func (dw *DeadlockWatchdog) Enable() {
-	// 🔒 环境隔离：仅在 Anvil 或演示模式下启用
-	if dw.chainID != 31337 && !dw.demoMode {
-		Logger.Warn("🔒 DeadlockWatchdog: Environment check failed - not enabling",
-			slog.Int64("chain_id", dw.chainID),
-			slog.Bool("demo_mode", dw.demoMode))
-		return
+// SetGapThreshold overrides the block-gap size that triggers self-healing.
+// Use a lower value (e.g. 500) for fast-block networks like Sepolia.
+func (dw *DeadlockWatchdog) SetGapThreshold(blocks int64) {
+	if blocks > 0 {
+		dw.gapThreshold = blocks
 	}
+}
 
+// Enable 启用看门狗
+// 原先仅允许 Anvil (chainID=31337) 或 demoMode 启用，导致 Sepolia 无自愈保护。
+// 现在所有网络均可启用，由调用方决定是否开启。
+func (dw *DeadlockWatchdog) Enable() {
 	dw.enabled = true
 	Logger.Info("🛡️ DeadlockWatchdog: Enabled",
 		slog.Int64("chain_id", dw.chainID),
 		slog.Bool("demo_mode", dw.demoMode),
+		slog.Int64("gap_threshold", dw.gapThreshold),
 		slog.Duration("stall_threshold", dw.stallThreshold),
 		slog.Duration("check_interval", dw.checkInterval))
 }
@@ -164,7 +169,7 @@ func (dw *DeadlockWatchdog) checkAndHeal(ctx context.Context) error {
 
 	// Step 3: 判断是否为"时空撕裂"
 	gapSize := rpcHeight.Int64() - dbHeight
-	isSpaceTimeTear := gapSize > 1000 && sequencerExpected.Int64() < rpcHeight.Int64()-1000
+	isSpaceTimeTear := gapSize > dw.gapThreshold && sequencerExpected.Int64() < rpcHeight.Int64()-dw.gapThreshold
 
 	if !isSpaceTimeTear {
 		// 不是时空撕裂，可能只是正常延迟

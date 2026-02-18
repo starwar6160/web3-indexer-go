@@ -274,6 +274,9 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	// ✨ On-Demand Lifecycle: Stay active for 5 mins after any heartbeat (Web access)
 	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 5*time.Minute, guard)
 
+	// 🔥 设置 ServiceManager 的 lazyManager 引用（用于区块链活动通知）
+	sm.lazyManager = lazyManager
+
 	// 🔥 Anvil 实验室环境：强制锁定为活跃状态，屏蔽休眠
 	// 优先级：ChainID 检测（自动）> FORCE_ALWAYS_ACTIVE（手动）
 	labModeEnabled := cfg.ChainID == 31337 || cfg.ForceAlwaysActive

@@ -92,17 +92,24 @@ func (p *EnhancedRPCClientPool) incrementRequestCount(nodeURL, method string) {
 	}
 }
 
-// enforceSyncBatchLimit enforces the maximum sync batch size
+// enforceSyncBatchLimit enforces the maximum sync batch size.
+// The sleep is performed after releasing the lock so that concurrent
+// RPC callers are not blocked while we wait.
 func (p *EnhancedRPCClientPool) enforceSyncBatchLimit() error {
-	p.batchMutex.Lock()
-	defer p.batchMutex.Unlock()
+	if !p.isTestnetMode {
+		return nil
+	}
 
-	if p.isTestnetMode {
-		p.currentSyncBatch++
-		if p.currentSyncBatch > 50 {
-			time.Sleep(200 * time.Millisecond)
-			p.currentSyncBatch = 0
-		}
+	p.batchMutex.Lock()
+	p.currentSyncBatch++
+	shouldSleep := p.currentSyncBatch > 50
+	if shouldSleep {
+		p.currentSyncBatch = 0
+	}
+	p.batchMutex.Unlock()
+
+	if shouldSleep {
+		time.Sleep(200 * time.Millisecond)
 	}
 	return nil
 }

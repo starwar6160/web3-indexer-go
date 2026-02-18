@@ -23,25 +23,32 @@ func (p *Processor) updateCheckpointInTx(ctx context.Context, tx *sqlx.Tx, chain
 		return fmt.Errorf("failed to update checkpoint: %w", err)
 	}
 
-	// 同时更新 sync_status 表，以便 Grafana 展示
-	// 这里通过 SELECT 子查询实时计算最新块和延迟，避免额外的 RPC 调用
+	// 同时更新 sync_status 表，以便 Grafana 展示。
+	// latest_block 使用 Metrics 中缓存的链上高度（由 UpdateChainHeight 写入），
+	// 而非 MAX(blocks.number)——后者在同步严重滞后时与 last_synced_block 几乎相等，
+	// 导致 sync_lag 虚报为 0。
+	syncedBlock := blockNumber.Int64()
+	chainHeight := syncedBlock // fallback: 若链高度尚未获取，lag 显示为 0 而非负数
+	if p.metrics != nil {
+		if h := p.metrics.lastChainHeight.Load(); h > 0 {
+			chainHeight = h
+		}
+	}
+	lag := chainHeight - syncedBlock
+	if lag < 0 {
+		lag = 0
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, updated_at)
-		SELECT 
-			$1, 
-			$2::BIGINT, 
-			COALESCE(MAX(number), $2::BIGINT), 
-			GREATEST(0, COALESCE(MAX(number), $2::BIGINT) - $2::BIGINT),
-			'syncing',
-			NOW()
-		FROM blocks
+		VALUES ($1, $2, $3, $4, 'syncing', NOW())
 		ON CONFLICT (chain_id) DO UPDATE SET
 			last_synced_block = EXCLUDED.last_synced_block,
 			latest_block = EXCLUDED.latest_block,
 			sync_lag = EXCLUDED.sync_lag,
 			status = EXCLUDED.status,
 			updated_at = EXCLUDED.updated_at
-	`, chainID, blockNumber.String())
+	`, chainID, syncedBlock, chainHeight, lag)
 
 	if err != nil {
 		// 记录错误但不中断流程
@@ -51,6 +58,10 @@ func (p *Processor) updateCheckpointInTx(ctx context.Context, tx *sqlx.Tx, chain
 	if p.metrics != nil {
 		p.metrics.RecordCheckpointUpdate()
 	}
+
+	// Keep HeightOracle in sync so /api/status reads a consistent snapshot
+	// without making a live RPC call.
+	GetHeightOracle().SetIndexedHead(syncedBlock)
 
 	return nil
 }
