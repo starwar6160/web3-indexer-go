@@ -74,6 +74,11 @@ type Metrics struct {
 	// 🎬 Replay Metrics
 	ReplayProgress prometheus.Gauge
 
+	// 🛡️ Self-healing metrics
+	SelfHealingTriggered prometheus.Counter
+	SelfHealingSuccess   prometheus.Counter
+	SelfHealingFailure   prometheus.Counter
+
 	// 📊 内部缓存用于计算 Lag
 	lastChainHeight atomic.Int64
 	lastSyncHeight  atomic.Int64
@@ -246,6 +251,20 @@ func NewMetrics() *Metrics {
 		ReplayProgress: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "indexer_replay_progress_percentage",
 			Help: "Current replay progress percentage (0-100)",
+		}),
+
+		// 🛡️ Self-healing metrics
+		SelfHealingTriggered: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "indexer_self_healing_triggered_total",
+			Help: "Total number of self-healing attempts triggered",
+		}),
+		SelfHealingSuccess: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "indexer_self_healing_success_total",
+			Help: "Total number of successful self-healing operations",
+		}),
+		SelfHealingFailure: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "indexer_self_healing_failure_total",
+			Help: "Total number of failed self-healing operations",
 		}),
 	}
 }
