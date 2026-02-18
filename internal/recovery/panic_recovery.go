@@ -8,6 +8,9 @@ import (
 
 var Logger = slog.Default()
 
+// OnPanic is an optional callback triggered when a panic is recovered
+var OnPanic func(name string, err interface{}, stack string)
+
 func WithRecovery(fn func(), name string) {
 	go func() {
 		defer func() {
@@ -18,6 +21,9 @@ func WithRecovery(fn func(), name string) {
 					slog.String("error", fmt.Sprintf("%v", r)),
 					slog.String("stack", stack),
 				)
+				if OnPanic != nil {
+					OnPanic(name, r, stack)
+				}
 			}
 		}()
 		fn()
@@ -32,6 +38,9 @@ func WithRecoverySync(fn func()) {
 				slog.String("error", fmt.Sprintf("%v", r)),
 				slog.String("stack", stack),
 			)
+			if OnPanic != nil {
+				OnPanic("sync_task", r, stack)
+			}
 		}
 	}()
 	fn()
@@ -46,6 +55,9 @@ func WithRecoveryNamed(name string, fn func()) {
 				slog.String("error", fmt.Sprintf("%v", r)),
 				slog.String("stack", stack),
 			)
+			if OnPanic != nil {
+				OnPanic(name, r, stack)
+			}
 		}
 	}()
 	fn()

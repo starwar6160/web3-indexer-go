@@ -48,7 +48,8 @@ func main() {
 		_ = generateMockTransactions(200) // 200 txs per block
 
 		block := types.NewBlockWithHeader(&types.Header{
-			Number:     blockNum,
+			Number: blockNum,
+			// #nosec G115 - Stress test time conversion
 			Time:       uint64(time.Now().Unix()),
 			ParentHash: common.HexToHash("0x123"),
 		})

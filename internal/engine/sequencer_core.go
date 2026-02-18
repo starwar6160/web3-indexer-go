@@ -130,6 +130,20 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 					}
 				}()
 				s.gapFillCount++
+			} else if bufferLen > 0 {
+				// 🚀 工业级演示增强：如果 gap-fill 失败多次或达到上限，执行“断层跳跃”
+				// 这将牺牲部分历史完整性，但能确保前端 UI 恢复实时跳动
+				Logger.Warn("🚧 DEMO_MODE_SKIP: Jumping over gap for visual continuity",
+					slog.String("skipped_from", expectedStr),
+					slog.String("jump_to", minBuffered.String()))
+
+				s.mu.Lock()
+				s.expectedBlock.Set(minBuffered)
+				s.gapFillCount = 0 // 重置尝试计数
+				s.mu.Unlock()
+
+				// 标记进度，防止在下一轮循环中再次触发 stall
+				s.lastProgressAt = time.Now()
 			}
 		} else {
 			Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", slog.String("expected", expectedStr), slog.Int("buffer_size", bufferLen), slog.Duration("idle_time", idleTime))

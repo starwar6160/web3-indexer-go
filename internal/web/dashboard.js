@@ -115,8 +115,21 @@ function connectWS() {
             }
 
             if (msg.type === 'block') {
-                updateBlocksTable(msg.data);
-                fetchStatus();
+                const data = msg.data;
+                updateBlocksTable(data);
+                
+                // 🚀 Atomic UI Update: Sync header stats with block event
+                if (data.latest_chain) document.getElementById('latestBlock').textContent = data.latest_chain;
+                document.getElementById('totalBlocks').textContent = data.number; // latest synced
+                if (data.sync_lag !== undefined) {
+                    const lagEl = document.getElementById('syncLag');
+                    lagEl.textContent = data.sync_lag;
+                    lagEl.style.color = data.sync_lag > 10 ? '#f43f5e' : '#667eea';
+                }
+                if (data.tps !== undefined) document.getElementById('tps').textContent = data.tps.toFixed(2);
+                if (data.latency_display) document.getElementById('latency').textContent = data.latency_display;
+                
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
             } else if (msg.type === 'transfer') {
                 const tx = msg.data;
                 tx.amount = tx.value || tx.amount; 
@@ -126,6 +139,11 @@ function connectWS() {
                 addLog(`Transfer detected: ${tx.tx_hash.substring(0,10)}...`, 'success');
             } else if (msg.type === 'gas_leaderboard') {
                 updateGasLeaderboard(msg.data);
+            } else if (msg.type === 'engine_panic') {
+                healthEl.textContent = '🚨 FATAL ERROR';
+                healthEl.className = 'status-badge status-error';
+                addLog(`CRITICAL: Engine Component [${msg.data.worker}] Crashed: ${msg.data.error}`, 'error');
+                updateSystemState('ENGINE CRASHED', 'status-down');
             } else if (msg.type === 'log') {
                 addLog(msg.data.message, msg.data.level);
             }
@@ -274,10 +292,10 @@ function updateBlocksTable(block) {
         <td class="stat-value">${number}</td>
         <td class="hash" title="${hash}">${hash.substring(0, 16)}...</td>
         <td class="hash" title="${parentHash}">${parentHash.substring(0, 16)}...</td>
-        <td class="status-cell status-syncing">
+        <td class="status-cell status-success">
             <div class="status-indicator">
                 <span class="dot"></span>
-                <span class="status-text">Syncing...</span>
+                <span class="status-text">${blockTime}</span>
             </div>
         </td>
     </tr>`;

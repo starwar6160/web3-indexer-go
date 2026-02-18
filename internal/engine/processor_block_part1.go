@@ -75,6 +75,30 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 6. 实时事件推送 (在事务成功后)
 	p.pushEvents(block, activities, leaderboard)
 
+	// 🚀 物理分发：如果配置了 DataSink (如 LZ4 录制), 则进行异步分发
+	if p.sink != nil {
+		// 转换为 models.Block
+		var baseFee *models.BigInt
+		if block.BaseFee() != nil {
+			baseFee = &models.BigInt{Int: block.BaseFee()}
+		}
+		mBlock := models.Block{
+			Number:           models.BigInt{Int: block.Number()},
+			Hash:             block.Hash().Hex(),
+			ParentHash:       block.ParentHash().Hex(),
+			Timestamp:        block.Time(),
+			GasLimit:         block.GasLimit(),
+			GasUsed:          block.GasUsed(),
+			BaseFeePerGas:    baseFee,
+			TransactionCount: len(block.Transactions()),
+		}
+		// 这里虽然是单块，但接口设计为 Batch 以对齐 IO 性能
+		_ = p.sink.WriteBlocks(ctx, []models.Block{mBlock}) // nolint:errcheck // secondary sink failure shouldn't block main flow
+		if len(activities) > 0 {
+			_ = p.sink.WriteTransfers(ctx, activities) // nolint:errcheck // secondary sink failure shouldn't block main flow
+		}
+	}
+
 	// 记录处理耗时 and 当前同步高度
 	p.updateMetrics(start, block)
 
@@ -266,17 +290,40 @@ func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer,
 		return
 	}
 	// #nosec G115
-	latency := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
-	if latency < 0 {
-		latency = 0
+	latencyMs := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
+	if latencyMs < 0 {
+		latencyMs = 0
 	}
+
+	// 🚀 Local/AnvilSmoothing: Ignore astronomical latency
+	latencyDisplay := fmt.Sprintf("%dms", latencyMs)
+	if p.chainID == 31337 && latencyMs > 3600000 {
+		latencyDisplay = "0.00s (Replay)"
+	}
+
+	// 获取实时指标
+	latestChain := int64(0)
+	syncLag := int64(0)
+	if p.metrics != nil {
+		latestChain = p.metrics.lastChainHeight.Load()
+		// #nosec G115 - block number is within safe range for int64
+		syncLag = latestChain - int64(block.NumberU64())
+		if syncLag < 0 {
+			syncLag = 0
+		}
+	}
+
 	p.EventHook("block", map[string]interface{}{
-		"number":      block.NumberU64(),
-		"hash":        block.Hash().Hex(),
-		"parent_hash": block.ParentHash().Hex(),
-		"timestamp":   block.Time(),
-		"tx_count":    len(block.Transactions()),
-		"latency_ms":  latency,
+		"number":          block.NumberU64(),
+		"hash":            block.Hash().Hex(),
+		"parent_hash":     block.ParentHash().Hex(),
+		"timestamp":       block.Time(),
+		"tx_count":        len(block.Transactions()),
+		"latency_ms":      latencyMs,
+		"latency_display": latencyDisplay,
+		"latest_chain":    latestChain,
+		"sync_lag":        syncLag,
+		"tps":             p.metrics.GetWindowTPS(),
 	})
 	p.EventHook("gas_leaderboard", leaderboard)
 	if p.metrics != nil {

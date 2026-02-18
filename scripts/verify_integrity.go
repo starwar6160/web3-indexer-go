@@ -13,7 +13,8 @@ import (
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_indexer?sslmode=disable"
+		// #nosec G101 - This is a fallback example URL for local development
+		dbURL = "postgres://postgres:password@localhost:15432/web3_indexer?sslmode=disable"
 	}
 
 	db, err := sqlx.Connect("pgx", dbURL)

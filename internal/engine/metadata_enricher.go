@@ -32,6 +32,7 @@ type DBUpdater interface {
 	LoadAllMetadata() (map[string]models.TokenMetadata, error)
 	GetMaxStoredBlock(ctx context.Context) (int64, error)
 	PruneFutureData(ctx context.Context, chainHead int64) error
+	UpdateSyncCursor(ctx context.Context, height int64) error
 }
 
 // MetadataEnricher 异步元数据丰富器

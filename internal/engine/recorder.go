@@ -1,12 +1,15 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"sync"
 	"time"
+
+	"web3-indexer-go/internal/models"
 )
 
 // DataRecorder 负责将原始 RPC 数据录制到本地文件，以便后续回放
@@ -25,7 +28,7 @@ func NewDataRecorder(path string) (*DataRecorder, error) {
 	}
 
 	// #nosec G304 - Record files are stored in a safe local path
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +73,22 @@ func (r *DataRecorder) Record(entryType string, data interface{}) {
 	if _, err := r.file.WriteString("\n"); err != nil {
 		log.Printf("⚠️ [Recorder] Write newline failed: %v", err)
 	}
+}
+
+// DataSink Interface Implementation
+
+func (r *DataRecorder) WriteTransfers(_ context.Context, transfers []models.Transfer) error {
+	for _, t := range transfers {
+		r.Record("transfer", t)
+	}
+	return nil
+}
+
+func (r *DataRecorder) WriteBlocks(_ context.Context, blocks []models.Block) error {
+	for _, b := range blocks {
+		r.Record("block", b)
+	}
+	return nil
 }
 
 // Close 关闭录制器
