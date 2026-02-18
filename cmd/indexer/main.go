@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"net/http"
@@ -131,8 +132,17 @@ func runSequencerWithSelfHealing(ctx context.Context, sequencer *engine.Sequence
 }
 
 func main() {
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	resetDB := flag.Bool("reset", false, "Reset database")
 	startFrom := flag.String("start-from", "", "Force start from: 'latest' or specific block number")
+	mode := flag.String("mode", "index", "Operation mode: 'index' or 'replay'")
+	replayFile := flag.String("file", "", "Trajectory file for replay (.jsonl or .lz4)")
+	replaySpeed := flag.Float64("speed", 1.0, "Replay speed factor (e.g. 2.0 for 2x speed, 0 for max speed)")
 	flag.Parse()
 	cfg = config.Load()
 	engine.InitLogger(cfg.LogLevel)
@@ -143,6 +153,26 @@ func main() {
 
 	wsHub := web.NewHub()
 	go wsHub.Run(ctx)
+
+	// 🎬 处理回放模式
+	if *mode == "replay" {
+		if *replayFile == "" {
+			slog.Error("❌ Replay mode requires -file parameter")
+			return fmt.Errorf("replay mode requires -file parameter")
+		}
+		db, err := connectDB(ctx)
+		if err != nil {
+			return err
+		}
+		processor := engine.NewProcessor(db, nil, 100, cfg.ChainID, false, "replay")
+
+		slog.Info("🏁 System starting in REPLAY mode.")
+		if err := RunReplayMode(ctx, *replayFile, *replaySpeed, processor); err != nil {
+			slog.Error("Replay failed", "err", err)
+			return err
+		}
+		return nil
+	}
 
 	apiServer := NewServer(nil, wsHub, cfg.Port, cfg.AppTitle)
 	recovery.WithRecovery(func() {
@@ -160,10 +190,24 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	slog.Info("🏁 System Operational.")
 	<-sigCh
+	return nil
 }
 
 func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB bool) {
 	slog.Info("⏳ Async engine initialization started...")
+
+	// 🚨 Register Engine Health Watchdog: Broadcast panic to UI
+	recovery.OnPanic = func(name string, err interface{}, _ string) {
+		wsHub.Broadcast(web.WSEvent{
+			Type: "engine_panic",
+			Data: map[string]interface{}{
+				"worker": name,
+				"error":  fmt.Sprintf("%v", err),
+				"ts":     time.Now().Unix(),
+			},
+		})
+	}
+
 	db, err := connectDB(ctx)
 	if err != nil {
 		return
@@ -193,12 +237,19 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		slog.Info("🛡️ Quota protection ACTIVE: Enforcing 1.0 TPS strict serial sync")
 	}
 
-	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, concurrency, cfg.EnableSimulator, cfg.NetworkMode)
+	sm := NewServiceManager(db, rpcPool, cfg.ChainID, cfg.RetryQueueSize, cfg.RPCRateLimit, cfg.RPCRateLimit*2, concurrency, cfg.EnableSimulator, cfg.NetworkMode, cfg.EnableRecording, cfg.RecordingPath)
 	configureTokenFiltering(sm)
 	sm.fetcher.SetThroughputLimit(tpsLimit)
 
+	// 🚀 启动期基础设施对齐 (自愈)
+	if err := sm.Processor.AlignInfrastructure(ctx, rpcPool); err != nil {
+		slog.Error("❌ [FATAL] Infrastructure alignment failed", "err", err)
+		// 严重错误，建议退出或降级，这里暂时记录错误
+	}
+
 	// 🚀 Industrial Guard: Align DB with Chain Absolute Truth
-	guard := engine.NewConsistencyGuard(sm.processor.GetRepoAdapter(), rpcPool)
+	guard := engine.NewConsistencyGuard(sm.Processor.GetRepoAdapter(), rpcPool)
+	guard.SetDemoMode(cfg.DemoMode)
 
 	// 🚀 Real-time reporting of alignment progress
 	guard.OnStatus = func(status string, detail string, progress int) {
@@ -214,6 +265,12 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 
 	// ✨ On-Demand Lifecycle: Stay active for 5 mins after any heartbeat (Web access)
 	lazyManager := engine.NewLazyManager(sm.fetcher, rpcPool, 5*time.Minute, guard)
+
+	// 🚀 环境感知：如果是 Anvil 实验室环境，强制锁定为活跃状态，屏蔽休眠
+	if cfg.ChainID == 31337 {
+		lazyManager.SetAlwaysActive(true)
+	}
+
 	lazyManager.StartMonitor(ctx)
 
 	// 🚀 Real-time status broadcasting
@@ -221,7 +278,7 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		wsHub.Broadcast(web.WSEvent{Type: "lazy_status", Data: status})
 	}
 
-	apiServer.SetDependencies(db, rpcPool, lazyManager, cfg.ChainID)
+	apiServer.SetDependencies(db, rpcPool, lazyManager, sm.Processor, cfg.ChainID)
 
 	// 🚀 Single Source of Truth for Activity: All WS connections wake up the engine
 	wsHub.OnActivity = func() {
@@ -231,10 +288,10 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	// 🎨 On-Demand Coloring: When UI scrolls to a token, fetch its metadata
 	wsHub.OnNeedMeta = func(addr string) {
 		slog.Debug("🎨 [On-Demand] UI requested metadata", "address", addr)
-		_ = sm.processor.GetSymbol(common.HexToAddress(addr))
+		_ = sm.Processor.GetSymbol(common.HexToAddress(addr))
 	}
 
-	sm.processor.EventHook = func(eventType string, data interface{}) {
+	sm.Processor.EventHook = func(eventType string, data interface{}) {
 		if apiServer.signer != nil {
 			if signed, err := apiServer.signer.Sign(eventType, data); err == nil {
 				wsHub.Broadcast(signed)
@@ -307,7 +364,7 @@ func configureTokenFiltering(sm *ServiceManager) {
 		watched = []string{}
 	}
 	sm.fetcher.SetWatchedAddresses(watched)
-	sm.processor.SetWatchedAddresses(watched)
+	sm.Processor.SetWatchedAddresses(watched)
 }
 
 func setupParentAnchor(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClient, startBlock *big.Int) {
@@ -328,7 +385,7 @@ func setupParentAnchor(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClien
 func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int) {
 	var wg sync.WaitGroup
 	sm.fetcher.Start(ctx, &wg)
-	sequencer := engine.NewSequencerWithFetcher(sm.processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 1), nil, engine.GetMetrics())
+	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 1), nil, engine.GetMetrics())
 
 	wg.Add(1)
 	go runSequencerWithSelfHealing(ctx, sequencer, &wg)
@@ -364,6 +421,9 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 					slog.Warn("🐕 [TailFollow] Failed to get tip", "err", err)
 				}
 			} else if tip.Cmp(lastScheduled) > 0 {
+				// 🚀 Update chain height metric for UI sync
+				engine.GetMetrics().UpdateChainHeight(tip.Int64())
+
 				nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
 				slog.Info("🐕 [TailFollow] Scheduling new range", "from", nextBlock.String(), "to", tip.String())
 				if err := fetcher.Schedule(ctx, nextBlock, tip); err != nil {

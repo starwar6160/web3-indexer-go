@@ -16,22 +16,33 @@ type ServiceManager struct {
 	db         *sqlx.DB
 	rpcPool    engine.RPCClient
 	fetcher    *engine.Fetcher
-	processor  *engine.Processor
+	Processor  *engine.Processor
 	reconciler *engine.Reconciler
 	chainID    int64
 }
 
-func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int, rps, burst, concurrency int, enableSimulator bool, networkMode string) *ServiceManager {
+func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, retryQueueSize int, rps, burst, concurrency int, enableSimulator bool, networkMode string, enableRecording bool, recordingPath string) *ServiceManager {
 	// ✨ 使用工业级限流器创建 Fetcher
 	fetcher := engine.NewFetcherWithLimiter(rpcPool, concurrency, rps, burst)
 	processor := engine.NewProcessor(db, rpcPool, retryQueueSize, chainID, enableSimulator, networkMode)
+
+	// 🚀 初始化物理分发 Sink
+	if enableRecording && recordingPath != "" {
+		if lz4Sink, err := engine.NewLz4Sink(recordingPath); err == nil {
+			processor.SetSink(lz4Sink)
+			engine.Logger.Info("🎙️ [Recorder] LZ4 Recording ACTIVE", "path", recordingPath)
+		} else {
+			engine.Logger.Error("failed_to_init_lz4_sink", "err", err)
+		}
+	}
+
 	reconciler := engine.NewReconciler(db, rpcPool, engine.GetMetrics())
 
 	return &ServiceManager{
 		db:         db,
 		rpcPool:    rpcPool,
 		fetcher:    fetcher,
-		processor:  processor,
+		Processor:  processor,
 		reconciler: reconciler,
 		chainID:    chainID,
 	}
@@ -90,6 +101,11 @@ func (sm *ServiceManager) startMetricsReporter(ctx context.Context) {
 			// 上报数据库连接池状态
 			stats := sm.db.Stats()
 			metrics.UpdateDBConnections(stats.OpenConnections)
+
+			// 🚀 存储空间监控
+			if free, err := engine.CheckStorageSpace("."); err == nil {
+				metrics.UpdateDiskFree(free)
+			}
 		}
 	}
 }
