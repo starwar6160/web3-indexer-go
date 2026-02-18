@@ -28,7 +28,8 @@ func NewDataRecorder(path string) (*DataRecorder, error) {
 	}
 
 	// 🛡️ 确保 logs 目录存在（防止 Docker 容器启动时报错）
-	if err := os.MkdirAll("logs", 0755); err != nil {
+	// 📋 Modern Go 1.13+ octal literal: 0o755 instead of 0755
+	if err := os.MkdirAll("logs", 0o755); err != nil {
 		return nil, fmt.Errorf("failed_to_create_logs_dir: %w", err)
 	}
 

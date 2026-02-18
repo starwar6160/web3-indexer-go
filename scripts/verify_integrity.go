@@ -59,7 +59,8 @@ func main() {
 	}
 
 	reportFile := "docs/integrity_report.log"
-	f, err := os.OpenFile(reportFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	// 📋 Modern Go 1.13+ octal literal: 0o600 instead of 0600
+	f, err := os.OpenFile(reportFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Fatalf("Failed to open report file: %v", err)
 	}
