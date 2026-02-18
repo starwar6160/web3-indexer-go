@@ -147,25 +147,47 @@ func (r *Repository) PruneFutureData(ctx context.Context, chainHead int64) error
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() // nolint:errcheck // Rollback is standard practice, error is usually non-critical during cleanup
+	defer tx.Rollback() // nolint:errcheck // Rollback is standard for safe transaction handling // Rollback is standard practice, error is usually non-critical during cleanup
+
+	headStr := fmt.Sprintf("%d", chainHead)
 
 	// 1. 删除过时的转账记录
-	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", chainHead); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE block_number > $1", headStr); err != nil {
 		return err
 	}
 
 	// 2. 删除过时的区块记录
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", chainHead); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", headStr); err != nil {
 		return err
 	}
 
 	// 3. 更新同步检查点
-	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", chainHead); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", headStr); err != nil {
 		return err
 	}
 
 	// 🚀 工业级对齐：更新或重置 sync_status，防止 API 抓取到脏高度
-	if _, err := tx.ExecContext(ctx, "UPDATE sync_status SET last_processed_block = $1, last_processed_timestamp = NOW()", chainHead); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_status SET last_processed_block = $1, last_processed_timestamp = NOW()", headStr); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// UpdateSyncCursor 强制更新同步游标（用于演示模式下的状态坍缩）
+func (r *Repository) UpdateSyncCursor(ctx context.Context, height int64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // nolint:errcheck // Rollback is standard for safe transaction handling
+
+	headStr := fmt.Sprintf("%d", height)
+
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", headStr); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE sync_status SET last_processed_block = $1, last_processed_timestamp = NOW()", headStr); err != nil {
 		return err
 	}
 

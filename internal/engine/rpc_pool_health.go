@@ -2,20 +2,130 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"math"
+	"strings"
+	"sync/atomic"
 	"time"
-
-	"golang.org/x/time/rate"
 )
 
-// StartHealthCheck starts a background goroutine to periodically check the health of RPC nodes.
-func (p *RPCClientPool) StartHealthCheck(ctx context.Context) {
+// CalculateOptimalRPS 根据环境自动计算最优 RPS
+func CalculateOptimalRPS(rpcURL string, currentLag int64, userConfigRPS int) float64 {
+	var policyRPS float64
+	isLocal := strings.Contains(rpcURL, "localhost") || strings.Contains(rpcURL, "127.0.0.1")
+
+	if isLocal {
+		policyRPS = 500.0
+	} else if strings.Contains(rpcURL, "infura.io") || strings.Contains(rpcURL, "quiknode.pro") {
+		policyRPS = 15.0
+	} else if strings.Contains(rpcURL, "public.com") {
+		policyRPS = 5.0
+	} else {
+		policyRPS = 10.0
+	}
+
+	if currentLag > 1000 && !isLocal {
+		policyRPS *= 2.0
+	}
+
+	if userConfigRPS > 0 {
+		configured := float64(userConfigRPS)
+		if isLocal {
+			return configured
+		}
+		return math.Min(policyRPS, configured)
+	}
+	return policyRPS
+}
+
+// handleRPCError handles errors from RPC nodes, specifically looking for 429s
+func (p *EnhancedRPCClientPool) handleRPCError(node *rpcNode, err error) {
+	if err == nil {
+		return
+	}
+
+	errStr := err.Error()
+	if strings.Contains(errStr, "429") || strings.Contains(errStr, "too many requests") || strings.Contains(errStr, "limit exceeded") {
+		log.Printf("🛑 [CIRCUIT BREAKER] %s returned 429, entering 5-minute cooldown", node.url)
+		p.mu.Lock()
+		node.isHealthy = false
+		node.lastError = time.Now()
+		node.retryAfter = time.Now().Add(5 * time.Minute)
+		p.mu.Unlock()
+
+		if p.metrics != nil {
+			p.metrics.UpdateRPCHealthyNodes("enhanced", p.GetHealthyNodeCount())
+		}
+	} else {
+		p.markNodeUnhealthy(node)
+	}
+}
+
+// markNodeUnhealthy marks a node as unhealthy with exponential backoff
+func (p *EnhancedRPCClientPool) markNodeUnhealthy(node *rpcNode) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	node.isHealthy = false
+	node.lastError = time.Now()
+	node.failCount++
+
+	backoffSec := int(math.Min(math.Pow(2, float64(node.failCount-1)), 60))
+	node.retryAfter = node.lastError.Add(time.Duration(backoffSec) * time.Second)
+
+	LogRPCRequestFailed("node_unhealthy", node.url, fmt.Errorf("fail_count: %d, retry_after: %v", node.failCount, node.retryAfter.Format("15:04:05")))
+	log.Printf("RPC node %s marked unhealthy (fail count: %d, retry after %ds)", node.url, node.failCount, backoffSec)
+}
+
+// incrementRequestCount increments the global request counter
+func (p *EnhancedRPCClientPool) incrementRequestCount(nodeURL, method string) {
+	atomic.AddInt64(&p.requestCount, 1)
+
+	if p.quotaMonitor != nil {
+		p.quotaMonitor.Inc()
+	}
+
+	if p.metrics != nil {
+		duration := time.Since(p.lastResetTime)
+		p.metrics.RecordRPCRequest(nodeURL, method, duration, true)
+	}
+}
+
+// enforceSyncBatchLimit enforces the maximum sync batch size
+func (p *EnhancedRPCClientPool) enforceSyncBatchLimit() error {
+	p.batchMutex.Lock()
+	defer p.batchMutex.Unlock()
+
+	if p.isTestnetMode {
+		p.currentSyncBatch++
+		if p.currentSyncBatch > 50 {
+			time.Sleep(200 * time.Millisecond)
+			p.currentSyncBatch = 0
+		}
+	}
+	return nil
+}
+
+// GetRequestCount returns the total number of RPC requests made
+func (p *EnhancedRPCClientPool) GetRequestCount() int64 {
+	return atomic.LoadInt64(&p.requestCount)
+}
+
+// ResetRequestCount resets the request counter
+func (p *EnhancedRPCClientPool) ResetRequestCount() {
+	atomic.StoreInt64(&p.requestCount, 0)
+	p.lastResetTime = time.Now()
+}
+
+// StartHealthCheck starts a background goroutine for periodic health checks
+func (p *EnhancedRPCClientPool) StartHealthCheck(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	go func() {
 		defer ticker.Stop()
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("HealthCheck goroutine panic: %v", r)
+				log.Printf("EnhancedHealthCheck goroutine panic: %v", r)
 			}
 		}()
 		for {
@@ -23,21 +133,20 @@ func (p *RPCClientPool) StartHealthCheck(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				p.CheckHealth()
+				p.checkHealth()
 			}
 		}
 	}()
 }
 
-// CheckHealth 检查所有节点的健康状态
-func (p *RPCClientPool) CheckHealth() bool {
+// checkHealth checks all nodes' health status
+func (p *EnhancedRPCClientPool) checkHealth() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	healthyNodes := 0
 	for _, node := range p.clients {
 		if node.isHealthy {
-			// 执行简单的健康检查
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, err := node.client.BlockNumber(ctx)
 			cancel()
@@ -46,71 +155,21 @@ func (p *RPCClientPool) CheckHealth() bool {
 				node.isHealthy = false
 				node.failCount++
 				node.lastError = time.Now()
-				log.Printf("RPC node %s marked unhealthy (fail count: %d)", node.url, node.failCount)
+				log.Printf("Enhanced RPC node %s marked unhealthy (fail count: %d)", node.url, node.failCount)
 			} else {
 				healthyNodes++
 			}
 		} else if time.Since(node.lastError) > 30*time.Second {
-			// 不健康的节点可以尝试恢复
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, err := node.client.BlockNumber(ctx)
 			cancel()
 
 			if err == nil {
 				node.isHealthy = true
-				log.Printf("RPC node %s recovered", node.url)
+				log.Printf("Enhanced RPC node %s recovered", node.url)
 				healthyNodes++
 			}
 		}
 	}
-
-	// Report to Prometheus
-	GetMetrics().UpdateRPCHealthyNodes("default", healthyNodes)
-
-	return healthyNodes > 0
-}
-
-// WaitForHealthy 等待直到有健康节点或超时
-func (p *RPCClientPool) WaitForHealthy(timeout time.Duration) bool {
-	start := time.Now()
-	for {
-		if p.CheckHealth() {
-			return true
-		}
-
-		if time.Since(start) > timeout {
-			return false
-		}
-
-		time.Sleep(5 * time.Second)
-		log.Printf("Waiting for healthy RPC nodes...")
-	}
-}
-
-// GetHealthyNodeCount 返回健康节点数量
-func (p *RPCClientPool) GetHealthyNodeCount() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	count := 0
-	for _, node := range p.clients {
-		if node.isHealthy {
-			count++
-		}
-	}
-	return count
-}
-
-// GetTotalNodeCount 返回总节点数量
-func (p *RPCClientPool) GetTotalNodeCount() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return len(p.clients)
-}
-
-// SetRateLimit 动态设置限速 (令牌桶)
-func (p *RPCClientPool) SetRateLimit(rps float64, burst int) {
-	p.rateLimiter.SetLimit(rate.Limit(rps))
-	p.rateLimiter.SetBurst(burst)
-	log.Printf("RPC Pool rate limit updated: %.2f RPS, %d Burst", rps, burst)
+	GetMetrics().UpdateRPCHealthyNodes("enhanced", healthyNodes)
 }

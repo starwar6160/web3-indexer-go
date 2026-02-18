@@ -120,6 +120,11 @@ func (f *Fetcher) fetchHeaderWithRetry(ctx context.Context, bn *big.Int) (*types
 }
 
 func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
+	// 💾 录制原始数据：直接录制完整的 BlockData 对象，方便未来 100% 还原回放
+	if f.recorder != nil && data.Err == nil {
+		f.recorder.Record("block_data", data)
+	}
+
 	// 🚀 工业级节流：基于『交易笔数』进行硬限速
 	// 这确保了如果一个块有 500 笔交易，它会强制分摊时间，绝对保住 2.0 TPS
 	if f.throughput != nil {

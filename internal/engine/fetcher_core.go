@@ -45,7 +45,8 @@ type Fetcher struct {
 	// Watched addresses for contract monitoring
 	watchedAddresses []common.Address
 
-	headerOnlyMode bool // 低成本模式：仅获取区块头，不获取Logs
+	headerOnlyMode bool          // 低成本模式：仅获取区块头，不获取Logs
+	recorder       *DataRecorder // 💾 原始数据录制器
 }
 
 // SetHeaderOnlyMode enables/disables low-cost mode
@@ -62,12 +63,19 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 	// 彻底关闭限速
 	limiter := rate.NewLimiter(rate.Inf, 0)
 
+	// 💾 初始化录制器
+	recorder, err := NewDataRecorder("")
+	if err != nil {
+		slog.Warn("failed_to_initialize_recorder", "err", err)
+	}
+
 	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
 		jobs:        make(chan FetchJob, concurrency*2),
-		Results:     make(chan BlockData, concurrency*2),
+		Results:     make(chan BlockData, 5000), // 🚀 统一扩容至 5000
 		limiter:     limiter,
+		recorder:    recorder,
 		stopCh:      make(chan struct{}),
 		paused:      false,
 		metrics:     GetMetrics(),
@@ -91,13 +99,20 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher
 	// 🚀 Hard Throttle: Limit ingestion to 2.0 TPS to protect remaining quota
 	throughput := rate.NewLimiter(rate.Limit(2.0), 1000)
 
+	// 💾 初始化录制器 (默认存储路径)
+	recorder, err := NewDataRecorder("")
+	if err != nil {
+		slog.Warn("failed_to_initialize_recorder", "err", err)
+	}
+
 	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
 		jobs:        make(chan FetchJob, concurrency*2),
-		Results:     make(chan BlockData, concurrency*2),
-		limiter:     rateLimiter.Limiter(), // 使用工业级限流器内部的 limiter
+		Results:     make(chan BlockData, 5000), // 🚀 扩容至 5000，充分利用 128G 内存进行解耦
+		limiter:     rateLimiter.Limiter(),      // 使用工业级限流器内部的 limiter
 		throughput:  throughput,
+		recorder:    recorder,
 		stopCh:      make(chan struct{}),
 		paused:      false,
 		metrics:     GetMetrics(),

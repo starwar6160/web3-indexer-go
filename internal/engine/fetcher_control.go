@@ -10,6 +10,10 @@ import (
 func (f *Fetcher) Stop() {
 	f.stopOnce.Do(func() {
 		close(f.stopCh)
+		// 💾 关闭录制器，确保数据落盘
+		if f.recorder != nil {
+			_ = f.recorder.Close()
+		}
 		// 清空 jobs channel 防止阻塞
 		go func() {
 			defer func() {
