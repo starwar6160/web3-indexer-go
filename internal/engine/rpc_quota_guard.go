@@ -13,10 +13,10 @@ type QuotaGuard struct {
 	mu sync.RWMutex
 
 	// 配额配置
-	DailyLimit       int64   // 每日限额（如 Infura 免费 100K）
-	CurrentUsed      int64   // 已使用量
-	StrictThreshold  float64 // 严格模式阈值（如 0.9 = 90%）
-	LastResetTime    time.Time
+	DailyLimit      int64   // 每日限额（如 Infura 免费 100K）
+	CurrentUsed     int64   // 已使用量
+	StrictThreshold float64 // 严格模式阈值（如 0.9 = 90%）
+	LastResetTime   time.Time
 
 	// 状态
 	mode QuotaMode
@@ -40,7 +40,7 @@ func NewQuotaGuard(dailyLimit int64) *QuotaGuard {
 	return &QuotaGuard{
 		DailyLimit:      dailyLimit,
 		CurrentUsed:     0,
-		StrictThreshold: 0.85, // 85% 触发严格模式
+		StrictThreshold: 0.90, // 90% 触发严格模式
 		LastResetTime:   time.Now(),
 		mode:            QuotaModeNormal,
 	}
@@ -83,7 +83,7 @@ func (g *QuotaGuard) RecordRequest() {
 	defer g.mu.Unlock()
 
 	g.CurrentUsed++
-	
+
 	// 自动重置（跨午夜）
 	if time.Since(g.LastResetTime) > 24*time.Hour {
 		g.Reset()
@@ -110,7 +110,7 @@ func (g *QuotaGuard) SetCurrentUsed(used int64) {
 	defer g.mu.Unlock()
 
 	g.CurrentUsed = used
-	
+
 	// 自动检测模式
 	usageRatio := float64(used) / float64(g.DailyLimit)
 	if usageRatio >= 1.0 {
@@ -131,7 +131,7 @@ func (g *QuotaGuard) Reset() {
 	g.CurrentUsed = 0
 	g.LastResetTime = time.Now()
 	g.mode = QuotaModeNormal
-	
+
 	slog.Info("🔄 QUOTA_RESET: Daily cycle completed", "old_used", oldUsed)
 }
 
@@ -141,12 +141,12 @@ func (g *QuotaGuard) GetMetrics() map[string]interface{} {
 	defer g.mu.RUnlock()
 
 	return map[string]interface{}{
-		"daily_limit":      g.DailyLimit,
-		"current_used":     g.CurrentUsed,
-		"remaining":        g.DailyLimit - g.CurrentUsed,
-		"usage_ratio":      g.GetUsageRatio(),
-		"mode":             g.mode.String(),
-		"requests_denied":  g.requestsDenied.Load(),
+		"daily_limit":     g.DailyLimit,
+		"current_used":    g.CurrentUsed,
+		"remaining":       g.DailyLimit - g.CurrentUsed,
+		"usage_ratio":     g.GetUsageRatio(),
+		"mode":            g.mode.String(),
+		"requests_denied": g.requestsDenied.Load(),
 	}
 }
 
