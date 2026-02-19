@@ -114,9 +114,10 @@
                     // 使用后端识别的 Host
                     grafanaBase = window.location.protocol + "//" + window.location.hostname + ":4000";
                 }
-                const dashboardPath = `/d/web3-indexer-multi/web3-indexer-multi?orgId=1&refresh=5s&kiosk&var-Environment=${currentEnv}&var-PostgresDS=${currentDS}`;
+                // ✅ 更新为使用 Prometheus Dashboard (无状态)
+                const dashboardPath = `/d/web3-indexer-prometheus/web3-indexer-prometheus?orgId=1&refresh=5s&kiosk`;
                 grafanaIframe.src = grafanaBase + dashboardPath;
-                console.log("🧬 Environment-Aware Dashboard Loaded:", currentEnv, currentDS);
+                console.log("🧬 Prometheus Dashboard Loaded (Stateless):", currentEnv);
             }
         });
     </script>

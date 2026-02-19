@@ -1,0 +1,226 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "refresh": "5s",
+  "schemaVersion": 16,
+  "style": "dark",
+  "tags": ["web3", "indexer", "prometheus"],
+  "templating": {
+    "list": [
+      {
+        "name": "Environment",
+        "type": "custom",
+        "options": [
+          { "text": "Demo (8082)", "value": "demo", "selected": true },
+          { "text": "Sepolia (8081)", "value": "sepolia", "selected": false }
+        ],
+        "current": { "text": "Demo (8082)", "value": "demo" }
+      },
+      {
+        "name": "PrometheusDS",
+        "type": "datasource",
+        "query": "prometheus",
+        "regex": "",
+        "refresh": 1,
+        "current": { "text": "Prometheus", "value": "prometheus_ds_001" }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Web3 Indexer - Prometheus Dashboard",
+  "uid": "web3-indexer-prometheus",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Goroutines",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "go_goroutines",
+          "refId": "A",
+          "legendFormat": "{{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 50, "color": "yellow" },
+              { "value": 100, "color": "red" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Heap Memory",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "go_memstats_heap_alloc_bytes",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            { "type": "value-to-text", "options": { "0": { "text": "0" } } },
+            { "type": "value-to-text", "options": { "0": { "text": "N/A" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 1073741824, "color": "yellow" },
+              { "value": 2147483648, "color": "red" }
+            ]
+          },
+          "unit": "bytes"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "GC Duration",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "rate(go_gc_duration_seconds_sum[1m])",
+          "legendFormat": "GC Duration",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": { "axisCenteredZero": false },
+          "unit": "s"
+        }
+      },
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Target Status",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "up{job=\"web3-indexer\"}",
+          "refId": "A",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            { "type": "value_to_text", "options": { "0": { "text": "DOWN" } } },
+            { "type": "value_to_text", "options": { "1": { "text": "UP" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 0, "color": "red" },
+              { "value": 1, "color": "green" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Memory Allocation Rate",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "rate(go_memstats_alloc_bytes_total[1m])",
+          "legendFormat": "Allocation Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": { "axisCenteredZero": false },
+          "unit": "Bps"
+        }
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Goroutines Over Time",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "go_goroutines",
+          "legendFormat": "Goroutines",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": { "axisCenteredZero": false },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": { "calcs": ["min", "max", "mean"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      }
+    }
+  ]
+}
