@@ -161,7 +161,7 @@ func (a *AdminServer) getRPCQuotaUsage(state IndexerState) string {
 	case StateWatching:
 		return "MINIMAL (WSS subscription only)"
 	default:
-		return "UNKNOWN"
+		return string(TxCategoryUnknown)
 	}
 }
 
@@ -175,7 +175,7 @@ func (a *AdminServer) getEstimatedDailyCost(state IndexerState) string {
 	case StateWatching:
 		return "~0.1M credits/day (3% of free tier)"
 	default:
-		return "UNKNOWN"
+		return string(TxCategoryUnknown)
 	}
 }
 

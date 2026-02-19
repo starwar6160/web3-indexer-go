@@ -73,7 +73,7 @@ func ProductionProfile() *PerformanceProfile {
 }
 
 // ApplyToConfig 应用性能配置到全局配置（用于环境覆盖）
-func (p *PerformanceProfile) ApplyToConfig(cfg interface{}) {
+func (p *PerformanceProfile) ApplyToConfig(_ interface{}) {
 	slog.Info("🚀 Applying Performance Profile",
 		"name", p.Name,
 		"batch_size", p.BatchSize,

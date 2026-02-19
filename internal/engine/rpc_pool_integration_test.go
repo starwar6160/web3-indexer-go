@@ -19,11 +19,11 @@ func isNetworkEnvError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "connection reset") || 
-		strings.Contains(msg, "eof") || 
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "eof") ||
 		strings.Contains(msg, "timeout") ||
-		strings.Contains(msg, "401") || 
-		strings.Contains(msg, "unauthorized") || 
+		strings.Contains(msg, "401") ||
+		strings.Contains(msg, "unauthorized") ||
 		strings.Contains(msg, "429")
 }
 

@@ -31,8 +31,8 @@ func (o *Orchestrator) LogPulse(ctx context.Context) {
 	pulse := map[string]interface{}{
 		"ts":         time.Now().UnixMilli(),
 		"tag":        "AI_DIAGNOSTIC",
-		"rpc_actual": rpcActual,             // 🚀 物理真理
-		"mem_latest": status.LatestBlock,    // 内存幻觉
+		"rpc_actual": rpcActual,          // 🚀 物理真理
+		"mem_latest": status.LatestBlock, // 内存幻觉
 		"is_desync":  fmt.Sprintf("%d", rpcActual) != status.LatestBlock,
 		"state":      status.State,
 		"mem_sync":   status.MemorySync,
@@ -50,7 +50,7 @@ func (o *Orchestrator) LogPulse(ctx context.Context) {
 	}
 }
 
-func strategyName(s EngineStrategy) string {
+func strategyName(s Strategy) string {
 	if s == nil {
 		return "unknown"
 	}

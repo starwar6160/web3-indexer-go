@@ -8,8 +8,8 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// EngineStrategy 定义了不同运行环境下的行为差异
-type EngineStrategy interface {
+// Strategy 定义了不同运行环境下的行为差异
+type Strategy interface {
 	Name() string
 	OnStartup(ctx context.Context, o *Orchestrator, db *sqlx.DB, chainID int64) error
 	ShouldPersist() bool
@@ -39,7 +39,7 @@ func (s *AnvilStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx
 
 	// 2. 内存原子级归零
 	o.ResetToZero()
-	
+
 	// 3. 清空管道残留
 	if o.fetcher != nil {
 		o.fetcher.ClearJobs()
@@ -49,26 +49,26 @@ func (s *AnvilStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx
 	return nil
 }
 
-func (s *AnvilStrategy) ShouldPersist() bool { return false } // 🔥 Anvil 不写盘，彻底释放 5600U I/O
+func (s *AnvilStrategy) ShouldPersist() bool      { return false } // 🔥 Anvil 不写盘，彻底释放 5600U I/O
 func (s *AnvilStrategy) GetConfirmations() uint64 { return 0 }
-func (s *AnvilStrategy) GetBatchSize() int { return 200 }
+func (s *AnvilStrategy) GetBatchSize() int        { return 200 }
 
 // TestnetStrategy: 针对测试网优化（稳健、持久、断点续传）
 type TestnetStrategy struct{}
 
 func (s *TestnetStrategy) Name() string { return "PERSISTENT_TESTNET" }
 
-func (s *TestnetStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx.DB, chainID int64) error {
+func (s *TestnetStrategy) OnStartup(_ context.Context, o *Orchestrator, db *sqlx.DB, chainID int64) error {
 	slog.Info("💾 Strategy: TESTNET mode detected. Aligning with disk cursor.")
 	return o.LoadInitialState(db, chainID)
 }
 
-func (s *TestnetStrategy) ShouldPersist() bool { return true }
+func (s *TestnetStrategy) ShouldPersist() bool      { return true }
 func (s *TestnetStrategy) GetConfirmations() uint64 { return 6 } // 等待 6 个块确认
-func (s *TestnetStrategy) GetBatchSize() int { return 50 }
+func (s *TestnetStrategy) GetBatchSize() int        { return 50 }
 
 // GetStrategy 根据 ChainID 自动选择策略
-func GetStrategy(chainID int64) EngineStrategy {
+func GetStrategy(chainID int64) Strategy {
 	if chainID == 31337 {
 		return &AnvilStrategy{}
 	}
