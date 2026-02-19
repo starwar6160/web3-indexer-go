@@ -56,7 +56,6 @@ test-a2: infra-up
 	PORT=8092 \
 	RPC_URLS="http://127.0.0.1:8545" \
 	CHAIN_ID=31337 \
-	START_BLOCK=latest \
 	DATABASE_URL="postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_demo?sslmode=disable" \
 	APP_TITLE="🧪 ANVIL-LOCAL (8092) [Latest:$$ANVIL_HEIGHT]" \
 	DEMO_MODE=false \

@@ -18,16 +18,19 @@ echo ""
 # 1. 停止所有相关容器
 echo -e "${YELLOW}1️⃣  停止所有容器...${NC}"
 echo "-----------------------------------"
+# 🚀 修正容器名称：web3-indexer-app (8082), web3-indexer-anvil (8545)
 docker stop web3-indexer-app 2>/dev/null && echo "  ✅ 8082 已停止" || echo "  ⚠️  8082 未运行"
-docker stop web3-demo2-app 2>/dev/null && echo "  ✅ 8092 已停止" || echo "  ⚠️  8092 未运行"
-docker stop web3-demo2-anvil 2>/dev/null && echo "  ✅ Anvil 已停止" || echo "  ⚠️  Anvil 未运行"
+# 8092 通常是本地进程，但这里也尝试停止可能的容器名
+docker stop web3-demo2-app 2>/dev/null && echo "  ✅ 8092 容器已停止" || echo "  ⚠️  8092 容器未运行"
+docker stop web3-indexer-anvil 2>/dev/null && echo "  ✅ Anvil 已停止" || echo "  ⚠️  Anvil 未运行"
 echo ""
 
 # 2. 删除容器
 echo -e "${YELLOW}2️⃣  删除容器（无状态）...${NC}"
 echo "-----------------------------------"
 docker rm web3-indexer-app 2>/dev/null && echo "  ✅ 8082 容器已删除" || echo "  ⚠️  8082 容器未创建"
-docker rm web3-demo2-anvil 2>/dev/null && echo "  ✅ Anvil 容器已删除" || echo "  ⚠️  Anvil 容器未创建"
+docker rm web3-demo2-app 2>/dev/null && echo "  ✅ 8092 容器已删除" || echo "  ⚠️  8092 容器未创建"
+docker rm web3-indexer-anvil 2>/dev/null && echo "  ✅ Anvil 容器已删除" || echo "  ⚠️  Anvil 容器未创建"
 echo ""
 
 # 3. 清理数据库

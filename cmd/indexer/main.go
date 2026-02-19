@@ -399,6 +399,17 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
 	}
 
+	// 🎼 SSOT: 初始化策略与协调器 (单一控制面)
+	// 🚀 IMPORTANT: Strategy OnStartup MUST run BEFORE GetStartBlock
+	// because AnvilStrategy performs a "Nuclear Reset" that wipes the DB.
+	strategy := engine.GetStrategy(cfg.ChainID)
+	orchestrator := engine.GetOrchestrator()
+	orchestrator.Init(ctx, sm.fetcher, strategy)
+
+	if err := strategy.OnStartup(ctx, orchestrator, sm.db, cfg.ChainID); err != nil {
+		slog.Error("🎼 Orchestrator: Strategy startup failed", "err", err)
+	}
+
 	startBlock, err := sm.GetStartBlock(ctx, forceFrom, resetDB)
 	if err != nil {
 		slog.Error("failed_to_get_start_block", "err", err)
@@ -507,15 +518,9 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	sm.fetcher.SetSequencer(sequencer)
 	slog.Info("🔥 Backpressure sensing enabled: Fetcher → Sequencer linked")
 
-	// 🎼 SSOT: 初始化策略与协调器 (单一控制面)
+	// 🎼 SSOT: 获取已初始化的策略与协调器
 	strategy := engine.GetStrategy(cfg.ChainID)
 	orchestrator := engine.GetOrchestrator()
-	orchestrator.Init(ctx, sm.fetcher, strategy)
-
-	// 🚀 执行环境特定的启动逻辑 (自愈对齐)
-	if err := strategy.OnStartup(ctx, orchestrator, sm.db, cfg.ChainID); err != nil {
-		slog.Error("🎼 Orchestrator: Strategy startup failed", "err", err)
-	}
 
 	// 🔥 横滨实验室：初始化异步写入器 (Muscle)
 	// 策略控制：如果 ShouldPersist=false，则进入全内存模式

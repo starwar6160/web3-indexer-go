@@ -31,8 +31,13 @@ fi
 
 # 1. 停止并删除容器
 echo "1️⃣  停止旧 Anvil 容器..."
-docker stop web3-demo2-anvil 2>/dev/null || echo -e "${YELLOW}⚠️  容器未运行${NC}"
-docker rm web3-demo2-anvil 2>/dev/null || echo -e "${YELLOW}⚠️  容器未创建${NC}"
+# 🚀 修正容器名称：从 web3-demo2-anvil 改为 web3-indexer-anvil (由 docker compose -p web3-indexer 决定)
+docker stop web3-indexer-anvil 2>/dev/null || echo -e "${YELLOW}⚠️  Anvil 容器未运行${NC}"
+docker rm web3-indexer-anvil 2>/dev/null || echo -e "${YELLOW}⚠️  Anvil 容器未创建${NC}"
+
+# 1.5 清理数据库状态 (强制无状态)
+echo "📂 清理数据库状态 (web3_demo)..."
+docker exec -i web3-indexer-db psql -U postgres -p 15432 -d web3_demo -c "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;" || echo -e "${YELLOW}⚠️  数据库清理失败 (可能尚未启动)${NC}"
 
 # 2. 重新启动
 echo ""
