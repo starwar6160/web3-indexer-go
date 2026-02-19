@@ -124,7 +124,7 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 
 	orchestrator := engine.GetOrchestrator()
-	status := orchestrator.GetUIStatus(Version)
+	status := orchestrator.GetUIStatus(r.Context(), db, Version)
 
 	if signer != nil {
 		if signed, err := signer.Sign("status", status); err == nil {

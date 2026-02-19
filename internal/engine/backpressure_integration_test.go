@@ -46,7 +46,7 @@ func TestIntegration_BackpressureFlow(t *testing.T) {
 	GetGlobalState().UpdatePipelineDepth(0, int32(fillCount), 0)
 
 	// 验证状态
-	status := orchestrator.GetUIStatus("test-v1")
+	status := orchestrator.GetUIStatus(context.Background(), db, "test-v1")
 	assert.Equal(t, "pressure_limit", status.State, "系统应识别到 I/O 瓶颈并进入限流状态")
 	assert.Equal(t, fillCount, status.ResultsDepth, "任务队列应有正确积压")
 }

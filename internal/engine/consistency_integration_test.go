@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -21,7 +22,8 @@ func TestIntegration_Math_Consistency_AI_Friendly(t *testing.T) {
 		// 🚀 核心：给予充足时间让 process 循环更新 snapshot
 		time.Sleep(100 * time.Millisecond)
 		
-		status := orchestrator.GetUIStatus("test-v1")
+		// 获取一个临时 DB 引用 (此处可以传 nil 因为测试不需要真正的数据库计算，或者使用 mock)
+		status := orchestrator.GetUIStatus(context.Background(), nil, "test-v1")
 		snap := orchestrator.GetSnapshot()
 
 		// 🚀 核心等式：Synced + Lag == Latest
@@ -55,8 +57,7 @@ func TestIntegration_SelfHealing_AI_Friendly(t *testing.T) {
 	// 2. 触发自愈
 	healer.auditAndHeal()
 
-	// 3. 验证结果 (注意：auditAndHeal 直接修改 state，但我们需要强制更新 snapshot 以供测试观察)
-	// 我们通过 Dispatch 一个空消息触发快照刷新
+	// 3. 验证结果
 	orchestrator.Dispatch(CmdNotifyFetchProgress, uint64(5000))
 	time.Sleep(100 * time.Millisecond)
 	

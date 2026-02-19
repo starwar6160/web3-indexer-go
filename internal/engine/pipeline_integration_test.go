@@ -74,6 +74,9 @@ func TestStage3_ShadowSync_Movement(t *testing.T) {
 
 // TestStage4_Persistence_Finalization 验证持久层：磁盘游标是否能完成物理确认
 func TestStage4_Persistence_Finalization(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
 	o := GetOrchestrator()
 	o.Reset()
 	
@@ -85,15 +88,18 @@ func TestStage4_Persistence_Finalization(t *testing.T) {
 	o.Dispatch(CmdNotifyFetched, uint64(66))
 
 	time.Sleep(300 * time.Millisecond)
-	snap := o.GetSnapshot()
+	status := o.GetUIStatus(context.Background(), db, "test-v1")
 
-	if snap.SyncedCursor != 66 {
-		t.Fatalf("AI_FIX_REQUIRED [Stage 4]: Persistence finalization failed. SyncedCursor expected 66, got %d", snap.SyncedCursor)
+	if status.LatestIndexed != "66" {
+		t.Fatalf("AI_FIX_REQUIRED [Stage 4]: Persistence finalization failed. UI LatestIndexed expected 66, got %s", status.LatestIndexed)
 	}
 }
 
 // TestStage5_UI_Logic_Invariants 验证展示层：DTO 数据是否满足博彩级数学自洽
 func TestStage5_UI_Logic_Invariants(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
 	o := GetOrchestrator()
 	o.Reset()
 
@@ -106,7 +112,7 @@ func TestStage5_UI_Logic_Invariants(t *testing.T) {
 	o.Dispatch(CmdNotifyFetched, uint64(9500))
 
 	time.Sleep(300 * time.Millisecond)
-	status := o.GetUIStatus("test-v1")
+	status := o.GetUIStatus(context.Background(), db, "test-v1")
 
 	// 1. 物理顺序约束
 	snap := o.GetSnapshot()

@@ -212,9 +212,14 @@ func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
 	}
 
 	// 🚀 Pacemaker: 强制匀速，防止突发流量撑爆 5600U 的 I/O
+	// 🛡️ 资深调优：限制等待时间，如果 Results 已满导致消费过慢，不再死等节拍器
 	if f.bpsLimiter != nil {
-		if err := f.bpsLimiter.Wait(ctx); err != nil {
-			return
+		limiterCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		err := f.bpsLimiter.Wait(limiterCtx)
+		cancel()
+		if err != nil {
+			// 超时说明当前速率已达上限且下游可能拥堵，跳过本次等待直接进入 select
+			slog.Debug("⏳ [Fetcher] bpsLimiter wait timeout, proceeding cautiously")
 		}
 	}
 
