@@ -47,6 +47,8 @@ test-a2: infra-up
 	@echo "🔍 [LOCAL] 检测 Anvil 当前高度..."
 	@ANVIL_HEIGHT=$$(scripts/get-anvil-height.sh); \
 	echo "📊 Anvil 当前高度：$$ANVIL_HEIGHT"; \
+	echo "🚀 [LOCAL] 正在确保数据库无状态 (Nuclear Reset)..."; \
+	PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo -c "TRUNCATE TABLE blocks, transfers, sync_checkpoints, sync_status, visitor_stats CASCADE;" >/dev/null 2>&1 || true; \
 	echo "🚀 [LOCAL] 正在确保数据库 Schema 已就绪..."; \
 	PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo -f scripts/db/001_init.sql >/dev/null 2>&1 || true; \
 	PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo -f scripts/db/002_visitor_stats.sql >/dev/null 2>&1 || true; \
