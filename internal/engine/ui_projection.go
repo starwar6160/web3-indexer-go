@@ -26,30 +26,39 @@ type UIStatusDTO struct {
 	SafetyBuffer     uint64                 `json:"safety_buffer"`
 	LastLog          map[string]interface{} `json:"last_log"`
 	UpdatedAt        string                 `json:"updated_at"`
+	LastPulse        int64                  `json:"last_pulse"` // 🚀 🔥 新增：系统心跳 (UnixMs)
 	Fingerprint      string                 `json:"fingerprint"`
 }
 
 // GetUIStatus 将复杂的内部状态投影为简洁的 UI 对象
-// 彻底解决 API Handler 圈复杂度过高的问题 (Ref: gocyclo)
 func (o *Orchestrator) GetUIStatus(version string) UIStatusDTO {
 	snap := o.GetSnapshot()
 	globalSnap := GetGlobalState().Snapshot()
 	maxJobs, maxResults, _ := GetGlobalState().GetCapacity()
 
-	// 1. 逻辑自洽：安全计算滞后 (修复 G115 溢出风险)
-	syncLag := SafeInt64Diff(snap.LatestHeight, snap.SyncedCursor)
+	// 🚀 视觉自愈：防止 UI 显示 Latest: 0
+	latest := snap.LatestHeight
+	if latest == 0 {
+		if snap.FetchedHeight > 0 {
+			latest = snap.FetchedHeight
+		} else {
+			latest = snap.SyncedCursor
+		}
+	}
+
+	// 1. 逻辑自洽：安全计算滞后
+	syncLag := SafeInt64Diff(latest, snap.SyncedCursor)
 	if syncLag < 0 {
 		syncLag = 0
 	}
 
-	fetchLag := SafeInt64Diff(snap.LatestHeight, snap.FetchedHeight)
+	fetchLag := SafeInt64Diff(latest, snap.FetchedHeight)
 	if fetchLag < 0 {
 		fetchLag = 0
 	}
 
-	// 2. 动态状态评估 (博彩级实时感)
+	// 2. 动态状态评估
 	stateStr := snap.SystemState.String()
-	// 如果 Results 队列积压超过 80%
 	if globalSnap.ResultsDepth > globalSnap.PipelineDepth*80/100 {
 		stateStr = "pressure_limit"
 	} else if syncLag > 1000 && GetMetrics().GetWindowBPS() < 1 {
@@ -58,8 +67,8 @@ func (o *Orchestrator) GetUIStatus(version string) UIStatusDTO {
 
 	// 3. 扫描进度计算
 	fetchProgress := 0.0
-	if snap.LatestHeight > 0 {
-		fetchProgress = float64(snap.FetchedHeight) / float64(snap.LatestHeight) * 100
+	if latest > 0 {
+		fetchProgress = float64(snap.FetchedHeight) / float64(latest) * 100
 		if fetchProgress > 100.0 {
 			fetchProgress = 100.0
 		}
@@ -68,7 +77,7 @@ func (o *Orchestrator) GetUIStatus(version string) UIStatusDTO {
 	return UIStatusDTO{
 		Version:         version,
 		State:           stateStr,
-		LatestChain:     fmt.Sprintf("%d", snap.LatestHeight),
+		LatestChain:     fmt.Sprintf("%d", latest),
 		MemorySync:      fmt.Sprintf("%d", snap.FetchedHeight),
 		DiskSync:        fmt.Sprintf("%d", snap.SyncedCursor),
 		SyncLag:         syncLag,
@@ -85,6 +94,7 @@ func (o *Orchestrator) GetUIStatus(version string) UIStatusDTO {
 		SafetyBuffer:    snap.SafetyBuffer,
 		LastLog:         snap.LogEntry,
 		UpdatedAt:       snap.UpdatedAt.Format(time.RFC3339),
+		LastPulse:       time.Now().UnixMilli(),
 		Fingerprint:     "Yokohama-Lab-Primary",
 	}
 }

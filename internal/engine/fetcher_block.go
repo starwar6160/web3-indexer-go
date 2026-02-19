@@ -18,6 +18,8 @@ import (
 func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 	startTime := time.Now()
 
+	GetOrchestrator().DispatchLog("DEBUG", "🌀 Fetcher: Starting block range", "from", start.String(), "to", end.String())
+
 	// Step 1: Range Filter
 	filterQuery := ethereum.FilterQuery{
 		FromBlock: start,
@@ -46,9 +48,15 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 
 	// 🚀 [Elegant Retry] for FilterLogs
 	for retries := 0; retries < 5; retries++ {
-		logs, err = f.pool.FilterLogs(ctx, filterQuery)
+		// 🛡️ 5600U 保护：增加硬超时，防止网络层挂起导致整个 Jobs 队列堵死
+		reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		logs, err = f.pool.FilterLogs(reqCtx, filterQuery)
+		cancel()
+
 		if err == nil {
 			GetOrchestrator().Dispatch(CmdFetchSuccess, nil)
+			// 🚀 🔥 新增：通知扫描进度 (内存水位)
+			GetOrchestrator().Dispatch(CmdNotifyFetched, end.Uint64())
 			break
 		}
 
@@ -105,7 +113,11 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		if len(blockLogs) > 0 || bn.Cmp(end) == 0 {
 			// 🚀 [Elegant Retry] for BlockByNumber
 			for retries := 0; retries < 5; retries++ {
-				block, err = f.pool.BlockByNumber(ctx, bn)
+				// 🛡️ 5600U 保护：增加硬超时，防止网络层挂起导致消费端死锁
+				reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				block, err = f.pool.BlockByNumber(reqCtx, bn)
+				cancel()
+
 				if err == nil {
 					GetOrchestrator().Dispatch(CmdFetchSuccess, nil)
 					break
@@ -137,6 +149,9 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 			Logs:     blockLogs,
 			Err:      err,
 		})
+
+		// 🚀 🔥 新增：影子进度更新 (用于 UI 先行跳动)
+		GetOrchestrator().Dispatch(CmdNotifyFetchProgress, bn.Uint64())
 	}
 
 	if f.metrics != nil {
@@ -204,8 +219,8 @@ func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
 	}
 
 	// 🔥 横滨实验室：非阻塞写入，超时后丢弃遥测数据
-	// 解决 Eco-Mode 下协程泄露问题
-	sendTimeout := time.NewTimer(100 * time.Millisecond) // 100ms 超时
+	// 解决 Eco-Mode 下协程泄露问题，并防止 5600U 的 Results 队列溢出死锁
+	sendTimeout := time.NewTimer(500 * time.Millisecond) // 500ms 超时
 	defer sendTimeout.Stop()
 
 	select {
@@ -216,10 +231,10 @@ func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
 		if f.metrics != nil {
 			f.metrics.RecordFetcherJobFailed() // 记录丢弃的 job
 		}
-		slog.Warn("🔥 [Fetcher] sendResult TIMEOUT: dropping telemetry data",
+		slog.Warn("🔥 [Fetcher] sendResult TIMEOUT: dropping data to break deadlock",
 			"block_number", data.Number.String(),
 			"results_depth", len(f.Results),
-			"timeout_ms", 100)
+			"timeout_ms", 500)
 	case <-ctx.Done():
 	case <-f.stopCh:
 	}
