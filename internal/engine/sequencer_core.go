@@ -164,7 +164,7 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 					slog.String("skipped_to", skippedTo.String()),
 					slog.String("resume_at", minBuffered.String()),
 					slog.Int("gap_fill_attempts", s.gapFillCount),
-					slog.Int("gap_size", gapSize),
+					slog.Int64("gap_size", gapSize),
 					slog.String("strategy", "backfill_async"),
 					slog.String("action_required", "replay skipped range to restore data completeness"))
 
