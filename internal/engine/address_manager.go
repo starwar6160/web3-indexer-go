@@ -179,7 +179,8 @@ func (am *AddressManager) loadInitialLabels() {
 	// 加载到内存
 	count := 0
 	for addr, label := range coreAddresses {
-		am.labels.Store(normalizeAddress(addr), label)
+		labelCopy := label
+		am.labels.Store(normalizeAddress(addr), &labelCopy)
 		count++
 	}
 
