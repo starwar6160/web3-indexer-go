@@ -12,13 +12,13 @@ type HeatStrategy struct {
 	mu sync.RWMutex
 
 	// 滑动窗口：存储过去 60 秒的 TPS
-	tpsWindow []float64
+	tpsWindow  []float64
 	windowSize int
 
 	// 阈值配置
-	wakeThreshold      float64 // 唤醒阈值：平均 TPS > 此值时唤醒
-	racingThreshold    float64 // 竞速阈值：进入全速模式
-	coolingThreshold   float64 // 冷却阈值：低于此值进入节能模式
+	wakeThreshold    float64 // 唤醒阈值：平均 TPS > 此值时唤醒
+	racingThreshold  float64 // 竞速阈值：进入全速模式
+	coolingThreshold float64 // 冷却阈值：低于此值进入节能模式
 
 	// 状态
 	isExhausted bool // Quota 耗尽强制休眠
@@ -31,9 +31,9 @@ func NewHeatStrategy() *HeatStrategy {
 	return &HeatStrategy{
 		tpsWindow:        make([]float64, 0, 60),
 		windowSize:       60,
-		wakeThreshold:    2.0,  // 平均 TPS > 2.0 时唤醒
-		racingThreshold:  5.0,  // TPS > 5.0 时全速
-		coolingThreshold: 0.5,  // TPS < 0.5 时冷却
+		wakeThreshold:    2.0, // 平均 TPS > 2.0 时唤醒
+		racingThreshold:  5.0, // TPS > 5.0 时全速
+		coolingThreshold: 0.5, // TPS < 0.5 时冷却
 		lastUpdate:       time.Now(),
 	}
 }
@@ -54,16 +54,24 @@ func (s *HeatStrategy) RecordTPS(tps float64) {
 // ShouldWakeUp 是否应该唤醒 Eco-Mode
 // 核心逻辑：不仅仅看有没有人看网页，还要看链上有没有"大鱼"
 func (s *HeatStrategy) ShouldWakeUp(currentTPS float64) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// 1. 强制休眠状态（Quota 耗尽）
 	if s.isExhausted {
 		return false
 	}
 
-	// 2. 当前 TPS 远高于历史平均值（检测突发热度）
+	// 记录当前采样值，保证推荐频率能立即感知突发热度
 	avg := s.calculateAverage()
+	s.tpsWindow = append(s.tpsWindow, currentTPS)
+	if len(s.tpsWindow) > s.windowSize {
+		s.tpsWindow = s.tpsWindow[1:]
+	}
+	s.lastHeat = currentTPS
+	s.lastUpdate = time.Now()
+
+	// 2. 当前 TPS 远高于历史平均值（检测突发热度）
 	if currentTPS > avg*2.0 {
 		slog.Info("🔥 HEAT_SPIKE: Detected sudden TPS surge",
 			"current_tps", currentTPS,
@@ -84,6 +92,10 @@ func (s *HeatStrategy) ShouldWakeUp(currentTPS float64) bool {
 func (s *HeatStrategy) GetRecommendedPace() time.Duration {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	if s.lastHeat >= s.racingThreshold {
+		return 200 * time.Millisecond
+	}
 
 	avg := s.calculateAverage()
 
