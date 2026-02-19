@@ -740,6 +740,21 @@ func (o *Orchestrator) RestoreState(state CoordinatorState) {
 		"eco_mode", state.IsEcoMode)
 }
 
+// SnapToReality 强制将内存位点对齐到链尖（用于解决幽灵位点问题）
+func (o *Orchestrator) SnapToReality(rpcHeight uint64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	
+	if o.state.LatestHeight > rpcHeight + 1000 {
+		slog.Warn("🎼 Orchestrator: Ghost state detected! Snapping to reality", "ghost", o.state.LatestHeight, "real", rpcHeight)
+		o.state.LatestHeight = rpcHeight
+		o.state.FetchedHeight = rpcHeight
+		o.state.SyncedCursor = rpcHeight
+		o.state.TargetHeight = rpcHeight
+		o.snapshot = o.state
+	}
+}
+
 // ResetToZero 强制归零游标 (用于全内存模式或 Anvil 重置)
 func (o *Orchestrator) ResetToZero() {
 	o.mu.Lock()
