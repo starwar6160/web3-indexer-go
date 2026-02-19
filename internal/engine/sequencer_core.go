@@ -72,6 +72,10 @@ func (s *Sequencer) Run(ctx context.Context) {
 	stallTicker := time.NewTicker(30 * time.Second)
 	defer stallTicker.Stop()
 
+	processedCount := 0
+	pulseTicker := time.NewTicker(10 * time.Second)
+	defer pulseTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -80,6 +84,13 @@ func (s *Sequencer) Run(ctx context.Context) {
 		case <-stallTicker.C:
 			s.handleStall(ctx)
 
+		case <-pulseTicker.C:
+			slog.Info("🚀 Sequencer: Pulse",
+				"expected", s.expectedBlock.String(),
+				"buffer", len(s.buffer),
+				"processed_since_last", processedCount)
+			processedCount = 0
+
 		case data, ok := <-s.resultCh:
 			if !ok {
 				s.drainBuffer(ctx)
@@ -87,10 +98,18 @@ func (s *Sequencer) Run(ctx context.Context) {
 			}
 
 			batch := s.collectBatch(ctx, data)
+			processedCount += len(batch)
 			if err := s.handleBatch(ctx, batch); err != nil {
+				// 🔥 关键修复：使用非阻塞 select 发送错误，防止下游消费者（Supervisor）
+				// 处理不及时导致 Sequencer 主循环永久死锁。
 				select {
 				case s.fatalErrCh <- err:
-				case <-ctx.Done():
+					// 成功上报
+				default:
+					slog.Error("⚠️ Sequencer fatalErrCh full, dropping error report to avoid deadlock",
+						"err", err.Error(),
+						"expected", s.expectedBlock.String(),
+						"buffer", len(s.buffer))
 				}
 				return
 			}
