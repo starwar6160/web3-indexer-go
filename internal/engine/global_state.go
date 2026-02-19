@@ -258,11 +258,7 @@ func (s *GlobalState) GetSyncLag() int64 {
 	if snap.OnChainHeight == 0 {
 		return 0
 	}
-	lag := int64(snap.OnChainHeight) - int64(snap.DBCursor)
-	if lag < 0 {
-		return 0 // 时间旅行场景
-	}
-	return lag
+	return SafeInt64Diff(snap.OnChainHeight, snap.DBCursor)
 }
 
 // IsStalled 检查是否停滞
