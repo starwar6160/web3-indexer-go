@@ -15,7 +15,7 @@ func TestIntegration_Math_Consistency_AI_Friendly(t *testing.T) {
 
 	// 模拟随机流量
 	for i := uint64(100); i < 150; i++ {
-		orchestrator.ForceUpdateChainHead(i + 10)
+		orchestrator.UpdateChainHead(i + 10)
 		orchestrator.Dispatch(CmdNotifyFetchProgress, i+5)
 		orchestrator.AdvanceDBCursor(i)
 

@@ -19,7 +19,7 @@ func TestStage1_Ingestion_Pulse(t *testing.T) {
 	o.Reset()
 
 	// 模拟监听到新块高度 50000
-	o.ForceUpdateChainHead(50000)
+	o.UpdateChainHead(50000)
 
 	// 允许单例循环处理
 	time.Sleep(200 * time.Millisecond)
@@ -39,6 +39,10 @@ func TestStage2_Scheduler_Saturation(t *testing.T) {
 	rpcPool, _ := NewRPCClientPool([]string{"http://localhost:8545"})
 	f := NewFetcher(rpcPool, 4)
 	
+	// 0. 准备：设置足够高的链高以通过边界检查
+	o.UpdateChainHead(100000)
+	time.Sleep(100 * time.Millisecond)
+
 	// 1. 人为制造背压：填满 Results Channel (Capacity 15000)
 	// 我们填到 91% 触发 90% 的 watermark
 	target := cap(f.Results) * 91 / 100
@@ -104,7 +108,7 @@ func TestStage5_UI_Logic_Invariants(t *testing.T) {
 	o.Reset()
 
 	// 设置一个复杂状态
-	o.ForceUpdateChainHead(10000)
+	o.UpdateChainHead(10000)
 	o.Dispatch(CmdNotifyFetchProgress, uint64(9500))
 	o.AdvanceDBCursor(9000)
 	
