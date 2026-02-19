@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -201,13 +202,15 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	}
 
 	// 3. 更新同步检查点 (SSOT 物理确认)
+	// 🛡️ SQL 编码修复：显式转换为字符串，避免 PostgreSQL 驱动对 uint64 的编码歧义
+	maxHeightStr := fmt.Sprintf("%d", maxHeight)
 	if _, err := tx.ExecContext(w.ctx,
 		`INSERT INTO sync_checkpoints (chain_id, last_synced_block)
 		 VALUES (1, $1)
 		 ON CONFLICT (chain_id) DO UPDATE SET
 			last_synced_block = EXCLUDED.last_synced_block,
 			updated_at = NOW()`,
-		maxHeight); err != nil {
+		maxHeightStr); err != nil {
 		slog.Error("📝 AsyncWriter: Update checkpoint failed", "err", err)
 		return
 	}
