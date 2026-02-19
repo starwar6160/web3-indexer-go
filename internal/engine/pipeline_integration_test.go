@@ -128,5 +128,5 @@ func TestStage5_UI_Logic_Invariants(t *testing.T) {
 	// 2. 数学自洽约束
 	// SyncedHeight (9000) + SyncLag (1000) == LatestOnChain (10000)
 	expectedLatest := 9000 + status.SyncLag
-	assert.Equal(t, uint64(10000), expectedLatest, "Math paradox: Synced + Lag != Latest")
+	assert.Equal(t, int64(10000), expectedLatest, "Math paradox: Synced + Lag != Latest")
 }
