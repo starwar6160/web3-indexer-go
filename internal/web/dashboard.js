@@ -4,8 +4,11 @@ const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const WS_DISCONNECT_GRACE_PERIOD = 30 * 1000; // 30 seconds grace period for WebSocket disconnection
 let wsDisconnectedSince = null; // Track when WebSocket disconnected
 
-// 🛡️ 演示模式：禁用休眠遮罩（用于 8091 等演示环境）
+// 🛡️ 演示模式：禁用休眠遮罩（用于 8082/8092 等 Anvil 演示环境）
 const DEMO_MODE_DISABLE_SLEEP = true;
+
+// 🚀 Anvil 演示环境：快速刷新（每秒 3-5 次，人眼感到很快）
+const DEMO_REFRESH_INTERVAL = 250; // 250ms = 每秒 4 次
 
 function resetIdleTimer() {
     // 🛡️ WebSocket 断线宽限期：如果在 30 秒内重连成功，不触发休眠倒计时
@@ -34,6 +37,12 @@ function resetIdleTimer() {
 }
 
 function startIdleCountdown() {
+    // 🛡️ 演示模式保护：完全禁用休眠倒计时和遮罩
+    if (DEMO_MODE_DISABLE_SLEEP) {
+        console.log('🛡️ Demo Mode: Idle countdown suppressed - system stays active');
+        return;
+    }
+
     let secondsLeft = 60; // Show 60-second countdown before entering Eco-Mode
 
     // Show countdown container
@@ -721,7 +730,11 @@ async function fetchData() {
 
 fetchData();
 connectWS();
-setInterval(fetchStatus, 5000);
+
+// 🚀 根据环境选择刷新频率
+const refreshInterval = DEMO_MODE_DISABLE_SLEEP ? DEMO_REFRESH_INTERVAL : 5000;
+console.log(`🔄 Dashboard refresh interval: ${refreshInterval}ms (${DEMO_MODE_DISABLE_SLEEP ? 'Demo Mode (Fast)' : 'Normal Mode'})`);
+setInterval(fetchStatus, refreshInterval);
 
 function updateSignatureStatus(isSigned, signerId, signature) {
     const sigStatusEl = document.getElementById('signatureStatus');
