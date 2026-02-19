@@ -604,6 +604,12 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 					// 这确保了即便有安全垫，也能批量调度
 					nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
 					aggressiveTarget := new(big.Int).Add(targetHeight, schedulingWindow)
+					if aggressiveTarget.Cmp(tip) > 0 {
+						aggressiveTarget = new(big.Int).Set(tip)
+					}
+					if nextBlock.Cmp(aggressiveTarget) > 0 {
+						continue
+					}
 
 					slog.Debug("🐕 [TailFollow] Scheduling new range",
 						"from", nextBlock.String(),
@@ -612,8 +618,9 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 						"window", schedulingWindow.Int64())
 					if err := fetcher.Schedule(ctx, nextBlock, aggressiveTarget); err != nil {
 						slog.Error("🐕 [TailFollow] Failed to schedule", "err", err)
+						continue
 					}
-					lastScheduled.Set(targetHeight)
+					lastScheduled.Set(aggressiveTarget)
 				}
 			}
 		}
