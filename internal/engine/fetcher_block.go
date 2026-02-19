@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"strings"
@@ -80,6 +81,10 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		slog.String("to", end.String()),
 		slog.Int("logs_found", len(logs)),
 		slog.Int("watched_addresses", len(f.watchedAddresses)))
+
+	GetOrchestrator().DispatchLog("INFO", "📡 RPC response received",
+		"range", fmt.Sprintf("%s-%s", start.String(), end.String()),
+		"logs", len(logs))
 
 	// Step 2: Group logs by block number
 	logsByBlock := make(map[uint64][]types.Log)
@@ -187,6 +192,13 @@ func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
 		}
 
 		if err := f.throughput.WaitN(ctx, tokens); err != nil {
+			return
+		}
+	}
+
+	// 🚀 Pacemaker: 强制匀速，防止突发流量撑爆 5600U 的 I/O
+	if f.bpsLimiter != nil {
+		if err := f.bpsLimiter.Wait(ctx); err != nil {
 			return
 		}
 	}

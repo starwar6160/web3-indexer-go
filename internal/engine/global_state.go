@@ -16,6 +16,10 @@ const (
 	SystemStateCatchingUp
 	SystemStateStalled
 	SystemStateHealing
+	SystemStateDegraded   // 🚀 压力过大，正在减压
+	SystemStateRunning    // 🚀 正常运行
+	SystemStateOptimizing // 🚀 性能调优中
+	SystemStateThrottled  // 🚀 背压限流中
 )
 
 func (s SystemStateEnum) String() string {
@@ -30,6 +34,14 @@ func (s SystemStateEnum) String() string {
 		return "stalled"
 	case SystemStateHealing:
 		return "healing"
+	case SystemStateDegraded:
+		return "degraded"
+	case SystemStateRunning:
+		return "running"
+	case SystemStateOptimizing:
+		return "optimizing"
+	case SystemStateThrottled:
+		return "throttled"
 	default:
 		return "unknown"
 	}

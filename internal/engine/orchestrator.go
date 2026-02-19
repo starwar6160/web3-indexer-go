@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,7 @@ const (
 	CmdSetSystemState                    // 设置系统状态
 	CmdFetchFailed                       // 抓取失败 (用于调整安全缓冲)
 	CmdFetchSuccess                      // 抓取成功 (用于重置失败计数)
+	CmdLogEvent                          // 🚀 🔥 新增：实时日志事件 (用于 UI 日志流)
 	ReqGetStatus                         // UI 查询状态 (REQ/REP)
 	ReqGetSnapshot                       // 获取状态快照 (REQ/REP)
 )
@@ -51,6 +53,9 @@ type CoordinatorState struct {
 	UpdatedAt        time.Time // 状态更新时间
 	LastUserActivity time.Time // 🔥 最后一次用户活动时间（用于休眠决策）
 	SafetyBuffer     uint64    // 🚀 动态安全缓冲 (解决追尾 404)
+	JobsDepth        int       // 🔥 任务队列深度
+	ResultsDepth     int       // 🔥 结果队列深度
+	LogEntry         map[string]interface{} // 🚀 🔥 新增：最新的日志条目
 }
 
 // Orchestrator 统一协调器（Actor 模型）
@@ -80,6 +85,9 @@ type Orchestrator struct {
 
 	// 🔥 异步持久化流水线
 	asyncWriter *AsyncWriter // 异步写入器引用
+
+	// 🔥 组件引用 (用于监控)
+	fetcher *Fetcher
 }
 
 var (
@@ -92,7 +100,7 @@ func GetOrchestrator() *Orchestrator {
 	orchestratorOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		orchestrator = &Orchestrator{
-			cmdChan: make(chan Message, 10000), // 🚀 16G RAM 调优：降低缓冲区
+			cmdChan: make(chan Message, 50000), // 🚀 16G RAM 调优：适中缓冲区
 			state: CoordinatorState{
 				UpdatedAt:        time.Now(),
 				SystemState:      SystemStateUnknown,
@@ -116,15 +124,35 @@ func GetOrchestrator() *Orchestrator {
 }
 
 // Init 初始化协调器（设置环境感知配置）
-func (o *Orchestrator) Init(ctx context.Context, fetcher, sequencer, processor, lazyMgr, watchdog interface{}) {
+func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, sequencer, processor, lazyMgr, watchdog interface{}) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	// 🔥 检测是否为横滨实验室环境（Anvil + 本地）
-	// 注意：这里不能直接读取 cfg.ChainID，需要通过其他方式判断
-	// 暂时保持 isYokohamaLab = false，由外部通过环境变量判断
+	o.fetcher = fetcher
 
 	slog.Info("🎼 Orchestrator components registered")
+}
+
+// LoadInitialState 从数据库加载初始状态
+func (o *Orchestrator) LoadInitialState(db *sqlx.DB, chainID int64) error {
+	var lastSyncedBlock string
+	err := db.GetContext(context.Background(), &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
+	if err != nil {
+		slog.Warn("🎼 Orchestrator: No checkpoint found in DB", "chain_id", chainID)
+		return nil // 允许从 0 开始
+	}
+
+	if lastSyncedBlock != "" {
+		height, ok := new(big.Int).SetString(lastSyncedBlock, 10)
+		if ok {
+			o.mu.Lock()
+			o.state.SyncedCursor = height.Uint64()
+			o.snapshot = o.state
+			o.mu.Unlock()
+			slog.Info("🎼 Orchestrator: Initial state loaded", "cursor", height.String())
+		}
+	}
+	return nil
 }
 
 // SetAsyncWriter 设置异步写入器（用于异步持久化）
@@ -159,6 +187,7 @@ func (o *Orchestrator) loop() {
 
 		case <-decisionTicker.C:
 			o.evaluateEcoMode()
+			o.evaluateSystemState()
 
 		case <-mergeTicker.C:
 			o.flushPendingHeightUpdate()
@@ -204,6 +233,13 @@ func (o *Orchestrator) process(msg Message) {
 			o.state.SafetyBuffer = 1
 			slog.Debug("🎼 Safety: Resetting buffer to 1")
 		}
+
+	case CmdLogEvent:
+		// 🚀 实时日志流：包装成特殊的日志事件发送给 WS
+		logData := msg.Data.(map[string]interface{})
+		o.state.LogEntry = logData
+		// 强制触发一次更新
+		o.state.UpdatedAt = time.Now()
 
 	case CmdCommitBatch:
 		// 🔥 关键点：在单一入口强制逻辑一致性
@@ -490,13 +526,18 @@ func (o *Orchestrator) GetStatus(ctx context.Context, db *sqlx.DB, rpcPool RPCCl
 		"is_eco_mode":    snap.IsEcoMode,
 		"progress":       snap.Progress,
 		"updated_at":     snap.UpdatedAt.Format(time.RFC3339),
-		"is_healthy":     rpcPool.GetHealthyNodeCount() > 0,
-		"rpc_nodes": map[string]int{
-			"healthy": rpcPool.GetHealthyNodeCount(),
-			"total":   rpcPool.GetTotalNodeCount(),
-		},
-		"tps": GetMetrics().GetWindowTPS(),
-	}
+				"is_healthy":             rpcPool.GetHealthyNodeCount() > 0,
+				"rpc_nodes": map[string]int{
+					"healthy": rpcPool.GetHealthyNodeCount(),
+					"total":   rpcPool.GetTotalNodeCount(),
+				},
+				"jobs_depth":      snap.JobsDepth,
+				"results_depth":   snap.ResultsDepth,
+				"jobs_capacity":   160, // 💡 5600U 专供
+				"results_capacity": 15000,
+				"tps":             GetMetrics().GetWindowTPS(),
+				"bps":             GetMetrics().GetWindowBPS(),
+			}
 
 	// 注入 AsyncWriter 指标
 	if o.asyncWriter != nil {
@@ -536,6 +577,34 @@ func (o *Orchestrator) RestoreState(state CoordinatorState) {
 		"height", state.SyncedCursor,
 		"transfers", state.Transfers,
 		"eco_mode", state.IsEcoMode)
+}
+
+// 🔥 自动化系统状态评估
+func (o *Orchestrator) evaluateSystemState() {
+	snap := GetGlobalState().Snapshot()
+
+	// 🚀 更新队列深度快照
+	if o.fetcher != nil {
+		o.state.JobsDepth = o.fetcher.QueueDepth()
+		o.state.ResultsDepth = o.fetcher.ResultsDepth()
+	}
+
+	// 1. 背压检查
+	if snap.ResultsDepth > snap.PipelineDepth*80/100 {
+		o.state.SystemState = SystemStateThrottled
+		return
+	}
+	
+	// 如果安全缓冲开启，说明正在优化追尾
+	if o.state.SafetyBuffer > 1 {
+		o.state.SystemState = SystemStateOptimizing
+		return
+	}
+
+	// 默认状态
+	if o.state.SystemState == SystemStateOptimizing || o.state.SystemState == SystemStateThrottled || o.state.SystemState == SystemStateUnknown {
+		o.state.SystemState = SystemStateRunning
+	}
 }
 
 // 🔥 自动化休眠决策引擎（Eco-Mode Decision Engine）
@@ -602,4 +671,15 @@ func (o *Orchestrator) flushPendingHeightUpdate() {
 func (o *Orchestrator) RecordUserActivity() {
 	o.state.LastUserActivity = time.Now()
 	slog.Debug("🎼 User activity recorded")
+}
+
+// DispatchLog 发送实时日志到 UI
+func (o *Orchestrator) DispatchLog(level string, message string, args ...interface{}) {
+	data := map[string]interface{}{
+		"level":   level,
+		"msg":     message,
+		"ts":      time.Now().Unix(),
+		"details": args,
+	}
+	o.Dispatch(CmdLogEvent, data)
 }

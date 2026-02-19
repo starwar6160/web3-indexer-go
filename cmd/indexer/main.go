@@ -495,6 +495,11 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	orchestrator.Init(ctx, sm.fetcher, sequencer, sm.Processor, lazyManager, nil)
 	slog.Info("🎼 Orchestrator initialized: SSOT control plane active")
 
+	// 🚀 加载初始高度，避免 UI 显示为 0
+	if err := orchestrator.LoadInitialState(sm.db, cfg.ChainID); err != nil {
+		slog.Error("🎼 Orchestrator: Failed to load initial state", "err", err)
+	}
+
 	// 🔥 横滨实验室：初始化异步写入器 (Muscle)
 	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator)
 	orchestrator.SetAsyncWriter(asyncWriter)
@@ -594,7 +599,7 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 					nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
 					aggressiveTarget := new(big.Int).Add(targetHeight, schedulingWindow)
 
-					slog.Info("🐕 [TailFollow] Scheduling new range",
+					slog.Debug("🐕 [TailFollow] Scheduling new range",
 						"from", nextBlock.String(),
 						"to", aggressiveTarget.String(),
 						"target", targetHeight.String(),

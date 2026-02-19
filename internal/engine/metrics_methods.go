@@ -10,6 +10,7 @@ func (m *Metrics) RecordBlockProcessed(duration time.Duration) {
 	m.BlocksProcessed.Inc()
 	atomic.AddUint64(&m.totalBlocksProcessed, 1)
 	m.ProcessingTime.Observe(duration.Seconds())
+	m.RecordBlockActivity(1) // 🚀 记录块处理活动，用于 BPS 计算
 }
 
 // RecordBlockFailed records a failed block processing
@@ -178,6 +179,11 @@ func (m *Metrics) UpdateRealtimeTPS(tps float64) {
 	m.RealtimeTPS.Set(tps)
 }
 
+// UpdateRealtimeBPS 更新实时 BPS 指标
+func (m *Metrics) UpdateRealtimeBPS(bps float64) {
+	m.RealtimeBPS.Set(bps)
+}
+
 // RecordActivity records a number of processed transactions into the sliding window
 func (m *Metrics) RecordActivity(count int) {
 	if m.tpsMonitor != nil {
@@ -185,10 +191,25 @@ func (m *Metrics) RecordActivity(count int) {
 	}
 }
 
+// RecordBlockActivity 记录块活动
+func (m *Metrics) RecordBlockActivity(count int) {
+	if m.bpsMonitor != nil {
+		m.bpsMonitor.Record(count)
+	}
+}
+
 // GetWindowTPS returns the average TPS from the sliding window
 func (m *Metrics) GetWindowTPS() float64 {
 	if m.tpsMonitor != nil {
 		return m.tpsMonitor.GetTPS()
+	}
+	return 0.0
+}
+
+// GetWindowBPS 返回滑动窗口平均 BPS
+func (m *Metrics) GetWindowBPS() float64 {
+	if m.bpsMonitor != nil {
+		return m.bpsMonitor.GetTPS() // Monitor is reused, GetTPS returns window average
 	}
 	return 0.0
 }

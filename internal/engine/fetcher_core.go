@@ -33,6 +33,7 @@ type Fetcher struct {
 	Results     chan BlockData
 	limiter     *rate.Limiter // 速率限制器
 	throughput  *rate.Limiter // 🚀 Throughput limiter for visual/speed control
+	bpsLimiter  *rate.Limiter // 🚀 🔥 新增：块级别节拍器 (Pacemaker)
 	stopCh      chan struct{} // 用于停止调度
 	stopOnce    sync.Once     // 确保只停止一次
 	metrics     *Metrics      // Prometheus metrics
@@ -92,8 +93,8 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 		concurrency: concurrency,
 		// 🔥 横滨实验室：Jobs channel 也扩容 (concurrency * 10)
 		jobs: make(chan FetchJob, concurrency*10),
-		// 🔥 16G RAM 调优：将 100,000 下调至 5,000
-		Results:  make(chan BlockData, 5000),
+		// 🔥 16G RAM 调优：提升至 15,000，给予消费端更多缓冲空间
+		Results:  make(chan BlockData, 15000),
 		limiter:  limiter,
 		recorder: recorder,
 		stopCh:   make(chan struct{}),
@@ -116,16 +117,31 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher
 		"concurrency", concurrency,
 		"protection", "industrial_grade")
 
-	// 🚀 Hard Throttle: Limit ingestion to 2.0 TPS to protect remaining quota
-	throughput := rate.NewLimiter(rate.Limit(2.0), 1000)
+		// 🚀 Hard Throttle: Limit ingestion to 2.0 TPS to protect remaining quota
 
-	// 💾 初始化录制器 (默认存储路径)
-	recorder, err := NewDataRecorder("")
-	if err != nil {
-		slog.Warn("failed_to_initialize_recorder", "err", err)
-	}
+		throughput := rate.NewLimiter(rate.Limit(2.0), 1000)
 
-		// 🔥 16G RAM 调优：将 100,000 下调至 5,000
+	
+
+		// 🚀 Pacemaker: 每秒最多允许处理 200 个块，确保 UI 数字匀速跳动
+
+		bpsLimiter := rate.NewLimiter(rate.Limit(200.0), 50)
+
+	
+
+		// 💾 初始化录制器 (默认存储路径)
+
+		recorder, err := NewDataRecorder("")
+
+		if err != nil {
+
+			slog.Warn("failed_to_initialize_recorder", "err", err)
+
+		}
+
+	
+
+		// 🔥 16G RAM 调优：提升至 15,000
 
 		f := &Fetcher{
 
@@ -135,15 +151,23 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher
 
 			jobs:         make(chan FetchJob, concurrency*10), // 扩容 10 倍
 
-			Results:      make(chan BlockData, 5000),       // 16G RAM 环境保守配置
+			Results:      make(chan BlockData, 15000),       // 16G RAM 环境适中配置
 
 			limiter:      rateLimiter.Limiter(),
-		throughput:  throughput,
-		recorder:    recorder,
-		stopCh:      make(chan struct{}),
-		paused:      false,
-		metrics:     GetMetrics(),
-	}
+
+			throughput:   throughput,
+
+			bpsLimiter:   bpsLimiter,
+
+			recorder:     recorder,
+
+			stopCh:       make(chan struct{}),
+
+			paused:       false,
+
+			metrics:      GetMetrics(),
+
+		}
 	f.pauseCond = sync.NewCond(&f.pauseMu)
 	return f
 }

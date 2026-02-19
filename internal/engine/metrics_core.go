@@ -61,10 +61,12 @@ type Metrics struct {
 	SyncLag            prometheus.Gauge // 新增：同步滞后
 	E2ELatency         prometheus.Gauge // 新增：秒级 E2E 延迟
 	RealtimeTPS        prometheus.Gauge // 新增：实时 TPS
+	RealtimeBPS        prometheus.Gauge // 🔥 新增：实时 BPS (Blocks Per Second)
 	DiskFree           prometheus.Gauge // 🚀 新增：磁盘剩余空间百分比
 
 	// 📊 Deterministic Telemetry
 	tpsMonitor *monitor.TPSMonitor
+	bpsMonitor *monitor.TPSMonitor // 🔥 新增：块速率监控
 
 	// 📊 交易类型分布
 	TransactionTypesTotal *prometheus.CounterVec
@@ -253,8 +255,13 @@ func NewMetrics() *Metrics {
 			Name: "indexer_realtime_tps",
 			Help: "Real-time transactions per second",
 		}),
+		RealtimeBPS: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_realtime_bps",
+			Help: "Real-time blocks per second",
+		}),
 
 		tpsMonitor: monitor.NewTPSMonitor(),
+		bpsMonitor: monitor.NewTPSMonitor(),
 
 		TransactionTypesTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "indexer_transaction_types_total",
