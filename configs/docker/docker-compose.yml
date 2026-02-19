@@ -8,17 +8,12 @@ services:
         limits:
           memory: 128M
     network_mode: host  # 👈 核心修改：使用 Host 模式，彻底打通 Tailscale 和宿主机端口
+    env_file:
+      - ../env/.env.demo2
     environment:
-      # 直接连接宿主机的基础设施数据库 (15432)
-      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_indexer?sslmode=disable}
-      - RPC_URLS=${RPC_URLS}
-      - CHAIN_ID=${CHAIN_ID}
-      - START_BLOCK=${START_BLOCK}
-      - DEMO_MODE=${DEMO_MODE}
-      - IS_TESTNET=${IS_TESTNET}
-      - ENABLE_ENERGY_SAVING=${ENABLE_ENERGY_SAVING}
-      - APP_TITLE=${APP_TITLE:-🚀 Web3 Indexer (Default)}
-      - PORT=${PORT:-8080}  # 使用环境变量中的端口
+      # 覆盖特定配置（优先级高于 env_file）
+      - APP_TITLE=${APP_TITLE:-🚀 Web3 Indexer (Demo)}
+      - PORT=${PORT:-8082}  # 8082 端口（演示环境）
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/status"]
       interval: 10s
@@ -45,7 +40,6 @@ services:
           memory: 2G
     tmpfs:
       - /home/foundry/.foundry/anvil/tmp:rw,size=100M,noexec,nosuid,nodev
-      - /tmp:rw,size=50M,noexec,nosuid,nodev
     restart: always
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8545"]
