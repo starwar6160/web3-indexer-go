@@ -217,4 +217,8 @@ doctor:
 	@HEIGHT=$$(curl -s http://127.0.0.1:8545 -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq -r .result | xargs printf "%d") ; \
 	echo "📊 Current Anvil Height: $$HEIGHT" ; \
 	PGPASSWORD=W3b3_Idx_Secur3_2026_Sec psql -h 127.0.0.1 -p 15432 -U postgres -d web3_demo -c "BEGIN; DELETE FROM transfers WHERE block_number > $$HEIGHT; DELETE FROM blocks WHERE number > $$HEIGHT; UPDATE sync_checkpoints SET last_synced_block = $$HEIGHT; UPDATE sync_status SET last_processed_block = $$HEIGHT; COMMIT;" ; \
-	echo "✅ Database surgically aligned to height $$HEIGHT."
+	        echo "✅ Database surgically aligned to height $$HEIGHT."
+	
+	clean-all:
+		chmod +x scripts/shred_data.sh
+		./scripts/shred_data.sh

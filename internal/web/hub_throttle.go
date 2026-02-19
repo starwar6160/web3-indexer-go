@@ -28,6 +28,10 @@ type ThrottledHub struct {
 
 // NewThrottledHub 创建带节流的 Hub
 func NewThrottledHub(throttleInterval time.Duration) *ThrottledHub {
+	// 🚀 横滨实验室：默认使用 200ms (5 FPS) 以获得最佳视觉节奏感
+	if throttleInterval > 200*time.Millisecond {
+		throttleInterval = 200 * time.Millisecond
+	}
 	baseHub := NewHub()
 	return &ThrottledHub{
 		Hub:              baseHub,

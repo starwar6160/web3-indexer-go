@@ -340,14 +340,14 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 			wsEvent := web.WSEvent{
 				Type: "status_update",
 				Data: map[string]interface{}{
-					"latest_height": snapshot.LatestHeight,
-					"synced_cursor": snapshot.SyncedCursor,
-					"transfers":     snapshot.Transfers,
-					"is_eco_mode":   snapshot.IsEcoMode,
-					"progress":      snapshot.Progress,
-					"system_state":  snapshot.SystemState.String(),
-					"updated_at":    snapshot.UpdatedAt.Format(time.RFC3339),
-					"sync_lag":      snapshot.LatestHeight - snapshot.SyncedCursor,
+					"latest_height":   snapshot.LatestHeight,
+					"synced_cursor":   snapshot.SyncedCursor,
+					"transfers":       snapshot.Transfers,
+					"is_eco_mode":     snapshot.IsEcoMode,
+					"progress":        snapshot.Progress,
+					"system_state":    snapshot.SystemState.String(),
+					"updated_at":      snapshot.UpdatedAt.Format(time.RFC3339),
+					"sync_lag":        snapshot.LatestHeight - snapshot.SyncedCursor,
 				},
 			}
 			wsHub.Broadcast(wsEvent)
@@ -484,47 +484,28 @@ func setupParentAnchor(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClien
 func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, lazyManager *engine.LazyManager, rpcPool engine.RPCClient, wsHub *web.Hub) {
 	var wg sync.WaitGroup
 	sm.fetcher.Start(ctx, &wg)
-	fatalErrCh := make(chan error, 1024)
-	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, fatalErrCh, nil, engine.GetMetrics())
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case err := <-fatalErrCh:
-				if err != nil {
-					slog.Error("🚨 [Sequencer] Fatal error reported", "err", err)
-				}
-			}
-		}
-	}()
+	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 100), nil, engine.GetMetrics())
 
 	// 🔥 横滨实验室：设置 Sequencer 引用到 Fetcher（用于背压检测）
 	sm.fetcher.SetSequencer(sequencer)
 	slog.Info("🔥 Backpressure sensing enabled: Fetcher → Sequencer linked")
 
-	// 🎼 SSOT: 初始化 Orchestrator（单一控制面）
+	// 🎼 SSOT: 初始化策略与协调器 (单一控制面)
+	strategy := engine.GetStrategy(cfg.ChainID)
 	orchestrator := engine.GetOrchestrator()
-	orchestrator.Init(ctx, sm.fetcher, sequencer, sm.Processor, lazyManager, nil)
-	slog.Info("🎼 Orchestrator initialized: SSOT control plane active")
+	orchestrator.Init(ctx, sm.fetcher, strategy)
 
-	// 🚀 处理全内存模式与冷启动对齐
-	if cfg.EphemeralMode {
-		orchestrator.ResetToZero()
-		slog.Warn("🔥 EPHEMERAL_MODE ACTIVE: Starting from Block 0. No data will be saved to disk.")
-	} else {
-		// 加载初始高度，避免 UI 显示为 0
-		if err := orchestrator.LoadInitialState(sm.db, cfg.ChainID); err != nil {
-			slog.Error("🎼 Orchestrator: Failed to load initial state", "err", err)
-		}
+	// 🚀 执行环境特定的启动逻辑 (自愈对齐)
+	if err := strategy.OnStartup(ctx, orchestrator, sm.db, cfg.ChainID); err != nil {
+		slog.Error("🎼 Orchestrator: Strategy startup failed", "err", err)
 	}
 
 	// 🔥 横滨实验室：初始化异步写入器 (Muscle)
-	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator, cfg.EphemeralMode)
+	// 策略控制：如果 ShouldPersist=false，则进入全内存模式
+	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator, !strategy.ShouldPersist())
 	orchestrator.SetAsyncWriter(asyncWriter)
 	asyncWriter.Start()
-	slog.Info("🔥 AsyncWriter initialized and started: Yokohama Muscle Active")
+	slog.Info("🔥 AsyncWriter initialized", "persisting", strategy.ShouldPersist())
 
 	// 🛡️ 初始化自愈审计引擎 (Immune System)
 	healer := engine.NewSelfHealer(orchestrator)
@@ -631,7 +612,6 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 						"window", schedulingWindow.Int64())
 					if err := fetcher.Schedule(ctx, nextBlock, aggressiveTarget); err != nil {
 						slog.Error("🐕 [TailFollow] Failed to schedule", "err", err)
-						continue
 					}
 					lastScheduled.Set(targetHeight)
 				}
