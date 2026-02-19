@@ -31,6 +31,7 @@ type DBUpdater interface {
 	SaveTokenMetadata(meta models.TokenMetadata, address string) error
 	LoadAllMetadata() (map[string]models.TokenMetadata, error)
 	GetMaxStoredBlock(ctx context.Context) (int64, error)
+	GetSyncCursor(ctx context.Context) (int64, error)
 	PruneFutureData(ctx context.Context, chainHead int64) error
 	UpdateSyncCursor(ctx context.Context, height int64) error
 }

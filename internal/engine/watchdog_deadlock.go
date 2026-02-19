@@ -44,6 +44,7 @@ type DeadlockWatchdog struct {
 type RepositoryAdapter interface {
 	UpdateSyncCursor(ctx context.Context, height int64) error
 	GetMaxStoredBlock(ctx context.Context) (int64, error)
+	GetSyncCursor(ctx context.Context) (int64, error)
 }
 
 // NewDeadlockWatchdog 创建新的死锁看门狗实例
@@ -162,9 +163,9 @@ func (dw *DeadlockWatchdog) checkAndHeal(ctx context.Context) error {
 		return err
 	}
 
-	dbHeight, err := dw.repo.GetMaxStoredBlock(ctx)
+	dbHeight, err := dw.repo.GetSyncCursor(ctx)
 	if err != nil {
-		Logger.Warn("DeadlockWatchdog: Failed to get DB height",
+		Logger.Warn("DeadlockWatchdog: Failed to get DB cursor",
 			slog.String("error", err.Error()))
 		return err
 	}

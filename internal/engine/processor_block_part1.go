@@ -60,7 +60,10 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 	// 4. 🔥 核心调度：通过 Orchestrator 分发落盘任务 (SSOT)
 	GetOrchestrator().Dispatch(CmdCommitBatch, task)
 
-	// 5. 实时推送 (UI 即时响应)
+	// 5. 更新 reorg 检测缓存（供下一个块使用，避免 DB 查询）
+	p.updateReorgCache(blockNum, block.Hash().Hex())
+
+	// 6. 实时推送 (UI 即时响应)
 	leaderboard := p.AnalyzeGas(block)
 	p.pushEvents(block, activities, leaderboard)
 
@@ -71,13 +74,47 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 }
 
 // handleReorgReadOnly 只读版本的 reorg 检测
+// 优先使用内存缓存，避免每块都查 DB。Anvil (chainID=31337) 不会 reorg，直接跳过。
 func (p *Processor) handleReorgReadOnly(ctx context.Context, blockNum *big.Int, parentHash common.Hash) error {
+	// Anvil 本地链不会发生 reorg，跳过检测节省 DB 查询
+	if p.chainID == 31337 {
+		return nil
+	}
+
+	prevNum := new(big.Int).Sub(blockNum, big.NewInt(1))
+	prevNumInt64 := prevNum.Int64()
+
+	// 优先查内存缓存
+	p.lastBlockHashMu.Lock()
+	cachedNum := p.lastBlockNum
+	cachedHash := p.lastBlockHash
+	p.lastBlockHashMu.Unlock()
+
+	if cachedNum == prevNumInt64 && cachedHash != "" {
+		if cachedHash != parentHash.Hex() {
+			return ReorgError{At: new(big.Int).Set(blockNum)}
+		}
+		return nil
+	}
+
+	// 缓存未命中，回退到 DB 查询
 	var lastBlock models.Block
-	err := p.db.GetContext(ctx, &lastBlock, "SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = $1", new(big.Int).Sub(blockNum, big.NewInt(1)).String())
+	err := p.db.GetContext(ctx, &lastBlock, "SELECT number, hash, parent_hash, timestamp FROM blocks WHERE number = $1", prevNum.String())
 	if err == nil && lastBlock.Hash != parentHash.Hex() {
 		return ReorgError{At: new(big.Int).Set(blockNum)}
 	}
 	return nil
+}
+
+// updateReorgCache 在成功处理块后更新 reorg 检测缓存
+func (p *Processor) updateReorgCache(blockNum *big.Int, blockHash string) {
+	if p.chainID == 31337 {
+		return
+	}
+	p.lastBlockHashMu.Lock()
+	p.lastBlockNum = blockNum.Int64()
+	p.lastBlockHash = blockHash
+	p.lastBlockHashMu.Unlock()
 }
 
 // extractActivities 提取活动 (纯内存逻辑)
@@ -276,7 +313,7 @@ func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
 		return
 	}
 	p.metrics.RecordBlockProcessed(time.Since(start))
-	
+
 	// 🚀 G115 安全转换：防止高度或时间戳溢出 int64
 	num := block.Number()
 	if num.IsInt64() {
@@ -291,7 +328,7 @@ func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
 	if blockTime > 9223372036854775807 {
 		blockTime = 9223372036854775807
 	}
-	
+
 	latency := time.Since(time.Unix(int64(blockTime), 0)).Seconds()
 	if latency < 0 {
 		latency = 0

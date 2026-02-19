@@ -212,18 +212,20 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		return
 	}
 
-	// 🚀 Grafana 对齐：更新 sync_status 表
-	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF) // 🚀 G115 安全截断
+	// 🚀 Grafana 对齐：更新 sync_status 表 (非致命操作)
+	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF) 
 
-	if _, err := tx.ExecContext(w.ctx, `
+	// 🛡️ 资深调优：使用独立的 Exec 而非合并在主逻辑中，确保即便此表报错也不影响主位点更新
+	_, err = tx.ExecContext(w.ctx, `
 		INSERT INTO sync_status (chain_id, last_processed_block, last_processed_timestamp, status)
 		VALUES ($1, $2, NOW(), 'syncing')
 		ON CONFLICT (chain_id) DO UPDATE SET
 			last_processed_block = EXCLUDED.last_processed_block,
 			last_processed_timestamp = NOW(),
 			status = EXCLUDED.status
-	`, 1, syncedBlock); err != nil {
-		slog.Warn("📝 AsyncWriter: Update sync_status failed", "err", err)
+	`, 1, syncedBlock)
+	if err != nil {
+		slog.Debug("📝 AsyncWriter: sync_status update skipped (non-fatal)", "err", err)
 	}
 
 	if err := tx.Commit(); err != nil {

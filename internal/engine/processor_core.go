@@ -76,6 +76,19 @@ func (r *repositoryAdapter) GetMaxStoredBlock(ctx context.Context) (int64, error
 	return dbMax, err
 }
 
+func (r *repositoryAdapter) GetSyncCursor(ctx context.Context) (int64, error) {
+	var cursor string
+	err := r.db.GetContext(ctx, &cursor, "SELECT COALESCE(last_synced_block, '0') FROM sync_checkpoints LIMIT 1")
+	if err != nil {
+		return 0, err
+	}
+	num, _ := new(big.Int).SetString(cursor, 10)
+	if num == nil {
+		return 0, nil
+	}
+	return num.Int64(), nil
+}
+
 func (r *repositoryAdapter) PruneFutureData(ctx context.Context, chainHead int64) error {
 	// Directly execute delete queries
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -150,6 +163,11 @@ type Processor struct {
 
 	// 🚀 DataSink (多路分发支持)
 	sink DataSink
+
+	// 🚀 Reorg 检测缓存：避免每块都查 DB
+	lastBlockHashMu sync.Mutex
+	lastBlockNum    int64
+	lastBlockHash   string
 }
 
 func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int64, enableSimulator bool, networkMode string) *Processor {
