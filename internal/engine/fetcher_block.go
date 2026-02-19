@@ -27,7 +27,7 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		filterQuery.Addresses = f.watchedAddresses
 		// For specific addresses, we still filter by Transfer event to save RPC weight
 		filterQuery.Topics = [][]common.Hash{{TransferEventHash}}
-		Logger.Info("🔍 Fetching logs with address filter",
+		Logger.Debug("🔍 Fetching logs with address filter",
 			slog.String("from", start.String()),
 			slog.String("to", end.String()),
 			slog.Int("watched_count", len(f.watchedAddresses)))
@@ -35,12 +35,36 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		// 🚀 Industrial Grade: Unfiltered mode captures EVERYTHING
 		// No Topics = No Filter = All contract events captured
 		filterQuery.Topics = nil
-		Logger.Info("🌍 Fetching logs for ALL events (Full Sniffing)",
+		Logger.Debug("🌍 Fetching logs for ALL events (Full Sniffing)",
 			slog.String("from", start.String()),
 			slog.String("to", end.String()))
 	}
 
-	logs, err := f.pool.FilterLogs(ctx, filterQuery)
+	var logs []types.Log
+	var err error
+
+	// 🚀 [Elegant Retry] for FilterLogs
+	for retries := 0; retries < 5; retries++ {
+		logs, err = f.pool.FilterLogs(ctx, filterQuery)
+		if err == nil {
+			GetOrchestrator().Dispatch(CmdFetchSuccess, nil)
+			break
+		}
+
+		if isNotFound(err) {
+			backoff := time.Duration(50*(1<<uint(retries))) * time.Millisecond
+			slog.Debug("⏳ [Fetcher] FilterLogs not found, retrying...", "from", start, "to", end, "backoff", backoff)
+			GetOrchestrator().Dispatch(CmdFetchFailed, "not_found")
+			select {
+			case <-time.After(backoff):
+				continue
+			case <-ctx.Done():
+				return
+			}
+		}
+		break // Other errors handled by normal flow
+	}
+
 	if err != nil {
 		// Log error and send results back
 		select {
@@ -51,7 +75,7 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		return
 	}
 
-	Logger.Info("📊 RPC response received",
+	Logger.Debug("📊 RPC response received",
 		slog.String("from", start.String()),
 		slog.String("to", end.String()),
 		slog.Int("logs_found", len(logs)),
@@ -74,9 +98,30 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 
 		// Only fetch full block if it has logs or it's the range end (to update UI time)
 		if len(blockLogs) > 0 || bn.Cmp(end) == 0 {
-			block, err = f.pool.BlockByNumber(ctx, bn)
+			// 🚀 [Elegant Retry] for BlockByNumber
+			for retries := 0; retries < 5; retries++ {
+				block, err = f.pool.BlockByNumber(ctx, bn)
+				if err == nil {
+					GetOrchestrator().Dispatch(CmdFetchSuccess, nil)
+					break
+				}
+
+				if isNotFound(err) {
+					backoff := time.Duration(50*(1<<uint(retries))) * time.Millisecond
+					slog.Debug("⏳ [Fetcher] BlockByNumber not found, retrying...", "block", bn, "backoff", backoff)
+					GetOrchestrator().Dispatch(CmdFetchFailed, "not_found")
+					select {
+					case <-time.After(backoff):
+						continue
+					case <-ctx.Done():
+						return
+					}
+				}
+				break
+			}
+
 			if err != nil {
-				slog.Warn("⚠️ [FETCHER] Block fetch failed", "block", bn, "err", err)
+				slog.Warn("⚠️ [FETCHER] Block fetch failed after retries", "block", bn, "err", err)
 			}
 		}
 
@@ -92,6 +137,14 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 	if f.metrics != nil {
 		f.metrics.RecordFetcherJobCompleted(time.Since(startTime))
 	}
+}
+
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") || strings.Contains(msg, "404")
 }
 
 func (f *Fetcher) fetchHeaderWithRetry(ctx context.Context, bn *big.Int) (*types.Header, error) {

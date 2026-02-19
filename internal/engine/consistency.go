@@ -29,7 +29,7 @@ func (r *RepositoryAdapterWrapper) UpdateSyncCursor(ctx context.Context, height 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() // nolint:errcheck
+	defer tx.Rollback() // nolint:errcheck // Rollback is used for safety, error is expected if commit succeeded.
 
 	if _, err := tx.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1, updated_at = NOW()", headStr); err != nil {
 		return err

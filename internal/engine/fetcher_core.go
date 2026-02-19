@@ -90,13 +90,15 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 	f := &Fetcher{
 		pool:        pool,
 		concurrency: concurrency,
-		jobs:        make(chan FetchJob, concurrency*2),
-		Results:     make(chan BlockData, 5000), // 🚀 统一扩容至 5000
-		limiter:     limiter,
-		recorder:    recorder,
-		stopCh:      make(chan struct{}),
-		paused:      false,
-		metrics:     GetMetrics(),
+		// 🔥 横滨实验室：Jobs channel 也扩容 (concurrency * 10)
+		jobs: make(chan FetchJob, concurrency*10),
+		// 🔥 16G RAM 调优：将 100,000 下调至 5,000
+		Results:  make(chan BlockData, 5000),
+		limiter:  limiter,
+		recorder: recorder,
+		stopCh:   make(chan struct{}),
+		paused:   false,
+		metrics:  GetMetrics(),
 	}
 	f.pauseCond = sync.NewCond(&f.pauseMu)
 	return f
@@ -123,12 +125,19 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher
 		slog.Warn("failed_to_initialize_recorder", "err", err)
 	}
 
-	f := &Fetcher{
-		pool:        pool,
-		concurrency: concurrency,
-		jobs:        make(chan FetchJob, concurrency*2),
-		Results:     make(chan BlockData, 5000), // 🚀 扩容至 5000，充分利用 128G 内存进行解耦
-		limiter:     rateLimiter.Limiter(),      // 使用工业级限流器内部的 limiter
+		// 🔥 16G RAM 调优：将 100,000 下调至 5,000
+
+		f := &Fetcher{
+
+			pool:         pool,
+
+			concurrency:  concurrency,
+
+			jobs:         make(chan FetchJob, concurrency*10), // 扩容 10 倍
+
+			Results:      make(chan BlockData, 5000),       // 16G RAM 环境保守配置
+
+			limiter:      rateLimiter.Limiter(),
 		throughput:  throughput,
 		recorder:    recorder,
 		stopCh:      make(chan struct{}),

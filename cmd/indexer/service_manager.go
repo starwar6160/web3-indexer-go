@@ -13,12 +13,12 @@ import (
 
 // ServiceManager 负责协调所有底层组件
 type ServiceManager struct {
-	db         *sqlx.DB
-	rpcPool    engine.RPCClient
-	fetcher    *engine.Fetcher
-	Processor  *engine.Processor
-	reconciler *engine.Reconciler
-	chainID    int64
+	db          *sqlx.DB
+	rpcPool     engine.RPCClient
+	fetcher     *engine.Fetcher
+	Processor   *engine.Processor
+	reconciler  *engine.Reconciler
+	chainID     int64
 	lazyManager *engine.LazyManager // 🔥 新增：用于通知区块活动
 }
 
@@ -40,12 +40,12 @@ func NewServiceManager(db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, ret
 	reconciler := engine.NewReconciler(db, rpcPool, engine.GetMetrics())
 
 	sm := &ServiceManager{
-		db:         db,
-		rpcPool:    rpcPool,
-		fetcher:    fetcher,
-		Processor:  processor,
-		reconciler: reconciler,
-		chainID:    chainID,
+		db:          db,
+		rpcPool:     rpcPool,
+		fetcher:     fetcher,
+		Processor:   processor,
+		reconciler:  reconciler,
+		chainID:     chainID,
 		lazyManager: nil, // 稍后设置
 	}
 
