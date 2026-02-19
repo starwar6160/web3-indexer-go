@@ -126,7 +126,11 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		slog.Error("📝 AsyncWriter: BeginTx failed", "err", err)
 		return
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && rollbackErr != sql.ErrTxDone {
+			slog.Debug("📝 AsyncWriter: Rollback skipped", "reason", "already_committed")
+		}
+	}()
 
 	var (
 		maxHeight      uint64 = 0
@@ -186,16 +190,16 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	}
 
 	// 🚀 Grafana 对齐：更新 sync_status 表
-	syncedBlock := int64(maxHeight)
+	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF) // 🚀 G115 安全截断
 	chainHeight := syncedBlock
 	if metrics := GetMetrics(); metrics != nil {
 		if h := metrics.lastChainHeight.Load(); h > 0 {
 			chainHeight = h
 		}
 	}
-	lag := chainHeight - syncedBlock
-	if lag < 0 {
-		lag = 0
+	lag := int64(0)
+	if chainHeight > syncedBlock {
+		lag = chainHeight - syncedBlock
 	}
 
 	if _, err := tx.ExecContext(w.ctx, `

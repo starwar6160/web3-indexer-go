@@ -27,7 +27,9 @@ const (
 	CmdSetSystemState                    // 设置系统状态
 	CmdFetchFailed                       // 抓取失败 (用于调整安全缓冲)
 	CmdFetchSuccess                      // 抓取成功 (用于重置失败计数)
-	CmdLogEvent                          // 🚀 🔥 新增：实时日志事件 (用于 UI 日志流)
+	CmdNotifyFetched                     // 🚀 🔥 内存同步高度 (Fetcher 进度)
+	CmdNotifyFetchProgress               // 🚀 🔥 新增：影子进度 (用于 UI 先行跳动)
+	CmdLogEvent                          // 🚀 🔥 实时日志事件 (用于 UI 日志流)
 	ReqGetStatus                         // UI 查询状态 (REQ/REP)
 	ReqGetSnapshot                       // 获取状态快照 (REQ/REP)
 )
@@ -45,6 +47,7 @@ type Message struct {
 type CoordinatorState struct {
 	LatestHeight     uint64  // 链上最新高度
 	TargetHeight     uint64  // 🎯 考虑安全垫后的目标高度
+	FetchedHeight    uint64  // 🚀 🔥 新增：内存同步高度 (Fetcher 进度)
 	SyncedCursor     uint64  // 数据库游标（已索引）
 	Transfers        uint64  // 总转账数
 	IsEcoMode        bool    // 是否处于休眠模式
@@ -137,19 +140,24 @@ func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, sequencer, pr
 func (o *Orchestrator) LoadInitialState(db *sqlx.DB, chainID int64) error {
 	var lastSyncedBlock string
 	err := db.GetContext(context.Background(), &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
-	if err != nil {
-		slog.Warn("🎼 Orchestrator: No checkpoint found in DB", "chain_id", chainID)
-		return nil // 允许从 0 开始
+	
+	// 🚀 增强逻辑：如果 checkpoint 没找到，尝试从 blocks 表直接获取最大值
+	if err != nil || lastSyncedBlock == "" || lastSyncedBlock == "0" {
+		var maxInDB int64
+		err = db.GetContext(context.Background(), &maxInDB, "SELECT COALESCE(MAX(number), 0) FROM blocks")
+		if err == nil && maxInDB > 0 {
+			lastSyncedBlock = fmt.Sprintf("%d", maxInDB)
+		}
 	}
 
-	if lastSyncedBlock != "" {
+	if lastSyncedBlock != "" && lastSyncedBlock != "0" {
 		height, ok := new(big.Int).SetString(lastSyncedBlock, 10)
 		if ok {
 			o.mu.Lock()
 			o.state.SyncedCursor = height.Uint64()
 			o.snapshot = o.state
 			o.mu.Unlock()
-			slog.Info("🎼 Orchestrator: Initial state loaded", "cursor", height.String())
+			slog.Info("🎼 Orchestrator: Initial state aligned from DB", "cursor", lastSyncedBlock)
 		}
 	}
 	return nil
@@ -203,7 +211,12 @@ func (o *Orchestrator) process(msg Message) {
 	switch msg.Type {
 	case CmdUpdateChainHeight:
 		// 🔥 消息合并策略：缓存高度更新,批量处理（防止 Anvil 高频推送溢出）
-		h := msg.Data.(uint64)
+		h, ok := msg.Data.(uint64)
+		if !ok {
+			slog.Error("🎼 Orchestrator: Invalid height data type", "type", fmt.Sprintf("%T", msg.Data))
+			return
+		}
+
 		if h > o.state.LatestHeight {
 			o.pendingHeightUpdate = &h
 			o.lastHeightMergeTime = time.Now()
@@ -218,7 +231,10 @@ func (o *Orchestrator) process(msg Message) {
 		}
 
 	case CmdFetchFailed:
-		errType := msg.Data.(string)
+		errType, ok := msg.Data.(string)
+		if !ok {
+			return
+		}
 		if errType == "not_found" {
 			// 连续抓不到块，说明追得太紧，增加安全缓冲
 			if o.state.SafetyBuffer < 10 {
@@ -234,9 +250,26 @@ func (o *Orchestrator) process(msg Message) {
 			slog.Debug("🎼 Safety: Resetting buffer to 1")
 		}
 
+	case CmdNotifyFetched:
+		// 🔥 内存同步进度：由 Fetcher 汇报，通常跑得比 SyncedCursor 快得多
+		h, ok := msg.Data.(uint64)
+		if ok && h > o.state.FetchedHeight {
+			o.state.FetchedHeight = h
+		}
+
+	case CmdNotifyFetchProgress:
+		// 🚀 影子同步：Fetcher 刚拿到数据，还没入库，先让 UI 动起来
+		h, ok := msg.Data.(uint64)
+		if ok && h > o.state.FetchedHeight {
+			o.state.FetchedHeight = h
+		}
+
 	case CmdLogEvent:
 		// 🚀 实时日志流：包装成特殊的日志事件发送给 WS
-		logData := msg.Data.(map[string]interface{})
+		logData, ok := msg.Data.(map[string]interface{})
+		if !ok {
+			return
+		}
 		o.state.LogEntry = logData
 		// 强制触发一次更新
 		o.state.UpdatedAt = time.Now()
@@ -244,7 +277,11 @@ func (o *Orchestrator) process(msg Message) {
 	case CmdCommitBatch:
 		// 🔥 关键点：在单一入口强制逻辑一致性
 		// 逻辑完成：提取数据并推入异步写入器
-		task := msg.Data.(PersistTask)
+		task, ok := msg.Data.(PersistTask)
+		if !ok {
+			slog.Error("🎼 Orchestrator: Invalid PersistTask data type", "type", fmt.Sprintf("%T", msg.Data))
+			return
+		}
 
 		// 逻辑确认：通知异步写入器落盘
 		if o.asyncWriter != nil {
@@ -257,7 +294,10 @@ func (o *Orchestrator) process(msg Message) {
 
 	case CmdCommitDisk:
 		// 🔥 物理完成：这是真正的 SSOT 游标更新点
-		diskHeight := msg.Data.(uint64)
+		diskHeight, ok := msg.Data.(uint64)
+		if !ok {
+			return
+		}
 		if diskHeight > o.state.SyncedCursor {
 			o.state.SyncedCursor = diskHeight
 			slog.Info("🎼 StateChange: Synced (Disk)", "cursor", diskHeight, "seq", msg.Sequence)
@@ -265,22 +305,34 @@ func (o *Orchestrator) process(msg Message) {
 
 	case CmdResetCursor:
 		// 🔥 强制重置：用于 Reorg 回滚
-		resetHeight := msg.Data.(uint64)
+		resetHeight, ok := msg.Data.(uint64)
+		if !ok {
+			return
+		}
 		o.state.SyncedCursor = resetHeight
 		slog.Warn("🎼 StateChange: Cursor RESET (Reorg)", "to", resetHeight, "seq", msg.Sequence)
 
 	case CmdIncrementTransfers:
-		count := msg.Data.(uint64)
+		count, ok := msg.Data.(uint64)
+		if !ok {
+			return
+		}
 		o.state.Transfers += count
 		slog.Debug("🎼 StateChange: Transfers", "count", count, "total", o.state.Transfers, "seq", msg.Sequence)
 
 	case CmdToggleEcoMode:
-		active := msg.Data.(bool)
+		active, ok := msg.Data.(bool)
+		if !ok {
+			return
+		}
 		o.state.IsEcoMode = active
 		slog.Warn("🎼 StateChange: EcoMode", "active", active, "seq", msg.Sequence)
 
 	case CmdSetSystemState:
-		state := msg.Data.(SystemStateEnum)
+		state, ok := msg.Data.(SystemStateEnum)
+		if !ok {
+			return
+		}
 		o.state.SystemState = state
 		slog.Info("🎼 StateChange: SystemState", "state", state.String(), "seq", msg.Sequence)
 
@@ -293,7 +345,10 @@ func (o *Orchestrator) process(msg Message) {
 
 	// 🔥 统一计算派生指标：彻底解决 15483/50151 = 100% 的悖论
 	if o.state.LatestHeight > 0 {
-		o.state.Progress = float64(o.state.SyncedCursor) / float64(o.state.LatestHeight) * 100
+		// 🚀 G115 安全转换与计算
+		latest := float64(o.state.LatestHeight)
+		synced := float64(o.state.SyncedCursor)
+		o.state.Progress = (synced / latest) * 100
 		// 限制最大为 100%
 		if o.state.Progress > 100.0 {
 			o.state.Progress = 100.0
@@ -505,49 +560,113 @@ func (o *Orchestrator) DumpSystemState() map[string]interface{} {
 }
 
 // GetStatus 返回一个全面的 API 响应 Map
+
 func (o *Orchestrator) GetStatus(ctx context.Context, db *sqlx.DB, rpcPool RPCClient, version string) map[string]interface{} {
+
 	snap := o.GetSnapshot()
 
-	// 计算实时指标
-	syncLag := int64(0)
-	if snap.LatestHeight > snap.SyncedCursor {
-		syncLag = int64(snap.LatestHeight - snap.SyncedCursor)
+
+
+	// 🚀 G115 安全计算
+
+	syncLag := SafeInt64Diff(snap.LatestHeight, snap.SyncedCursor)
+
+	if syncLag < 0 {
+
+		syncLag = 0
+
 	}
+
+
+
+	fetchProgress := 0.0
+
+	if snap.LatestHeight > 0 {
+
+		fetchProgress = float64(snap.FetchedHeight) / float64(snap.LatestHeight) * 100
+
+		if fetchProgress > 100.0 {
+
+			fetchProgress = 100.0
+
+		}
+
+	}
+
+
 
 	status := map[string]interface{}{
-		"version":        version,
-		"state":          snap.SystemState.String(),
-		"latest_block":   fmt.Sprintf("%d", snap.LatestHeight),
-		"target_height":  fmt.Sprintf("%d", snap.TargetHeight),
-		"safety_buffer":  snap.SafetyBuffer,
-		"latest_indexed": fmt.Sprintf("%d", snap.SyncedCursor),
-		"sync_lag":       syncLag,
-		"transfers":      snap.Transfers,
-		"is_eco_mode":    snap.IsEcoMode,
-		"progress":       snap.Progress,
-		"updated_at":     snap.UpdatedAt.Format(time.RFC3339),
-				"is_healthy":             rpcPool.GetHealthyNodeCount() > 0,
-				"rpc_nodes": map[string]int{
-					"healthy": rpcPool.GetHealthyNodeCount(),
-					"total":   rpcPool.GetTotalNodeCount(),
-				},
-				"jobs_depth":      snap.JobsDepth,
-				"results_depth":   snap.ResultsDepth,
-				"jobs_capacity":   160, // 💡 5600U 专供
-				"results_capacity": 15000,
-				"tps":             GetMetrics().GetWindowTPS(),
-				"bps":             GetMetrics().GetWindowBPS(),
-			}
 
-	// 注入 AsyncWriter 指标
-	if o.asyncWriter != nil {
-		writerMetrics := o.asyncWriter.GetMetrics()
-		for k, v := range writerMetrics {
-			status["writer_"+k] = v
-		}
+		"version":        version,
+
+		"state":          snap.SystemState.String(),
+
+		"latest_block":   fmt.Sprintf("%d", snap.LatestHeight),
+
+		"target_height":  fmt.Sprintf("%d", snap.TargetHeight),
+
+		"latest_fetched": fmt.Sprintf("%d", snap.FetchedHeight), // 🚀 内存扫描进度
+
+		"fetch_progress": fetchProgress,
+
+		"safety_buffer":  snap.SafetyBuffer,
+
+		"latest_indexed": fmt.Sprintf("%d", snap.SyncedCursor),
+
+		"sync_lag":       syncLag,
+
+		"transfers":      snap.Transfers,
+
+		"is_eco_mode":    snap.IsEcoMode,
+
+		"progress":       snap.Progress,
+
+		"updated_at":     snap.UpdatedAt.Format(time.RFC3339),
+
+		"is_healthy":     rpcPool.GetHealthyNodeCount() > 0,
+
+		"rpc_nodes": map[string]int{
+
+			"healthy": rpcPool.GetHealthyNodeCount(),
+
+			"total":   rpcPool.GetTotalNodeCount(),
+
+		},
+
+		"jobs_depth":       snap.JobsDepth,
+
+		"results_depth":    snap.ResultsDepth,
+
+		"jobs_capacity":    160, // 💡 5600U 专供
+
+		"results_capacity": 15000,
+
+		"tps":              GetMetrics().GetWindowTPS(),
+
+		"bps":              GetMetrics().GetWindowBPS(),
+
 	}
 
+
+
+	// 注入 AsyncWriter 指标
+
+	if o.asyncWriter != nil {
+
+		writerMetrics := o.asyncWriter.GetMetrics()
+
+		for k, v := range writerMetrics {
+
+			status["writer_"+k] = v
+
+		}
+
+	}
+
+
+
 	return status
+
 }
 
 // Shutdown 优雅关闭协调器

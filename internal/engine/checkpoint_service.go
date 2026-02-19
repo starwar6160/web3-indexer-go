@@ -60,7 +60,7 @@ func (s *CheckpointService) Start(ctx context.Context) {
 		"max_snapshots", s.maxSnapshots)
 
 	// 确保保存目录存在
-	if err := os.MkdirAll(s.savePath, 0755); err != nil {
+	if err := os.MkdirAll(s.savePath, 0o755); err != nil {
 		slog.Error("💾 Failed to create checkpoint directory", "err", err)
 		return
 	}
@@ -178,7 +178,7 @@ func (s *CheckpointService) atomicSave(checkpoint Checkpoint) {
 }
 
 // serializeCheckpoint 序列化检查点（使用 gob 二进制格式）
-func (s *CheckpointService) serializeCheckpoint(checkpoint Checkpoint) ([]byte, error) {
+func (s *CheckpointService) serializeCheckpoint(_ Checkpoint) ([]byte, error) {
 	// TODO: 考虑迁移到 Protobuf 以获得更好的性能和兼容性
 	// gob 优势：Go 原生支持，无需额外依赖
 	// Protobuf 优势：跨语言兼容，性能更优，schema 演化友好
@@ -240,7 +240,7 @@ func (s *CheckpointService) findLatestValidCheckpoint() (*Checkpoint, error) {
 }
 
 // verifyChecksum 验证检查点校验和
-func (s *CheckpointService) verifyChecksum(checkpoint *Checkpoint) error {
+func (s *CheckpointService) verifyChecksum(_ *Checkpoint) error {
 	// TODO: 重新序列化并计算 SHA256，与 checkpoint.Checksum 对比
 	// 如果不匹配，说明文件损坏，拒绝加载
 	return nil

@@ -123,21 +123,8 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 		lazyManager.Trigger()
 	}
 
-	ctx := r.Context()
 	orchestrator := engine.GetOrchestrator()
-	status := orchestrator.GetStatus(ctx, db, rpcPool, Version)
-
-	// 保持对 LazyManager 的特殊兼容 (如果存在)
-	if lazyManager != nil {
-		lazyStatus := lazyManager.GetStatus()
-		if mode, ok := lazyStatus["mode"].(string); ok {
-			status["state"] = mode
-			status["lazy_indexer"] = lazyStatus
-			if mode == engine.ModeSleep {
-				status["data_is_stale"] = true
-			}
-		}
-	}
+	status := orchestrator.GetUIStatus(Version)
 
 	if signer != nil {
 		if signed, err := signer.Sign("status", status); err == nil {
