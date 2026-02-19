@@ -191,9 +191,9 @@ h1 { color: #333; font-size: 28px; margin-bottom: 10px; }
     transition: opacity 0.5s ease;
 }
 
+/* 🛡️ Anvil 演示模式：强制禁用休眠遮罩显示 */
 body.is-sleeping .sleep-overlay-container {
-    display: flex;
-    animation: fade-in 0.5s forwards;
+    display: none !important; /* 覆盖原有的 flex 显示 */
 }
 
 @keyframes fade-in {

@@ -336,9 +336,10 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 			"chain_id", cfg.ChainID,
 			"rpc", cfg.RPCURLs[0])
 
-		// 🔥 设置无限配额
-		sm.fetcher.SetThroughputLimit(100000.0)
-		slog.Info("🔥 YOKOHAMA LAB BYPASS: Quota set to unlimited (100k TPS)")
+		// 🔥 Anvil 演示模式：设置适度配额（10 TPS 足够演示）
+		// 既要保证前端数据流畅，又要避免过度消耗资源
+		sm.fetcher.SetThroughputLimit(10.0)
+		slog.Info("🔥 ANVIL_DEMO_MODE: TPS limit set to 10 (sufficient for demo UI)")
 	}
 
 	// 🔥 更新 Prometheus 指标
