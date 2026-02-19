@@ -21,6 +21,8 @@ type UIStatusDTO struct {
 	Health           bool                   `json:"health"`
 	JobsDepth        int                    `json:"jobs_depth"`
 	JobsCapacity     int                    `json:"jobs_capacity"`
+	ResultsDepth     int                    `json:"results_depth"`
+	ResultsCapacity  int                    `json:"results_capacity"`
 	SafetyBuffer     uint64                 `json:"safety_buffer"`
 	LastLog          map[string]interface{} `json:"last_log"`
 	UpdatedAt        string                 `json:"updated_at"`
@@ -31,6 +33,8 @@ type UIStatusDTO struct {
 // 彻底解决 API Handler 圈复杂度过高的问题 (Ref: gocyclo)
 func (o *Orchestrator) GetUIStatus(version string) UIStatusDTO {
 	snap := o.GetSnapshot()
+	globalSnap := GetGlobalState().Snapshot()
+	maxJobs, maxResults, _ := GetGlobalState().GetCapacity()
 
 	// 1. 逻辑自洽：安全计算滞后 (修复 G115 溢出风险)
 	syncLag := SafeInt64Diff(snap.LatestHeight, snap.SyncedCursor)
@@ -45,7 +49,8 @@ func (o *Orchestrator) GetUIStatus(version string) UIStatusDTO {
 
 	// 2. 动态状态评估 (博彩级实时感)
 	stateStr := snap.SystemState.String()
-	if snap.JobsDepth >= 150 { // 接近 160 上限
+	// 如果 Results 队列积压超过 80%
+	if globalSnap.ResultsDepth > globalSnap.PipelineDepth*80/100 {
 		stateStr = "pressure_limit"
 	} else if syncLag > 1000 && GetMetrics().GetWindowBPS() < 1 {
 		stateStr = "stalled"
@@ -61,23 +66,25 @@ func (o *Orchestrator) GetUIStatus(version string) UIStatusDTO {
 	}
 
 	return UIStatusDTO{
-		Version:       version,
-		State:         stateStr,
-		LatestChain:   fmt.Sprintf("%d", snap.LatestHeight),
-		MemorySync:    fmt.Sprintf("%d", snap.FetchedHeight),
-		DiskSync:      fmt.Sprintf("%d", snap.SyncedCursor),
-		SyncLag:       syncLag,
-		FetchLag:      fetchLag,
-		Progress:      snap.Progress,
-		FetchProgress: fetchProgress,
-		BPS:           GetMetrics().GetWindowBPS(),
-		TPS:           GetMetrics().GetWindowTPS(),
-		Health:        stateStr != "stalled",
-		JobsDepth:     snap.JobsDepth,
-		JobsCapacity:  160,
-		SafetyBuffer:  snap.SafetyBuffer,
-		LastLog:       snap.LogEntry,
-		UpdatedAt:     snap.UpdatedAt.Format(time.RFC3339),
-		Fingerprint:   "Yokohama-Lab-Primary",
+		Version:         version,
+		State:           stateStr,
+		LatestChain:     fmt.Sprintf("%d", snap.LatestHeight),
+		MemorySync:      fmt.Sprintf("%d", snap.FetchedHeight),
+		DiskSync:        fmt.Sprintf("%d", snap.SyncedCursor),
+		SyncLag:         syncLag,
+		FetchLag:        fetchLag,
+		Progress:        snap.Progress,
+		FetchProgress:   fetchProgress,
+		BPS:             GetMetrics().GetWindowBPS(),
+		TPS:             GetMetrics().GetWindowTPS(),
+		Health:          stateStr != "stalled",
+		JobsDepth:       int(globalSnap.JobsQueueDepth),
+		JobsCapacity:    int(maxJobs),
+		ResultsDepth:    int(globalSnap.ResultsDepth),
+		ResultsCapacity: int(maxResults),
+		SafetyBuffer:    snap.SafetyBuffer,
+		LastLog:         snap.LogEntry,
+		UpdatedAt:       snap.UpdatedAt.Format(time.RFC3339),
+		Fingerprint:     "Yokohama-Lab-Primary",
 	}
 }

@@ -488,6 +488,16 @@ func (o *Orchestrator) AdvanceCursor(cursor uint64) {
 	o.Dispatch(CmdCommitBatch, cursor)
 }
 
+// AdvanceDBCursor 前进数据库游标（物理同步）
+func (o *Orchestrator) AdvanceDBCursor(height uint64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if height > o.state.SyncedCursor {
+		o.state.SyncedCursor = height
+		slog.Info("🎼 Orchestrator: Synced cursor advanced", "height", height)
+	}
+}
+
 // IncrementTransfers 增加转账计数（兼容方法）
 func (o *Orchestrator) IncrementTransfers(count uint64) {
 	o.Dispatch(CmdIncrementTransfers, count)
@@ -698,16 +708,38 @@ func (o *Orchestrator) RestoreState(state CoordinatorState) {
 		"eco_mode", state.IsEcoMode)
 }
 
+// Reset 重置协调器状态（仅用于测试）
+func (o *Orchestrator) Reset() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.state = CoordinatorState{
+		UpdatedAt:        time.Now(),
+		SystemState:      SystemStateUnknown,
+		LastUserActivity: time.Now(),
+		SafetyBuffer:     1,
+	}
+	o.snapshot = o.state
+	slog.Info("🎼 Orchestrator: State reset for testing")
+}
+
 // 🔥 自动化系统状态评估
 func (o *Orchestrator) evaluateSystemState() {
-	snap := GetGlobalState().Snapshot()
-
 	// 🚀 更新队列深度快照
+	jobsDepth := 0
+	resultsDepth := 0
 	if o.fetcher != nil {
-		o.state.JobsDepth = o.fetcher.QueueDepth()
-		o.state.ResultsDepth = o.fetcher.ResultsDepth()
+		jobsDepth = o.fetcher.QueueDepth()
+		resultsDepth = o.fetcher.ResultsDepth()
+		o.state.JobsDepth = jobsDepth
+		o.state.ResultsDepth = resultsDepth
 	}
 
+	// 🚀 🔥 同步到 GlobalState 以供 UIProjection 和其他组件使用
+	// 注意：此处我们需要获取 Sequencer 的深度，但 Orchestrator 暂时没存，先填 0
+	GetGlobalState().UpdatePipelineDepth(int32(jobsDepth), int32(resultsDepth), 0)
+
+	snap := GetGlobalState().Snapshot()
+	
 	// 1. 背压检查
 	if snap.ResultsDepth > snap.PipelineDepth*80/100 {
 		o.state.SystemState = SystemStateThrottled

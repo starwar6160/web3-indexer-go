@@ -191,27 +191,15 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 
 	// 🚀 Grafana 对齐：更新 sync_status 表
 	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF) // 🚀 G115 安全截断
-	chainHeight := syncedBlock
-	if metrics := GetMetrics(); metrics != nil {
-		if h := metrics.lastChainHeight.Load(); h > 0 {
-			chainHeight = h
-		}
-	}
-	lag := int64(0)
-	if chainHeight > syncedBlock {
-		lag = chainHeight - syncedBlock
-	}
 
 	if _, err := tx.ExecContext(w.ctx, `
-		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, updated_at)
-		VALUES ($1, $2, $3, $4, 'syncing', NOW())
+		INSERT INTO sync_status (chain_id, last_processed_block, last_processed_timestamp, status)
+		VALUES ($1, $2, NOW(), 'syncing')
 		ON CONFLICT (chain_id) DO UPDATE SET
-			last_synced_block = EXCLUDED.last_synced_block,
-			latest_block = EXCLUDED.latest_block,
-			sync_lag = EXCLUDED.sync_lag,
-			status = EXCLUDED.status,
-			updated_at = EXCLUDED.updated_at
-	`, 1, syncedBlock, chainHeight, lag); err != nil {
+			last_processed_block = EXCLUDED.last_processed_block,
+			last_processed_timestamp = NOW(),
+			status = EXCLUDED.status
+	`, 1, syncedBlock); err != nil {
 		slog.Warn("📝 AsyncWriter: Update sync_status failed", "err", err)
 	}
 
@@ -298,7 +286,7 @@ func (w *AsyncWriter) emergencyDrain() {
 done:
 	// 最终同步一次游标到大脑，让 UI 的 Synced 数字瞬间跳跃
 	if lastHeight > 0 {
-		w.orchestrator.Dispatch(CmdCommitDisk, lastHeight)
+		w.orchestrator.AdvanceDBCursor(lastHeight)
 	}
 
 	slog.Info("✅ Relief Valve Closed",

@@ -118,14 +118,23 @@ func setupDatabase(dsn string) error {
 	}
 	defer db.Close()
 
-	// 读取并执行核心初始化 SQL
-	schema, err := os.ReadFile("../../scripts/init-db.sql")
-	if err != nil {
-		return fmt.Errorf("failed to read init-db.sql: %w", err)
+	// 🚀 从 migrations 目录顺序加载 Schema
+	migrationFiles := []string{
+		"../../migrations/001_init.sql",
+		"../../migrations/002_visitor_stats.sql",
+		"../../migrations/003_add_activity_type.sql",
+		"../../migrations/004_token_metadata.sql",
 	}
-	_, err = db.Exec(string(schema))
-	if err != nil {
-		return fmt.Errorf("failed to execute schema: %w", err)
+
+	for _, file := range migrationFiles {
+		schema, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("failed to read migration %s: %w", file, err)
+		}
+		_, err = db.Exec(string(schema))
+		if err != nil {
+			return fmt.Errorf("failed to execute migration %s: %w", file, err)
+		}
 	}
 
 	return nil
