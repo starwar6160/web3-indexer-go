@@ -37,5 +37,9 @@ test:
 	@echo "🧪 Running Go unit tests..."
 	go test -v ./internal/...
 
-check: lint security test test-api
+test-integration:
+	@echo "🧪 Running Industrial Grade Integration Tests..."
+	go test -v -tags=integration ./internal/engine
+
+check: lint security test test-integration test-api
 	@echo "✅ All quality gates passed!"

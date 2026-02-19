@@ -276,14 +276,27 @@ func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
 		return
 	}
 	p.metrics.RecordBlockProcessed(time.Since(start))
-	if block.Number().IsInt64() {
-		p.metrics.UpdateCurrentSyncHeight(block.Number().Int64())
-		latency := time.Since(time.Unix(int64(block.Time()), 0)).Seconds()
-		if latency < 0 {
-			latency = 0
-		}
-		p.metrics.UpdateE2ELatency(latency)
+	
+	// 🚀 G115 安全转换：防止高度或时间戳溢出 int64
+	num := block.Number()
+	if num.IsInt64() {
+		p.metrics.UpdateCurrentSyncHeight(num.Int64())
+	} else {
+		// 防御性处理：截断为正数最大值，保持指标跳动
+		p.metrics.UpdateCurrentSyncHeight(int64(num.Uint64() & 0x7FFFFFFFFFFFFFFF))
 	}
+
+	// 🚀 确保时间戳转换安全
+	blockTime := block.Time()
+	if blockTime > 9223372036854775807 {
+		blockTime = 9223372036854775807
+	}
+	
+	latency := time.Since(time.Unix(int64(blockTime), 0)).Seconds()
+	if latency < 0 {
+		latency = 0
+	}
+	p.metrics.UpdateE2ELatency(latency)
 }
 
 // AnalyzeGas 实时分析区块中的 Gas 消耗大户

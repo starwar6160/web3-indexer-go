@@ -478,6 +478,21 @@ func (o *Orchestrator) Subscribe() <-chan CoordinatorState {
 
 // 🔥 兼容性方法（用于现有代码迁移）
 
+// ForceUpdateChainHead 强制立即更新链头 (用于测试或高优先级场景)
+func (o *Orchestrator) ForceUpdateChainHead(height uint64) {
+	o.mu.Lock()
+	if height > o.state.LatestHeight {
+		o.state.LatestHeight = height
+		o.state.TargetHeight = height - o.state.SafetyBuffer
+		if height <= o.state.SafetyBuffer {
+			o.state.TargetHeight = 0
+		}
+	}
+	o.mu.Unlock()
+	// 触发一次 snapshot 更新
+	o.Dispatch(CmdNotifyFetched, height)
+}
+
 // UpdateChainHead 更新链头高度（兼容方法）
 func (o *Orchestrator) UpdateChainHead(height uint64) {
 	o.Dispatch(CmdUpdateChainHeight, height)

@@ -5,6 +5,10 @@ CREATE TABLE IF NOT EXISTS blocks (
     hash CHAR(66) NOT NULL UNIQUE,
     parent_hash CHAR(66) NOT NULL,
     timestamp NUMERIC(20,0) NOT NULL, -- 支持毫秒级
+    gas_limit NUMERIC(78,0),
+    gas_used NUMERIC(78,0),
+    base_fee_per_gas NUMERIC(78,0),
+    transaction_count INTEGER,
     processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

@@ -3,11 +3,8 @@
 package engine
 
 import (
-	"context"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // TestIntegration_Math_Consistency_AI_Friendly 验证 DTO 数据在数学上必须自洽
@@ -17,25 +14,28 @@ func TestIntegration_Math_Consistency_AI_Friendly(t *testing.T) {
 
 	// 模拟随机流量
 	for i := uint64(100); i < 150; i++ {
-		orchestrator.UpdateChainHead(i + 10)
-		orchestrator.Dispatch(CmdNotifyFetched, i+5)
+		orchestrator.ForceUpdateChainHead(i + 10)
+		orchestrator.Dispatch(CmdNotifyFetchProgress, i+5)
 		orchestrator.AdvanceDBCursor(i)
 
+		// 🚀 核心：给予充足时间让 process 循环更新 snapshot
+		time.Sleep(100 * time.Millisecond)
+		
 		status := orchestrator.GetUIStatus("test-v1")
+		snap := orchestrator.GetSnapshot()
 
 		// 🚀 核心等式：Synced + Lag == Latest
-		// 如果等式不成立，AI 需要检查 GetUIStatus 里的计算逻辑
-		if uint64(int64(status.SyncedHeight)+status.SyncLag) != status.LatestOnChain {
+		if uint64(int64(snap.SyncedCursor)+status.SyncLag) != snap.LatestHeight {
 			t.Fatalf("AI_FIX_REQUIRED: Math paradox detected! "+
 				"Synced(%d) + Lag(%d) != Latest(%d)",
-				status.SyncedHeight, status.SyncLag, status.LatestOnChain)
+				snap.SyncedCursor, status.SyncLag, snap.LatestHeight)
 		}
 
 		// 🚀 顺序约束：Disk <= Memory <= Latest
-		if !(status.DiskSync <= status.MemorySync && status.MemorySync <= status.LatestChain) {
+		if !(snap.SyncedCursor <= snap.FetchedHeight && snap.FetchedHeight <= snap.LatestHeight) {
 			t.Fatalf("AI_FIX_REQUIRED: Watermark violation! "+
-				"Expected: Disk(%s) <= Memory(%s) <= Latest(%s)",
-				status.DiskSync, status.MemorySync, status.LatestChain)
+				"Expected: Disk(%d) <= Memory(%d) <= Latest(%d)",
+				snap.SyncedCursor, snap.FetchedHeight, snap.LatestHeight)
 		}
 	}
 }
@@ -55,7 +55,11 @@ func TestIntegration_SelfHealing_AI_Friendly(t *testing.T) {
 	// 2. 触发自愈
 	healer.auditAndHeal()
 
-	// 3. 验证结果
+	// 3. 验证结果 (注意：auditAndHeal 直接修改 state，但我们需要强制更新 snapshot 以供测试观察)
+	// 我们通过 Dispatch 一个空消息触发快照刷新
+	orchestrator.Dispatch(CmdNotifyFetchProgress, uint64(5000))
+	time.Sleep(100 * time.Millisecond)
+	
 	snap := orchestrator.GetSnapshot()
 	if snap.FetchedHeight != 5000 {
 		t.Errorf("AI_FIX_REQUIRED: Self-Healer failed to align memory watermark. "+

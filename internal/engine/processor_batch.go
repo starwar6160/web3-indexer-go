@@ -188,7 +188,13 @@ func (p *Processor) updateBatchMetrics(blocks []BlockData) {
 		bNum = lastData.Number
 	}
 
-	if bNum != nil && bNum.IsInt64() {
-		p.metrics.UpdateCurrentSyncHeight(bNum.Int64())
+	if bNum != nil {
+		// 🚀 G115 安全转换
+		if bNum.IsInt64() {
+			p.metrics.UpdateCurrentSyncHeight(bNum.Int64())
+		} else {
+			// 防御性截断，确保指标系统不会因为大高度而崩溃
+			p.metrics.UpdateCurrentSyncHeight(int64(bNum.Uint64() & 0x7FFFFFFFFFFFFFFF))
+		}
 	}
 }

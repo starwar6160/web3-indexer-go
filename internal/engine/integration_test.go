@@ -100,6 +100,9 @@ func TestMain(m *testing.M) {
 	// 6. 运行测试
 	code := m.Run()
 
+	// 🚀 给一丁点时间让异步清理和最后一次 I/O 完成，防止 connection reset
+	time.Sleep(5 * time.Second)
+
 	// 7. 优雅清理
 	if terr := pgContainer.Terminate(ctx); terr != nil {
 		log.Printf("failed to terminate pg container: %v", terr)

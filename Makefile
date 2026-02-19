@@ -30,6 +30,7 @@ help:
 	@echo ""
 	@echo "🧪 质量与文档 (makefiles/test.mk & docs.mk):"
 	@echo "  make test-api     - 运行逻辑守卫集成测试 (Python)"
+	@echo "  make test-integration - 运行工业级全链路集成测试 (Go)"
 	@echo "  make check        - 运行所有质量检查 (Lint/Security/Test)"
 	@echo "  make docs-sync    - 自动刷新文档索引 (SUMMARY.md)"
 	@echo "  make repair       - [Sepolia] 异步修复数据库中的哈希链断裂 (0x000...)"
