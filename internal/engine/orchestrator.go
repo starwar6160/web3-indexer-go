@@ -56,6 +56,7 @@ type CoordinatorState struct {
 	UpdatedAt        time.Time // 状态更新时间
 	LastUserActivity time.Time // 🔥 最后一次用户活动时间（用于休眠决策）
 	SafetyBuffer     uint64    // 🚀 动态安全缓冲 (解决追尾 404)
+	SuccessCount     uint64    // 🚀 🔥 新增：连续成功计数
 	JobsDepth        int       // 🔥 任务队列深度
 	ResultsDepth     int       // 🔥 结果队列深度
 	LogEntry         map[string]interface{} // 🚀 🔥 新增：最新的日志条目
@@ -90,7 +91,8 @@ type Orchestrator struct {
 	asyncWriter *AsyncWriter // 异步写入器引用
 
 	// 🔥 组件引用 (用于监控)
-	fetcher *Fetcher
+	fetcher  *Fetcher
+	strategy EngineStrategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
 }
 
 var (
@@ -127,13 +129,14 @@ func GetOrchestrator() *Orchestrator {
 }
 
 // Init 初始化协调器（设置环境感知配置）
-func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, sequencer, processor, lazyMgr, watchdog interface{}) {
+func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, strategy EngineStrategy) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
 	o.fetcher = fetcher
+	o.strategy = strategy
 
-	slog.Info("🎼 Orchestrator components registered")
+	slog.Info("🎼 Orchestrator initialized", "strategy", strategy.Name())
 }
 
 // LoadInitialState 从数据库加载初始状态
@@ -237,17 +240,20 @@ func (o *Orchestrator) process(msg Message) {
 		}
 		if errType == "not_found" {
 			// 连续抓不到块，说明追得太紧，增加安全缓冲
-			if o.state.SafetyBuffer < 10 {
+			o.state.SuccessCount = 0 // 重置成功计数
+			if o.state.SafetyBuffer < 20 { // 提升上限到 20
 				o.state.SafetyBuffer++
 				slog.Warn("🎼 Safety: Increasing buffer due to 404", "new_val", o.state.SafetyBuffer)
 			}
 		}
 
 	case CmdFetchSuccess:
-		// 成功抓取，重置安全缓冲 (或缓慢缩减)
-		if o.state.SafetyBuffer > 1 {
-			o.state.SafetyBuffer = 1
-			slog.Debug("🎼 Safety: Resetting buffer to 1")
+		// 🚀 资深调优：不再暴力重置，改为缓慢缩减
+		o.state.SuccessCount++
+		if o.state.SuccessCount >= 50 && o.state.SafetyBuffer > 1 {
+			o.state.SafetyBuffer--
+			o.state.SuccessCount = 0
+			slog.Info("🎼 Safety: Gradually reducing buffer", "new_val", o.state.SafetyBuffer)
 		}
 
 	case CmdNotifyFetched:
