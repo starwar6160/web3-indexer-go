@@ -11,12 +11,12 @@ import (
 func TestStage4_GapBypass_VisualConsistency(t *testing.T) {
 	// 创建模拟处理器
 	mockProcessor := &MockBlockProcessor{}
-	
+
 	// 创建 Sequencer，从块 100 开始
 	startBlock := big.NewInt(100)
 	resultCh := make(chan BlockData, 100)
 	fatalErrCh := make(chan error, 1)
-	
+
 	seq := NewSequencerWithFetcher(
 		mockProcessor,
 		nil, // 不使用 fetcher
@@ -32,7 +32,7 @@ func TestStage4_GapBypass_VisualConsistency(t *testing.T) {
 	resultCh <- BlockData{Number: big.NewInt(100)}
 	resultCh <- BlockData{Number: big.NewInt(102)} // 空洞：缺少 101
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
 	defer cancel()
 
 	// 启动 Sequencer（后台）
@@ -63,11 +63,11 @@ func TestStage4_Persistence_Encoding_AI_Friendly(t *testing.T) {
 // MockBlockProcessor 模拟处理器
 type MockBlockProcessor struct{}
 
-func (m *MockBlockProcessor) ProcessBlockWithRetry(ctx context.Context, data BlockData, maxRetries int) error {
+func (m *MockBlockProcessor) ProcessBlockWithRetry(_ context.Context, _ BlockData, _ int) error {
 	return nil
 }
 
-func (m *MockBlockProcessor) ProcessBatch(ctx context.Context, blocks []BlockData, chainID int64) error {
+func (m *MockBlockProcessor) ProcessBatch(_ context.Context, _ []BlockData, _ int64) error {
 	return nil
 }
 

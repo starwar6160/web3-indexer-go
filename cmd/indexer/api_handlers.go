@@ -118,7 +118,7 @@ func handleInitialStatus(w http.ResponseWriter, title string) {
 	}
 }
 
-func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64, signer *engine.SignerMachine) {
+func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, _ engine.RPCClient, lazyManager *engine.LazyManager, _ int64, signer *engine.SignerMachine) {
 	if lazyManager != nil {
 		lazyManager.Trigger()
 	}

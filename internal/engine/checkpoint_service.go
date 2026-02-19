@@ -60,7 +60,7 @@ func (s *CheckpointService) Start(ctx context.Context) {
 		"max_snapshots", s.maxSnapshots)
 
 	// 确保保存目录存在
-	if err := os.MkdirAll(s.savePath, 0o755); err != nil {
+	if err := os.MkdirAll(s.savePath, 0o750); err != nil {
 		slog.Error("💾 Failed to create checkpoint directory", "err", err)
 		return
 	}
@@ -188,7 +188,7 @@ func (s *CheckpointService) serializeCheckpoint(_ Checkpoint) ([]byte, error) {
 }
 
 // writeFile 写入检查点文件
-func (s *CheckpointService) writeFile(path string, checkpoint Checkpoint) error {
+func (s *CheckpointService) writeFile(_ string, _ Checkpoint) error {
 	// TODO: 实现实际的文件写入逻辑
 	// 建议使用 gob.NewEncoder 写入二进制格式
 	return nil

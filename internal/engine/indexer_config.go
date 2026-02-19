@@ -201,7 +201,7 @@ func (cm *ConfigManager) Get() IndexerConfig {
 
 // Update atomically replaces the config and notifies all registered listeners.
 // This is the hot-reload entry point called by SIGHUP handler or /api/config PUT.
-func (cm *ConfigManager) Update(ctx context.Context, next IndexerConfig) error {
+func (cm *ConfigManager) Update(_ context.Context, next IndexerConfig) error {
 	if err := validateConfig(next); err != nil {
 		return err
 	}
