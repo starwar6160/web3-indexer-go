@@ -328,7 +328,7 @@ func (p *Processor) ProcessBlockWithRetry(ctx context.Context, data BlockData, m
 		if data.Number != nil {
 			return data.Number.String()
 		}
-		return "unknown"
+		return systemStateUnknownStr
 	}(), err)
 }
 
