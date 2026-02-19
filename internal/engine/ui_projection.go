@@ -33,6 +33,9 @@ type UIStatusDTO struct {
 	UpdatedAt           string                 `json:"updated_at"`
 	LastPulse           int64                  `json:"last_pulse"`
 	Fingerprint         string                 `json:"fingerprint"`
+	// 🔥 时空悖论警告
+	Warning       string `json:"warning,omitempty"`         // 警告信息
+	IsTimeParadox bool   `json:"is_time_paradox,omitempty"` // 是否处于时空悖论
 }
 
 // GetUIStatus 将复杂的内部状态投影为简洁的 UI 对象
@@ -77,6 +80,15 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		stateStr = "stalled"
 	}
 
+	// 🔥 检测时空悖论（索引器领先于链）
+	warning := ""
+	isTimeParadox := false
+	if snap.SyncedCursor > latest && latest > 0 {
+		isTimeParadox = true
+		warning = "[!!] TIME_PARADOX: Indexer is ahead of Chain. Self-healing in progress..."
+		stateStr = "time_paradox"
+	}
+
 	// 4. 进度计算
 	fetchProgress := 0.0
 	if latest > 0 {
@@ -111,5 +123,8 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		UpdatedAt:           snap.UpdatedAt.Format(time.RFC3339),
 		LastPulse:           time.Now().UnixMilli(),
 		Fingerprint:         "Yokohama-Lab-Primary",
+		// 🔥 时空悖论警告
+		Warning:       warning,
+		IsTimeParadox: isTimeParadox,
 	}
 }
