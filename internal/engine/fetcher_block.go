@@ -142,13 +142,15 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 			}
 		}
 
-		f.sendResult(ctx, BlockData{
+		if !f.sendResult(ctx, BlockData{
 			Number:   bn,
 			RangeEnd: end,
 			Block:    block,
 			Logs:     blockLogs,
 			Err:      err,
-		})
+		}) {
+			return // ctx cancelled or stopped — abort remaining blocks in this job
+		}
 
 		// 🚀 🔥 新增：影子进度更新 (用于 UI 先行跳动)
 		GetOrchestrator().Dispatch(CmdNotifyFetchProgress, bn.Uint64())
@@ -192,56 +194,45 @@ func (f *Fetcher) fetchHeaderWithRetry(ctx context.Context, bn *big.Int) (*types
 	return nil, err
 }
 
-func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
+// sendResult sends a BlockData to the Results channel.
+// Returns true if the data was sent, false if ctx/stop fired.
+// It NEVER drops data silently — dropping causes Sequencer gaps and deadlocks.
+func (f *Fetcher) sendResult(ctx context.Context, data BlockData) bool {
 	// 💾 录制原始数据：直接录制完整的 BlockData 对象，方便未来 100% 还原回放
 	if f.recorder != nil && data.Err == nil {
 		f.recorder.Record("block_data", data)
 	}
 
 	// 🚀 工业级节流：基于『交易笔数』进行硬限速
-	// 这确保了如果一个块有 500 笔交易，它会强制分摊时间，绝对保住 2.0 TPS
 	if f.throughput != nil {
 		tokens := len(data.Logs)
 		if tokens == 0 {
-			tokens = 1 // 即使空块也消耗 1 令牌，维持 2.0 BPS 的心跳
+			tokens = 1
 		}
-
 		if err := f.throughput.WaitN(ctx, tokens); err != nil {
-			return
+			return false
 		}
 	}
 
-	// 🚀 Pacemaker: 强制匀速，防止突发流量撑爆 5600U 的 I/O
-	// 🛡️ 资深调优：限制等待时间，如果 Results 已满导致消费过慢，不再死等节拍器
+	// 🚀 Pacemaker: 匀速发送，超时则跳过节拍器（不丢数据）
 	if f.bpsLimiter != nil {
 		limiterCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		err := f.bpsLimiter.Wait(limiterCtx)
 		cancel()
 		if err != nil {
-			// 超时说明当前速率已达上限且下游可能拥堵，跳过本次等待直接进入 select
 			slog.Debug("⏳ [Fetcher] bpsLimiter wait timeout, proceeding cautiously")
 		}
 	}
 
-	// 🔥 横滨实验室：非阻塞写入，超时后丢弃遥测数据
-	// 解决 Eco-Mode 下协程泄露问题，并防止 5600U 的 Results 队列溢出死锁
-	sendTimeout := time.NewTimer(500 * time.Millisecond) // 500ms 超时
-	defer sendTimeout.Stop()
-
+	// 🔥 阻塞写入：等待 Sequencer 消费，不丢弃数据
+	// 丢弃会导致 Sequencer expectedBlock 永远等不到该块，形成死锁
 	select {
 	case f.Results <- data:
-		// 成功发送
-	case <-sendTimeout.C:
-		// 超时：丢弃遥测数据，记录指标
-		if f.metrics != nil {
-			f.metrics.RecordFetcherJobFailed() // 记录丢弃的 job
-		}
-		slog.Warn("🔥 [Fetcher] sendResult TIMEOUT: dropping data to break deadlock",
-			"block_number", data.Number.String(),
-			"results_depth", len(f.Results),
-			"timeout_ms", 500)
+		return true
 	case <-ctx.Done():
+		return false
 	case <-f.stopCh:
+		return false
 	}
 }
 

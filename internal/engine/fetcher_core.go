@@ -63,6 +63,22 @@ func (f *Fetcher) ResultsDepth() int {
 	return len(f.Results)
 }
 
+// 🔥 ClearJobs 清空任务队列 (用于 Ephemeral Mode 重置)
+func (f *Fetcher) ClearJobs() {
+	count := 0
+	for {
+		select {
+		case <-f.jobs:
+			count++
+		default:
+			if count > 0 {
+				slog.Warn("🌀 [Fetcher] Jobs queue purged", "cleared", count)
+			}
+			return
+		}
+	}
+}
+
 // 🔥 SetSequencer 设置 Sequencer 引用（用于背压检测）
 func (f *Fetcher) SetSequencer(seq *Sequencer) {
 	f.sequencer = seq
@@ -117,57 +133,51 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher
 		"concurrency", concurrency,
 		"protection", "industrial_grade")
 
-		// 🚀 Hard Throttle: Limit ingestion to 2.0 TPS to protect remaining quota
+	// 🚀 Hard Throttle: default unlimited; caller sets via SetThroughputLimit
+	// NOTE: rate.Inf avoids WaitN deadlock when tokens > burst
 
-		throughput := rate.NewLimiter(rate.Limit(2.0), 1000)
+	throughput := rate.NewLimiter(rate.Inf, 0)
 
-	
+	// 🚀 Pacemaker: default unlimited; avoids burst exhaustion on Anvil
 
-		// 🚀 Pacemaker: 每秒最多允许处理 200 个块，确保 UI 数字匀速跳动
+	bpsLimiter := rate.NewLimiter(rate.Inf, 0)
 
-		bpsLimiter := rate.NewLimiter(rate.Limit(200.0), 50)
+	// 💾 初始化录制器 (默认存储路径)
 
-	
+	recorder, err := NewDataRecorder("")
 
-		// 💾 初始化录制器 (默认存储路径)
+	if err != nil {
 
-		recorder, err := NewDataRecorder("")
+		slog.Warn("failed_to_initialize_recorder", "err", err)
 
-		if err != nil {
+	}
 
-			slog.Warn("failed_to_initialize_recorder", "err", err)
+	// 🔥 16G RAM 调优：提升至 15,000
 
-		}
+	f := &Fetcher{
 
-	
+		pool: pool,
 
-		// 🔥 16G RAM 调优：提升至 15,000
+		concurrency: concurrency,
 
-		f := &Fetcher{
+		jobs: make(chan FetchJob, concurrency*10), // 扩容 10 倍
 
-			pool:         pool,
+		Results: make(chan BlockData, 15000), // 16G RAM 环境适中配置
 
-			concurrency:  concurrency,
+		limiter: rateLimiter.Limiter(),
 
-			jobs:         make(chan FetchJob, concurrency*10), // 扩容 10 倍
+		throughput: throughput,
 
-			Results:      make(chan BlockData, 15000),       // 16G RAM 环境适中配置
+		bpsLimiter: bpsLimiter,
 
-			limiter:      rateLimiter.Limiter(),
+		recorder: recorder,
 
-			throughput:   throughput,
+		stopCh: make(chan struct{}),
 
-			bpsLimiter:   bpsLimiter,
+		paused: false,
 
-			recorder:     recorder,
-
-			stopCh:       make(chan struct{}),
-
-			paused:       false,
-
-			metrics:      GetMetrics(),
-
-		}
+		metrics: GetMetrics(),
+	}
 	f.pauseCond = sync.NewCond(&f.pauseMu)
 	return f
 }
@@ -182,14 +192,22 @@ func (f *Fetcher) SetWatchedAddresses(addresses []string) {
 	}
 }
 
-// SetThroughputLimit updates the target processing speed
+// SetThroughputLimit updates the target processing speed.
+// burst is set equal to tps (minimum 1) so WaitN(ctx, n) never blocks
+// permanently when n <= burst. Pass tps <= 0 to disable throttling.
 func (f *Fetcher) SetThroughputLimit(tps float64) {
 	if tps <= 0 {
 		f.throughput = rate.NewLimiter(rate.Inf, 0)
+		f.bpsLimiter = rate.NewLimiter(rate.Inf, 0)
 		return
 	}
-	// 🚀 允许 1000 的 Burst，这样即便大块也能进入队列，但消耗令牌会产生后续延迟
-	f.throughput = rate.NewLimiter(rate.Limit(tps), 1000)
+	// burst = ceil(tps) so a single WaitN call for up to burst tokens never deadlocks
+	burst := int(tps)
+	if burst < 1 {
+		burst = 1
+	}
+	f.throughput = rate.NewLimiter(rate.Limit(tps), burst)
+	f.bpsLimiter = rate.NewLimiter(rate.Limit(tps*10), burst*10)
 }
 
 func (f *Fetcher) Start(ctx context.Context, wg *sync.WaitGroup) {

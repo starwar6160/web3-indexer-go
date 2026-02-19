@@ -8,6 +8,27 @@ import (
 )
 
 func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
+	// 🚀 🔥 边界卫兵：绝对禁止抓取还未产生的块 (Ghost Chase Defense)
+	orch := GetOrchestrator()
+	snap := orch.GetSnapshot()
+	chainHeight := big.NewInt(int64(snap.LatestHeight))
+
+	if start.Cmp(chainHeight) > 0 {
+		// 如果是 Anvil 模式，仅记录 Debug 而非 Error，减少日志噪音
+		slog.Debug("🌀 [Fetcher] Boundary skip: start block is ahead of chain", "start", start.String(), "chain", chainHeight.String())
+		return nil // 优雅跳过，不报错以免触发上游重试
+	}
+
+	// 如果 end 超过了 chainHeight，自动截断到 chainHeight
+	if end.Cmp(chainHeight) > 0 {
+		slog.Debug("🌀 [Fetcher] Truncating schedule range to chain height", "original_end", end.String(), "new_end", chainHeight.String())
+		end = chainHeight
+	}
+
+	if start.Cmp(end) > 0 {
+		return nil
+	}
+
 	Logger.Info("📋 [Fetcher] Schedule 开始调度任务",
 		slog.String("start_block", start.String()),
 		slog.String("end_block", end.String()),
@@ -21,8 +42,8 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	maxResultsCapacity := cap(f.Results)
 
 	// 水位线阈值
-	jobsWatermark := maxJobsCapacity * 80 / 100       // 80%
-	resultsWatermark := maxResultsCapacity * 80 / 100 // 80%
+	jobsWatermark := maxJobsCapacity * 90 / 100       // 90%
+	resultsWatermark := maxResultsCapacity * 90 / 100 // 90%
 
 	if jobsDepth > jobsWatermark {
 		Logger.Warn("🚫 [Fetcher] SCHEDULE_BLOCKED: Jobs queue too deep",
@@ -43,7 +64,6 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	}
 
 	// 🔥 检查 Sequencer buffer 深度
-	// 横滨实验室：提升阈值至 2000 (128G RAM 可承受)
 	if f.sequencer != nil {
 		seqBufferSize := f.sequencer.GetBufferSize()
 		if seqBufferSize > 2000 {
