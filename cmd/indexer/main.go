@@ -506,6 +506,11 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	asyncWriter.Start()
 	slog.Info("🔥 AsyncWriter initialized and started: Yokohama Muscle Active")
 
+	// 🛡️ 初始化自愈审计引擎 (Immune System)
+	healer := engine.NewSelfHealer(orchestrator)
+	go healer.Start(ctx)
+	slog.Info("🛡️ SelfHealer activated: Logic audit loop online")
+
 	// 🛡️ Deadlock Watchdog: enabled for all networks (Anvil, Sepolia, production).
 	// Enable() is now unconditional; the old chainID==31337 gate has been removed.
 	watchdog := engine.NewDeadlockWatchdog(
