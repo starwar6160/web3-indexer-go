@@ -362,6 +362,16 @@ async function fetchStatus() {
         }
 
         // 更新 UI 指标
+        const currentLatestDisplay = parseInt(document.getElementById('latestBlock').textContent || '0');
+        const incomingLatest = parseInt(data?.latest_block || '0');
+
+        // 🚀 视觉洗盘：如果后端高度发生大幅回退（说明执行了 Hard Reset）
+        if (incomingLatest > 0 && currentLatestDisplay > incomingLatest + 100) {
+            console.warn('🚨 State Reset detected in backend! Purging UI...');
+            location.reload();
+            return;
+        }
+
         document.getElementById('latestBlock').textContent = data?.latest_block || '0';
         document.getElementById('totalBlocks').textContent = data?.total_blocks || '0';
         document.getElementById('totalTransfers').textContent = data?.total_transfers || '0';

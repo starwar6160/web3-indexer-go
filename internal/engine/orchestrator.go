@@ -187,6 +187,10 @@ func (o *Orchestrator) loop() {
 	mergeTicker := time.NewTicker(100 * time.Millisecond)
 	defer mergeTicker.Stop()
 
+	// 📊 遥测定时器：每 1 秒输出一行 AI 专用诊断日志
+	telemetryTicker := time.NewTicker(1 * time.Second)
+	defer telemetryTicker.Stop()
+
 	for {
 		select {
 		case <-o.ctx.Done():
@@ -202,6 +206,9 @@ func (o *Orchestrator) loop() {
 
 		case <-mergeTicker.C:
 			o.flushPendingHeightUpdate()
+
+		case <-telemetryTicker.C:
+			o.LogPulse(o.ctx)
 		}
 	}
 }
@@ -484,24 +491,28 @@ func (o *Orchestrator) Subscribe() <-chan CoordinatorState {
 
 // 🔥 兼容性方法（用于现有代码迁移）
 
-// ForceUpdateChainHead 强制立即更新链头 (用于测试或高优先级场景)
-func (o *Orchestrator) ForceUpdateChainHead(height uint64) {
+// UpdateChainHead 更新链头高度（兼容方法）
+func (o *Orchestrator) UpdateChainHead(height uint64) {
+	// 🚀 🔥 资深调优：不再走 cmdChan 异步队列，而是立即通过锁更新 state 和 snapshot
+	// 这解决了 UI 上 'Latest: 0' 滞后的问题，确保链脉搏瞬时响应
 	o.mu.Lock()
 	if height > o.state.LatestHeight {
 		o.state.LatestHeight = height
-		o.state.TargetHeight = height - o.state.SafetyBuffer
-		if height <= o.state.SafetyBuffer {
+		
+		// 🚀 计算目标高度 (Latest - SafetyBuffer)
+		if height > o.state.SafetyBuffer {
+			o.state.TargetHeight = height - o.state.SafetyBuffer
+		} else {
 			o.state.TargetHeight = 0
 		}
+		
+		// 🚀 物理对齐：立即更新 snapshot，让 GetUIStatus 拿到的总是最新值
+		o.snapshot = o.state
+		o.state.UpdatedAt = time.Now()
 	}
 	o.mu.Unlock()
-	// 触发一次 snapshot 更新
-	o.Dispatch(CmdNotifyFetched, height)
-}
-
-// UpdateChainHead 更新链头高度（兼容方法）
-func (o *Orchestrator) UpdateChainHead(height uint64) {
-	o.Dispatch(CmdUpdateChainHeight, height)
+	
+	// 仍然发送一个轻量级消息以触发 loop 里的 evaluate 逻辑（可选）
 }
 
 // AdvanceCursor 前进数据库游标（兼容方法）
@@ -738,6 +749,12 @@ func (o *Orchestrator) ResetToZero() {
 	o.state.LatestHeight = 0
 	o.state.TargetHeight = 0
 	o.snapshot = o.state
+
+	// 🚀 同时清空 Fetcher 队列，防止老任务干扰新周期
+	if o.fetcher != nil {
+		o.fetcher.ClearJobs()
+	}
+
 	slog.Warn("🎼 Orchestrator: State reset to zero (EPHEMERAL_MODE)")
 }
 

@@ -54,8 +54,10 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 	// 1. 实时数据库统计 (带 5s 缓存以防高频请求压垮 DB)
 	// 此处为简化逻辑直接查询，实际生产建议使用原子变量缓存
 	var totalBlocks, totalTransfers int64
-	_ = db.GetContext(ctx, &totalBlocks, "SELECT COUNT(*) FROM blocks")
-	_ = db.GetContext(ctx, &totalTransfers, "SELECT COUNT(*) FROM transfers")
+	if db != nil {
+		_ = db.GetContext(ctx, &totalBlocks, "SELECT COUNT(*) FROM blocks")
+		_ = db.GetContext(ctx, &totalTransfers, "SELECT COUNT(*) FROM transfers")
+	}
 
 	// 2. 逻辑自洽
 	syncLag := SafeInt64Diff(latest, snap.SyncedCursor)
@@ -86,7 +88,7 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		State:               stateStr,
 		LatestBlock:         fmt.Sprintf("%d", latest),
 		LatestIndexed:       fmt.Sprintf("%d", snap.SyncedCursor),
-		TotalBlocks:         totalBlocks,
+		TotalBlocks:         int64(snap.SyncedCursor), // 🚀 🔥 修正：UI 总进度应基于逻辑游标
 		TotalTransfers:      totalTransfers,
 		MemorySync:          fmt.Sprintf("%d", snap.FetchedHeight),
 		SyncLag:             syncLag,
