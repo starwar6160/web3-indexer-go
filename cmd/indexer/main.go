@@ -56,7 +56,8 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 		if err != nil {
 			slog.Error("reset_db_fail", "err", err)
 		}
-		return big.NewInt(10262444), nil
+		// ChainID-aware default start block
+		return getDefaultStartBlockForChain(chainID), nil
 	}
 
 	if forceFrom != "" {
@@ -90,7 +91,8 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 	var lastSyncedBlock string
 	err := db.GetContext(ctx, &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
 	if err != nil || lastSyncedBlock == "" {
-		return big.NewInt(10262444), nil
+		// ChainID-aware default start block
+		return getDefaultStartBlockForChain(chainID), nil
 	}
 
 	blockNum, _ := new(big.Int).SetString(lastSyncedBlock, 10)
@@ -102,6 +104,20 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 	}
 
 	return new(big.Int).Add(blockNum, big.NewInt(1)), nil
+}
+
+// getDefaultStartBlockForChain 返回基于 ChainID 的默认起始块
+func getDefaultStartBlockForChain(chainID int64) *big.Int {
+	switch chainID {
+	case 31337: // Anvil
+		return big.NewInt(0)
+	case 11155111: // Sepolia
+		return big.NewInt(10262444)
+	case 1: // Mainnet
+		return big.NewInt(0)
+	default:
+		return big.NewInt(0)
+	}
 }
 
 // runSequencerWithSelfHealing 启动 Sequencer 并在崩溃后自动重启
