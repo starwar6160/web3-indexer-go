@@ -3,8 +3,10 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -135,7 +137,7 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 			totalEvents += len(task.Transfers)
 			GetMetrics().RecordBlockActivity(1)
 		}
-		
+
 		// 仍然更新内存水位线和视觉进度
 		w.diskWatermark.Store(maxHeight)
 		w.orchestrator.AdvanceDBCursor(maxHeight)
@@ -156,11 +158,11 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	}()
 
 	var (
-		maxHeight         uint64 = 0
-		totalTransfers           = 0
-		validBlocks              = 0
-		blocksToInsert    []models.Block
-		transfersToInsert []models.Transfer
+		maxHeight         uint64
+		totalTransfers    = 0
+		validBlocks       = 0
+		blocksToInsert    = make([]models.Block, 0, len(batch))
+		transfersToInsert = make([]models.Transfer, 0)
 	)
 
 	for _, task := range batch {
@@ -216,7 +218,10 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	}
 
 	// 🚀 Grafana 对齐：更新 sync_status 表 (非致命操作)
-	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF) 
+	syncedBlock := int64(math.MaxInt64)
+	if maxHeight <= uint64(math.MaxInt64) {
+		syncedBlock = int64(maxHeight)
+	}
 
 	// 🛡️ 资深调优：使用独立的 Exec 而非合并在主逻辑中，确保即便此表报错也不影响主位点更新
 	_, err = tx.ExecContext(w.ctx, `
@@ -276,7 +281,7 @@ func (w *AsyncWriter) Enqueue(task PersistTask) error {
 	case w.taskChan <- task:
 		return nil
 	default:
-		return sql.ErrConnDone // 简单表示队列满 (实际不应发生)
+		return errors.New("queue full")
 	}
 }
 

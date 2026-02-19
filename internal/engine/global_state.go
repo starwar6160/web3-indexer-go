@@ -22,6 +22,11 @@ const (
 	SystemStateThrottled  // 🚀 背压限流中
 )
 
+const (
+	systemStateUnknownStr = "unknown"
+	systemStateStalledStr = "stalled"
+)
+
 func (s SystemStateEnum) String() string {
 	switch s {
 	case SystemStateIdle:
@@ -31,7 +36,7 @@ func (s SystemStateEnum) String() string {
 	case SystemStateCatchingUp:
 		return "catching_up"
 	case SystemStateStalled:
-		return "stalled"
+		return systemStateStalledStr
 	case SystemStateHealing:
 		return "healing"
 	case SystemStateDegraded:
@@ -43,7 +48,7 @@ func (s SystemStateEnum) String() string {
 	case SystemStateThrottled:
 		return "throttled"
 	default:
-		return "unknown"
+		return systemStateUnknownStr
 	}
 }
 
@@ -102,8 +107,8 @@ func GetGlobalState() *GlobalState {
 			lastUpdate:         time.Now(),
 			subscribers:        make([]chan Snapshot, 0, 8), // 最多 8 个订阅者
 			maxJobsCapacity:    200,                         // cap(f.jobs)
-			maxResultsCapacity: 5000,                        // cap(f.Results)
-			maxSequencerBuffer: 1000,                        // 默认 buffer 上限
+			maxResultsCapacity: 5000,
+			maxSequencerBuffer: 1000, // 默认 buffer 上限
 			jobsQueueDepth:     0,
 			resultsDepth:       0,
 			sequencerBuffer:    0,
