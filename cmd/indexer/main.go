@@ -340,14 +340,14 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 			wsEvent := web.WSEvent{
 				Type: "status_update",
 				Data: map[string]interface{}{
-					"latest_height":   snapshot.LatestHeight,
-					"synced_cursor":   snapshot.SyncedCursor,
-					"transfers":       snapshot.Transfers,
-					"is_eco_mode":     snapshot.IsEcoMode,
-					"progress":        snapshot.Progress,
-					"system_state":    snapshot.SystemState.String(),
-					"updated_at":      snapshot.UpdatedAt.Format(time.RFC3339),
-					"sync_lag":        snapshot.LatestHeight - snapshot.SyncedCursor,
+					"latest_height": snapshot.LatestHeight,
+					"synced_cursor": snapshot.SyncedCursor,
+					"transfers":     snapshot.Transfers,
+					"is_eco_mode":   snapshot.IsEcoMode,
+					"progress":      snapshot.Progress,
+					"system_state":  snapshot.SystemState.String(),
+					"updated_at":    snapshot.UpdatedAt.Format(time.RFC3339),
+					"sync_lag":      snapshot.LatestHeight - snapshot.SyncedCursor,
 				},
 			}
 			wsHub.Broadcast(wsEvent)
