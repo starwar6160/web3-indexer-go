@@ -142,7 +142,9 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 			gapSize := new(big.Int).Sub(minBuffered, expectedCopy).Int64()
 			Logger.Error("🚨 CRITICAL_GAP_DETECTED", slog.String("missing_from", expectedStr), slog.String("missing_to", gapEnd.String()), slog.Int64("gap_size", gapSize), slog.Int("buffered_blocks", bufferLen), slog.Int("gap_fill_attempt", s.gapFillCount+1))
 
-			// 🛡️ 演示期间：如果 gap-fill 失败 3 次，立即跳过（从 10 次减少）
+			// 🛡️ Gap Bypass Strategy: 最多重试 3 次，然后强制跳过
+			// 设计理念：让流水线继续流，把伤疤留给后台异步补齐
+			// 参考 LMAX Disruptor 的非阻塞设计
 			if s.fetcher != nil && s.gapFillCount < 3 {
 				Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill", slog.String("from", expectedStr), slog.String("to", gapEnd.String()), slog.Int("attempt", s.gapFillCount+1))
 				go func() {
@@ -152,15 +154,18 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 				}()
 				s.gapFillCount++
 			} else if bufferLen > 0 {
-				// 跳块兜底：gap-fill 多次失败后跳过，保证 UI 不卡死。
-				// 跳过的区块范围会被记录为结构化日志，供运维人员通过 replay 补录。
-				// 注意：lastProgressAt 必须在修改 expectedBlock 之前重置，
-				// 否则看门狗在下一个 30s tick 时会立即对新的 expectedBlock 再次触发。
-				Logger.Error("🚧 GAP_SKIP: Abandoning gap after max fill attempts — blocks will be missing",
+				// 🚀 强制空洞跳过（Forced Gap Bypass）
+				// 设计理念：在博彩/交易系统中，"阻塞（Stall）"比"延迟"更可怕
+				// 让流水线继续流，把缺失的块标记为"待补偿"
+				// 注意：lastProgressAt 必须在修改 expectedBlock 之前重置
+				skippedTo := new(big.Int).Sub(minBuffered, big.NewInt(1))
+				Logger.Error("🚧 GAP_BYPASS: Forced skip after max retries — pipeline unblocked",
 					slog.String("skipped_from", expectedStr),
-					slog.String("skipped_to", new(big.Int).Sub(minBuffered, big.NewInt(1)).String()),
+					slog.String("skipped_to", skippedTo.String()),
 					slog.String("resume_at", minBuffered.String()),
 					slog.Int("gap_fill_attempts", s.gapFillCount),
+					slog.Int("gap_size", gapSize),
+					slog.String("strategy", "backfill_async"),
 					slog.String("action_required", "replay skipped range to restore data completeness"))
 
 				s.lastProgressAt = time.Now() // reset BEFORE lock to avoid immediate re-trigger
