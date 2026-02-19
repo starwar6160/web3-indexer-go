@@ -25,6 +25,40 @@ func (s *AnvilStrategy) Name() string { return "EPHEMERAL_ANVIL" }
 func (s *AnvilStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx.DB, _ int64) error {
 	slog.Warn("☢️ ANVIL_EPHEMERAL: Executing Nuclear Reset...")
 
+	// 🚀 Step 0 - Reality Check BEFORE nuclear reset
+	if o.fetcher != nil && o.fetcher.pool != nil {
+		rpcHeight, err := o.fetcher.pool.GetLatestBlockNumber(ctx)
+		if err == nil {
+			snap := o.GetSnapshot()
+
+			// Detect "Future Human" state
+			if snap.SyncedCursor > rpcHeight.Uint64() ||
+				snap.FetchedHeight > rpcHeight.Uint64() ||
+				snap.LatestHeight > rpcHeight.Uint64() {
+
+				gap := int64(0)
+				if snap.SyncedCursor > rpcHeight.Uint64() {
+					gap = int64(snap.SyncedCursor) - rpcHeight.Int64()
+				}
+
+				slog.Error("🚨 REALITY_PARADOX_DETECTED: Indexer is in the future!",
+					"mem_synced", snap.SyncedCursor,
+					"mem_fetched", snap.FetchedHeight,
+					"mem_latest", snap.LatestHeight,
+					"rpc_actual", rpcHeight.Uint64(),
+					"reality_gap", gap,
+					"action", "forcing_collapse_to_reality")
+
+				// Force collapse to RPC reality
+				o.SnapToReality(rpcHeight.Uint64())
+			} else {
+				slog.Info("✅ REALITY_CHECK: State aligned with RPC",
+					"rpc_height", rpcHeight.Uint64(),
+					"mem_height", snap.SyncedCursor)
+			}
+		}
+	}
+
 	// 1. 物理清空数据库 (TRUNCATE 是最彻底的)
 	if db != nil {
 		tables := []string{"blocks", "transfers", "sync_checkpoints", "sync_status", "visitor_stats"}

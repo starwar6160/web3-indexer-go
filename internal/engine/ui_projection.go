@@ -36,6 +36,11 @@ type UIStatusDTO struct {
 	// 🔥 时空悖论警告
 	Warning       string `json:"warning,omitempty"`         // 警告信息
 	IsTimeParadox bool   `json:"is_time_paradox,omitempty"` // 是否处于时空悖论
+
+	// 🚀 NEW: RPC reality fields
+	RPCActual    int64  `json:"rpc_actual,omitempty"`    // RPC 实际高度
+	RealityGap   int64  `json:"reality_gap,omitempty"`   // 现实差距（可为负）
+	ParityStatus string `json:"parity_status,omitempty"` // 奇偶校验状态
 }
 
 // GetUIStatus 将复杂的内部状态投影为简洁的 UI 对象
@@ -51,6 +56,19 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 			latest = snap.FetchedHeight
 		} else {
 			latest = snap.SyncedCursor
+		}
+	}
+
+	// 🚀 NEW: Get actual RPC height for reality check
+	var rpcActual uint64
+	var isInFuture bool
+	var realityGap int64
+
+	if o.fetcher != nil && o.fetcher.pool != nil {
+		if tip, err := o.fetcher.pool.GetLatestBlockNumber(ctx); err == nil {
+			rpcActual = tip.Uint64()
+			realityGap = int64(rpcActual) - int64(snap.SyncedCursor)
+			isInFuture = realityGap < 0
 		}
 	}
 
@@ -83,10 +101,16 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 	// 🔥 检测时空悖论（索引器领先于链）
 	warning := ""
 	isTimeParadox := false
+
 	if snap.SyncedCursor > latest && latest > 0 {
 		isTimeParadox = true
 		warning = "[!!] TIME_PARADOX: Indexer is ahead of Chain. Self-healing in progress..."
 		stateStr = "time_paradox"
+	} else if isInFuture {
+		// 🚀 NEW: Enhanced paradox detection with RPC actual
+		isTimeParadox = true
+		warning = fmt.Sprintf("[!!] DETACHED: Indexer ahead of RPC reality by %d blocks. Realignment in progress...", -realityGap)
+		stateStr = "detached"
 	}
 
 	// 4. 进度计算
@@ -97,6 +121,14 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 	syncProgress := 0.0
 	if latest > 0 {
 		syncProgress = float64(snap.SyncedCursor) / float64(latest) * 100
+	}
+
+	// 🚀 NEW: Parity status calculation
+	parityStatus := "healthy"
+	if isInFuture {
+		parityStatus = "paradox_detected"
+	} else if realityGap > 1000 {
+		parityStatus = "lagging"
 	}
 
 	return UIStatusDTO{
@@ -126,5 +158,9 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		// 🔥 时空悖论警告
 		Warning:       warning,
 		IsTimeParadox: isTimeParadox,
+		// 🚀 NEW: RPC reality fields
+		RPCActual:    int64(rpcActual),
+		RealityGap:   realityGap,
+		ParityStatus: parityStatus,
 	}
 }

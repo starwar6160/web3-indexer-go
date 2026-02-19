@@ -23,24 +23,46 @@ func (o *Orchestrator) LogPulse(ctx context.Context) {
 	// 🚀 计算位点差距
 	latestNum, _ := new(big.Int).SetString(status.LatestBlock, 10)
 	memNum, _ := new(big.Int).SetString(status.MemorySync, 10)
+
+	// 🚀 NEW: Enhanced reality gap calculation
+	realityGap := int64(0)
+	isInFuture := false
+	parityCheck := "healthy"
+
+	if latestNum != nil && memNum != nil {
+		realityGap = int64(rpcActual) - memNum.Int64()
+		isInFuture = realityGap < 0
+
+		// Parity health check
+		if memNum.Int64() > int64(rpcActual) {
+			parityCheck = "paradox_detected"
+		} else if int64(rpcActual)-memNum.Int64() > 1000 {
+			parityCheck = "lagging"
+		}
+	}
+
 	diff := int64(0)
 	if latestNum != nil && memNum != nil {
 		diff = latestNum.Int64() - memNum.Int64()
 	}
 
 	pulse := map[string]interface{}{
-		"ts":         time.Now().UnixMilli(),
-		"tag":        "AI_DIAGNOSTIC",
-		"rpc_actual": rpcActual,          // 🚀 物理真理
-		"mem_latest": status.LatestBlock, // 内存幻觉
-		"is_desync":  fmt.Sprintf("%d", rpcActual) != status.LatestBlock,
-		"state":      status.State,
-		"mem_sync":   status.MemorySync,
-		"disk_sync":  status.LatestIndexed,
-		"diff":       diff,
-		"lag":        status.SyncLag,
-		"bps":        status.BPS,
-		"strategy":   strategyName(o.strategy),
+		"ts":           time.Now().UnixMilli(),
+		"tag":          "AI_DIAGNOSTIC",
+		"rpc_actual":   rpcActual,
+		"mem_latest":   status.LatestBlock,
+		"is_desync":    fmt.Sprintf("%d", rpcActual) != status.LatestBlock,
+		"state":        status.State,
+		"mem_sync":     status.MemorySync,
+		"disk_sync":    status.LatestIndexed,
+		"diff":         diff,
+		"lag":          status.SyncLag,
+		"bps":          status.BPS,
+		"strategy":     strategyName(o.strategy),
+		// 🚀 NEW: Reality collapse fields
+		"reality_gap":  realityGap,   // Can be negative (future)
+		"is_in_future": isInFuture,   // Boolean flag
+		"parity_check": parityCheck,  // Health status
 	}
 
 	data, err := json.Marshal(pulse)
