@@ -66,9 +66,9 @@ type IndexerService interface {
 // NewStateManager 创建状态管理器
 func NewStateManager(indexer IndexerService, rpcPool *RPCClientPool) *StateManager {
 	// 检查是否启用持续运行模式（用于本地展示）
-	continuousMode := os.Getenv("CONTINUOUS_MODE") == "true"
+	continuousMode := os.Getenv("CONTINUOUS_MODE") == EnvTrue
 	// 检查是否禁用智能睡眠系统（用于本地开发）
-	disableSmartSleep := os.Getenv("DISABLE_SMART_SLEEP") == "true"
+	disableSmartSleep := os.Getenv("DISABLE_SMART_SLEEP") == EnvTrue
 
 	sm := &StateManager{
 		indexer:        indexer,

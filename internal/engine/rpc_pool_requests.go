@@ -75,9 +75,7 @@ func (p *RPCClientPool) getNextHealthyNode() *rpcNode {
 
 func (p *EnhancedRPCClientPool) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
 	if p.isTestnetMode {
-		if err := p.enforceSyncBatchLimit(); err != nil {
-			return nil, err
-		}
+		p.enforceSyncBatchLimit()
 		if p.globalRateLimiter != nil {
 			if err := p.globalRateLimiter.Wait(ctx); err != nil {
 				return nil, fmt.Errorf("global rate limiter error: %w", err)
@@ -126,9 +124,7 @@ func (p *EnhancedRPCClientPool) BlockByNumber(ctx context.Context, number *big.I
 
 func (p *EnhancedRPCClientPool) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
 	if p.isTestnetMode {
-		if err := p.enforceSyncBatchLimit(); err != nil {
-			return nil, err
-		}
+		p.enforceSyncBatchLimit()
 		if p.globalRateLimiter != nil {
 			if err := p.globalRateLimiter.Wait(ctx); err != nil {
 				return nil, fmt.Errorf("global rate limiter error: %w", err)
@@ -177,9 +173,7 @@ func (p *EnhancedRPCClientPool) HeaderByNumber(ctx context.Context, number *big.
 
 func (p *EnhancedRPCClientPool) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
 	if p.isTestnetMode {
-		if err := p.enforceSyncBatchLimit(); err != nil {
-			return nil, err
-		}
+		p.enforceSyncBatchLimit()
 		if p.globalRateLimiter != nil {
 			if err := p.globalRateLimiter.Wait(ctx); err != nil {
 				return nil, fmt.Errorf("global rate limiter error: %w", err)

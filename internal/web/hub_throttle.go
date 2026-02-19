@@ -17,12 +17,12 @@ type ThrottledHub struct {
 	throttleInterval time.Duration // 节流间隔（默认 500ms）
 	aggregateEvents  []interface{} // 聚合的事件缓冲区
 	aggregateMu      sync.Mutex    // 聚合缓冲区锁
-	lastBroadcast    time.Time    // 上次广播时间
-	ticker           *time.Ticker // 定时广播触发器
+	lastBroadcast    time.Time     // 上次广播时间
+	ticker           *time.Ticker  // 定时广播触发器
 
 	// 统计
-	totalEvents      uint64
-	droppedEvents    uint64
+	totalEvents       uint64
+	droppedEvents     uint64
 	aggregatedBatches uint64
 }
 
@@ -167,10 +167,10 @@ func getEventType(event interface{}) string {
 func shouldImmediateBroadcast(eventType string) bool {
 	// 🔥 关键事件立即推送
 	immediateTypes := map[string]bool{
-		"system_healing": true, // 自愈事件
-		"engine_panic":    true, // 崩溃事件
+		"system_healing":   true, // 自愈事件
+		"engine_panic":     true, // 崩溃事件
 		"linearity_status": true, // 线性检查状态
-		"lazy_status":     true, // LazyManager 状态变化
+		"lazy_status":      true, // LazyManager 状态变化
 	}
 
 	return immediateTypes[eventType]
@@ -182,12 +182,12 @@ func (h *ThrottledHub) GetStats() map[string]interface{} {
 	defer h.aggregateMu.Unlock()
 
 	return map[string]interface{}{
-		"total_events":        h.totalEvents,
-		"dropped_events":      h.droppedEvents,
-		"aggregated_batches":  h.aggregatedBatches,
-		"pending_events":      len(h.aggregateEvents),
-		"buffer_capacity":     cap(h.aggregateEvents),
-		"throttle_interval":   h.throttleInterval.String(),
-		"last_broadcast":      h.lastBroadcast.Format(time.RFC3339),
+		"total_events":       h.totalEvents,
+		"dropped_events":     h.droppedEvents,
+		"aggregated_batches": h.aggregatedBatches,
+		"pending_events":     len(h.aggregateEvents),
+		"buffer_capacity":    cap(h.aggregateEvents),
+		"throttle_interval":  h.throttleInterval.String(),
+		"last_broadcast":     h.lastBroadcast.Format(time.RFC3339),
 	}
 }

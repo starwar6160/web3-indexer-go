@@ -21,7 +21,7 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	maxResultsCapacity := cap(f.Results)
 
 	// 水位线阈值
-	jobsWatermark := maxJobsCapacity * 80 / 100     // 80%
+	jobsWatermark := maxJobsCapacity * 80 / 100       // 80%
 	resultsWatermark := maxResultsCapacity * 80 / 100 // 80%
 
 	if jobsDepth > jobsWatermark {
@@ -43,9 +43,10 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	}
 
 	// 🔥 检查 Sequencer buffer 深度
+	// 横滨实验室：提升阈值至 2000 (128G RAM 可承受)
 	if f.sequencer != nil {
 		seqBufferSize := f.sequencer.GetBufferSize()
-		if seqBufferSize > 800 {
+		if seqBufferSize > 2000 {
 			Logger.Warn("🚫 [Fetcher] SCHEDULE_BLOCKED: Sequencer buffer too deep",
 				slog.Int("sequencer_buffer_size", seqBufferSize),
 				slog.Int("jobs_depth", jobsDepth),

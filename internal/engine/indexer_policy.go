@@ -40,9 +40,9 @@ func GetPolicy(rpcURLs []string, chainID int64) IndexerPolicy {
 
 	// 默认: 生产环境保守策略
 	return IndexerPolicy{
-		AllowSleep:     true,  // 允许 Eco-Mode
-		EnforceQuota:   true,  // 强制配额限制
-		BurstBatchSize: 20,    // 保守批次
+		AllowSleep:     true, // 允许 Eco-Mode
+		EnforceQuota:   true, // 强制配额限制
+		BurstBatchSize: 20,   // 保守批次
 		LabMode:        false,
 	}
 }

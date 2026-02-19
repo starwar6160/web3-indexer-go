@@ -124,144 +124,15 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPoo
 	}
 
 	ctx := r.Context()
+	orchestrator := engine.GetOrchestrator()
+	status := orchestrator.GetStatus(ctx, db, rpcPool, Version)
 
-	// 🔥 原子状态更新：Latest (on Chain) = max(Fetcher_Current, RPC_Latest)
-	// 解决指标更新滞后问题：Dashboard 显示的高度可能落后于 TailFollow 实际调度的高度
-	//
-	// 策略：
-	// 1. 优先使用 HeightOracle（TailFollow 推送）
-	// 2. 如果为 0（冷启动），则从 RPC 拉取
-	// 3. Anvil 环境：每次强制刷新（消除缓存）
-	snap := engine.GetHeightOracle().Snapshot()
-	latestChainInt64 := snap.ChainHead
-
-	// 冷启动或 Anvil 环境：强制从 RPC 获取最新高度
-	if latestChainInt64 == 0 || chainID == 31337 {
-		if tip, err := rpcPool.GetLatestBlockNumber(ctx); err == nil && tip != nil {
-			rpcHeight := tip.Int64()
-			// 只更新 RPC 高度更高时（避免回退）
-			if rpcHeight > latestChainInt64 {
-				engine.GetHeightOracle().SetChainHead(rpcHeight)
-				latestChainInt64 = rpcHeight
-			}
-		}
-	}
-
-	// Use HeightOracle snapshot as the single source of truth for all height
-	// numbers. This eliminates the race where /api/status calls GetLatestBlockNumber
-	// on a potentially lagging RPC node while TailFollow has already advanced
-	// further, producing "Synced > On-Chain" phantom readings.
-	//
-	// HeightOracle.ChainHead() is written exclusively by TailFollow (every 500ms),
-	// which is the most authoritative and up-to-date source.
-	// HeightOracle.IndexedHead() is written by Processor after each checkpoint commit.
-	// Re-read snapshot after potential update
-	snap = engine.GetHeightOracle().Snapshot()
-	latestChainInt64 = snap.ChainHead
-	latestIndexedBlockInt64 := snap.IndexedHead
-	latestIndexedBlock := fmt.Sprintf("%d", latestIndexedBlockInt64)
-
-	// If HeightOracle hasn't been populated yet (cold start before first TailFollow
-	// tick), fall back to a live RPC call exactly once.
-	if latestChainInt64 == 0 {
-		if tip, err := rpcPool.GetLatestBlockNumber(ctx); err == nil && tip != nil {
-			latestChainInt64 = tip.Int64()
-			engine.GetHeightOracle().SetChainHead(latestChainInt64)
-		}
-	}
-	if latestIndexedBlockInt64 == 0 {
-		latestIndexedBlock = getLatestIndexedBlock(ctx, db)
-		latestIndexedBlockInt64 = parseBlockNumber(latestIndexedBlock)
-	}
-
-	// 🔥 原子 Lag 计算：避免使用过时的快照值
-	// 公式：SyncLag = max(0, LatestChain - LatestIndexed)
-	// 不使用任何中间变量，直接从数据库实时查询
-	var totalBlocksInDB int64
-	err := db.GetContext(ctx, &totalBlocksInDB, "SELECT COUNT(*) FROM blocks")
-	if err != nil {
-		totalBlocksInDB = 0
-	}
-
-	// 实时计算 SyncLag（原子操作）
-	rawSyncLag := latestChainInt64 - latestIndexedBlockInt64
-	var syncLag int64
-	var driftBlocks int64
-	var isTimeTravel bool
-
-	if rawSyncLag < 0 {
-		// 时间旅行：Indexed > Chain（可能因为 RPC 节点滞后）
-		driftBlocks = -rawSyncLag
-		syncLag = 0
-		isTimeTravel = driftBlocks > engine.GetHeightOracle().DriftTolerance
-	} else {
-		// 正常情况
-		syncLag = rawSyncLag
-		driftBlocks = 0
-		isTimeTravel = false
-	}
-
-	e2eLatencyDisplay, e2eLatencySeconds := calculateLatency(ctx, db, latestChainInt64, latestIndexedBlockInt64, latestIndexedBlock)
-
-	// 🚀 Local/Anvil/Replay Smoothing: Ignore astronomical latency
-	if chainID == 31337 && e2eLatencySeconds > 3600 {
-		e2eLatencyDisplay = "0.00s (Replay)"
-		e2eLatencySeconds = 0
-	}
-
-	status := make(map[string]interface{})
-	status["version"] = Version
-	status["state"] = engine.ModeActive
-	status["latest_block"] = fmt.Sprintf("%d", latestChainInt64)
-	status["latest_indexed"] = latestIndexedBlock
-	status["sync_lag"] = syncLag
-	// time_travel: indexer has processed blocks beyond the reported chain head.
-	// Caused by RPC node lag or stale HeightOracle (not a data integrity issue
-	// unless drift_blocks > drift_tolerance).
-	status["time_travel"] = isTimeTravel
-	status["drift_blocks"] = driftBlocks
-	// 🔥 实时查询总块数（避免使用过时的缓存值）
-	status["total_blocks"] = totalBlocksInDB
-	status["total_transfers"] = getCount(ctx, db, "SELECT COUNT(*) FROM transfers")
-	status["tps"] = calculateTPS(ctx, db)
-	status["is_catching_up"] = syncLag > 10
-	status["is_healthy"] = rpcPool.GetHealthyNodeCount() > 0
-	status["rpc_nodes"] = map[string]int{
-		"healthy": rpcPool.GetHealthyNodeCount(),
-		"total":   rpcPool.GetTotalNodeCount(),
-	}
-	status["e2e_latency_seconds"] = e2eLatencySeconds
-	status["e2e_latency_display"] = e2eLatencyDisplay
-
-	// 🎯 同步进度百分比计算（原子操作）
-	// 规则：分母必须 >= 分子，否则百分比无意义。
-	// 当 indexedHead > chainHead（时间旅行）时，进度视为 100%（已追上）。
-	// 当 chainHead == 0（冷启动）时，进度为 0%。
-	syncProgressPercent := 0.0
-	if latestChainInt64 > 0 && latestIndexedBlockInt64 > 0 {
-		if latestIndexedBlockInt64 >= latestChainInt64 {
-			syncProgressPercent = 100.0
-		} else {
-			syncProgressPercent = float64(latestIndexedBlockInt64) / float64(latestChainInt64) * 100.0
-		}
-	}
-	status["sync_progress_percent"] = syncProgressPercent
-
-	// f5: Standby 模式下标记数据为 stale，让前端区分缓存数据和实时数据。
-	// oracle_age_ms > 5000 表示 TailFollow 已超过 5 秒未更新链高度。
-	oracleAgeMs := time.Since(snap.UpdatedAt).Milliseconds()
-	if snap.UpdatedAt.IsZero() {
-		oracleAgeMs = -1 // 尚未初始化
-	}
-	status["height_oracle_age_ms"] = oracleAgeMs
-	status["data_is_stale"] = oracleAgeMs < 0 || oracleAgeMs > 5000
-
+	// 保持对 LazyManager 的特殊兼容 (如果存在)
 	if lazyManager != nil {
 		lazyStatus := lazyManager.GetStatus()
 		if mode, ok := lazyStatus["mode"].(string); ok {
 			status["state"] = mode
 			status["lazy_indexer"] = lazyStatus
-			// Standby 模式下数据必然是 stale 的
 			if mode == engine.ModeSleep {
 				status["data_is_stale"] = true
 			}

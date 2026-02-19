@@ -65,11 +65,11 @@ func Load() *Config {
 		}
 	}
 
-	const trueVal = "true"
+	const envTrue = "true"
 
 	// 明确模式
-	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == trueVal || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == trueVal
-	energySaving := strings.ToLower(os.Getenv("ENABLE_ENERGY_SAVING")) == trueVal
+	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == envTrue || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == envTrue
+	energySaving := strings.ToLower(os.Getenv("ENABLE_ENERGY_SAVING")) == envTrue
 	chainID := getEnvAsInt64("CHAIN_ID", 1)
 	networkMode := strings.ToLower(getEnv("NETWORK_MODE", "mainnet"))
 
@@ -77,7 +77,7 @@ func Load() *Config {
 	enableSimulatorStr := os.Getenv("ENABLE_SIMULATOR")
 	var enableSimulator bool
 	if enableSimulatorStr != "" {
-		enableSimulator = strings.EqualFold(enableSimulatorStr, trueVal)
+		enableSimulator = strings.EqualFold(enableSimulatorStr, envTrue)
 	} else {
 		// 默认逻辑：Demo 模式或本地 Anvil 自动开启
 		enableSimulator = demoMode || chainID == 31337
@@ -109,12 +109,12 @@ func Load() *Config {
 	maxSyncBatch := int(getEnvAsInt64("MAX_SYNC_BATCH", 20)) // 提高至 20 块，对抗 1.0 TPS 限制
 
 	// 🛡️ Deadlock watchdog 配置
-	deadlockWatchdogEnabled := strings.ToLower(os.Getenv("DEADLOCK_WATCHDOG_ENABLED")) == trueVal
+	deadlockWatchdogEnabled := strings.ToLower(os.Getenv("DEADLOCK_WATCHDOG_ENABLED")) == envTrue
 	deadlockStallThresholdSec := getEnvAsInt64("DEADLOCK_STALL_THRESHOLD_SECONDS", 120)
 	deadlockCheckIntervalSec := getEnvAsInt64("DEADLOCK_CHECK_INTERVAL_SECONDS", 30)
 
 	// 🔥 Anvil Lab Mode 配置
-	forceAlwaysActive := strings.ToLower(os.Getenv("FORCE_ALWAYS_ACTIVE")) == trueVal
+	forceAlwaysActive := strings.ToLower(os.Getenv("FORCE_ALWAYS_ACTIVE")) == envTrue
 
 	// Check if we're connecting to a testnet
 	isTestnet := false
@@ -170,20 +170,20 @@ func Load() *Config {
 		IsTestnet:          isTestnet,
 		MaxSyncBatch:       maxSyncBatch,
 		EnableEnergySaving: energySaving,
-		EnableRecording:    strings.ToLower(os.Getenv("ENABLE_RECORDING")) == trueVal,
+		EnableRecording:    strings.ToLower(os.Getenv("ENABLE_RECORDING")) == envTrue,
 		RecordingPath:      getEnv("RECORDING_PATH", "trajectory.lz4"),
 		// 🛡️ Deadlock watchdog: enabled for all networks
 		DeadlockWatchdogEnabled:   deadlockWatchdogEnabled,
 		DeadlockStallThresholdSec: deadlockStallThresholdSec,
 		DeadlockCheckIntervalSec:  deadlockCheckIntervalSec,
 		// 🔥 Anvil Lab Mode
-		ForceAlwaysActive: forceAlwaysActive,
-		StrictHeightCheck:  strings.ToLower(os.Getenv("STRICT_HEIGHT_CHECK")) != "false", // default true
-		DriftTolerance:     getEnvAsInt64("DRIFT_TOLERANCE", 5),
-		WatchedTokenAddresses:     watchedTokens,
-		TokenFilterMode:           getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
-		Port:                      getEnv("PORT", "8080"),
-		AppTitle:                  getEnv("APP_TITLE", "🚀 Web3 Indexer Dashboard"),
+		ForceAlwaysActive:     forceAlwaysActive,
+		StrictHeightCheck:     strings.ToLower(os.Getenv("STRICT_HEIGHT_CHECK")) != "false", // default true
+		DriftTolerance:        getEnvAsInt64("DRIFT_TOLERANCE", 5),
+		WatchedTokenAddresses: watchedTokens,
+		TokenFilterMode:       getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
+		Port:                  getEnv("PORT", "8080"),
+		AppTitle:              getEnv("APP_TITLE", "🚀 Web3 Indexer Dashboard"),
 	}
 
 	// 🚨 优先级锁定：优先信任显式传入的 RPC_URLS 环境变量

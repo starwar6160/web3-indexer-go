@@ -38,24 +38,24 @@ type IndexerConfig struct {
 	// SyncMode controls the overall resource/speed policy.
 	SyncMode SyncMode `json:"sync_mode"`
 
-	// RpcQuotaThreshold is the fraction of the sliding-window quota (0.0–1.0)
+	// RPCQuotaThreshold is the fraction of the sliding-window quota (0.0–1.0)
 	// at which the engine transitions from Balanced → Eco throttle.
 	// Corresponds to SlidingWindowLimiter.ecoThreshold.
 	// Default: 0.80 (enter Eco when 80% of per-minute quota is consumed).
-	RpcQuotaThreshold float64 `json:"rpc_quota_threshold"`
+	RPCQuotaThreshold float64 `json:"rpc_quota_threshold"`
 
-	// RpcBalancedThreshold is the fraction at which Aggressive → Balanced.
+	// RPCBalancedThreshold is the fraction at which Aggressive → Balanced.
 	// Default: 0.50.
-	RpcBalancedThreshold float64 `json:"rpc_balanced_threshold"`
+	RPCBalancedThreshold float64 `json:"rpc_balanced_threshold"`
 
-	// RpcWindowLimit is the maximum RPC requests allowed per RpcWindowDuration.
+	// RPCWindowLimit is the maximum RPC requests allowed per RPCWindowDuration.
 	// Set this to your provider's per-minute CU/request limit.
 	// Default: 300 (Alchemy free tier: 300 req/min on Sepolia).
-	RpcWindowLimit int `json:"rpc_window_limit"`
+	RPCWindowLimit int `json:"rpc_window_limit"`
 
-	// RpcWindowDuration is the quota measurement window.
+	// RPCWindowDuration is the quota measurement window.
 	// Default: 60s (matches most providers' reset period).
-	RpcWindowDuration time.Duration `json:"rpc_window_duration"`
+	RPCWindowDuration time.Duration `json:"rpc_window_duration"`
 
 	// MaxRPS is the hard ceiling on outbound RPC requests per second.
 	// The sliding window limiter's RecommendedRPS() will never exceed this.
@@ -107,10 +107,10 @@ type IndexerConfig struct {
 func DefaultConfig() IndexerConfig {
 	return IndexerConfig{
 		SyncMode:             SyncModeBalanced,
-		RpcQuotaThreshold:    0.80,
-		RpcBalancedThreshold: 0.50,
-		RpcWindowLimit:       300,
-		RpcWindowDuration:    60 * time.Second,
+		RPCQuotaThreshold:    0.80,
+		RPCBalancedThreshold: 0.50,
+		RPCWindowLimit:       300,
+		RPCWindowDuration:    60 * time.Second,
 		MaxRPS:               15.0,
 		IdleTimeout:          5 * time.Minute,
 		AnomalySensitivity:   1.0,
@@ -128,7 +128,7 @@ func DefaultConfig() IndexerConfig {
 func LocalLabConfig() IndexerConfig {
 	cfg := DefaultConfig()
 	cfg.SyncMode = SyncModeAggressive
-	cfg.RpcWindowLimit = 100000 // local node: effectively unlimited
+	cfg.RPCWindowLimit = 100000 // local node: effectively unlimited
 	cfg.MaxRPS = 500.0
 	cfg.IdleTimeout = 30 * time.Minute
 	cfg.FetcherConcurrency = 16
@@ -182,10 +182,10 @@ func NewConfigManagerFromEnv() *ConfigManager {
 	if v := os.Getenv("SYNC_MODE"); v != "" {
 		cfg.SyncMode = SyncMode(v)
 	}
-	if os.Getenv("ALWAYS_ACTIVE") == "true" {
+	if os.Getenv("ALWAYS_ACTIVE") == EnvTrue {
 		cfg.AlwaysActive = true
 	}
-	if os.Getenv("DEMO_MODE") == "true" {
+	if os.Getenv("DEMO_MODE") == EnvTrue {
 		cfg.DemoMode = true
 	}
 
@@ -214,7 +214,7 @@ func (cm *ConfigManager) Update(ctx context.Context, next IndexerConfig) error {
 
 	cm.logger.Info("config_updated",
 		slog.String("sync_mode", string(next.SyncMode)),
-		slog.Float64("rpc_quota_threshold", next.RpcQuotaThreshold),
+		slog.Float64("rpc_quota_threshold", next.RPCQuotaThreshold),
 		slog.Float64("max_rps", next.MaxRPS),
 		slog.Bool("always_active", next.AlwaysActive),
 	)
@@ -245,8 +245,8 @@ func (cm *ConfigManager) MarshalJSON() ([]byte, error) {
 // Call this when initialising or re-initialising the RPC pool.
 func (cm *ConfigManager) BuildSlidingWindowLimiter() *limiter.SlidingWindowLimiter {
 	cfg := cm.Get()
-	swl := limiter.NewSlidingWindowLimiter(cfg.RpcWindowLimit, cfg.RpcWindowDuration)
-	swl.SetThresholds(cfg.RpcBalancedThreshold, cfg.RpcQuotaThreshold)
+	swl := limiter.NewSlidingWindowLimiter(cfg.RPCWindowLimit, cfg.RPCWindowDuration)
+	swl.SetThresholds(cfg.RPCBalancedThreshold, cfg.RPCQuotaThreshold)
 	return swl
 }
 
@@ -260,17 +260,17 @@ func (cm *ConfigManager) AnomalyGapThreshold() int64 {
 
 // validateConfig checks for obviously invalid values.
 func validateConfig(cfg IndexerConfig) error {
-	if cfg.RpcQuotaThreshold <= 0 || cfg.RpcQuotaThreshold > 1.0 {
-		return errorf("rpc_quota_threshold must be in (0, 1], got %f", cfg.RpcQuotaThreshold)
+	if cfg.RPCQuotaThreshold <= 0 || cfg.RPCQuotaThreshold > 1.0 {
+		return errorf("rpc_quota_threshold must be in (0, 1], got %f", cfg.RPCQuotaThreshold)
 	}
-	if cfg.RpcBalancedThreshold <= 0 || cfg.RpcBalancedThreshold >= cfg.RpcQuotaThreshold {
-		return errorf("rpc_balanced_threshold must be in (0, rpc_quota_threshold), got %f", cfg.RpcBalancedThreshold)
+	if cfg.RPCBalancedThreshold <= 0 || cfg.RPCBalancedThreshold >= cfg.RPCQuotaThreshold {
+		return errorf("rpc_balanced_threshold must be in (0, rpc_quota_threshold), got %f", cfg.RPCBalancedThreshold)
 	}
 	if cfg.MaxRPS <= 0 {
 		return errorf("max_rps must be > 0, got %f", cfg.MaxRPS)
 	}
-	if cfg.RpcWindowLimit <= 0 {
-		return errorf("rpc_window_limit must be > 0, got %d", cfg.RpcWindowLimit)
+	if cfg.RPCWindowLimit <= 0 {
+		return errorf("rpc_window_limit must be > 0, got %d", cfg.RPCWindowLimit)
 	}
 	if cfg.FetcherConcurrency <= 0 {
 		return errorf("fetcher_concurrency must be > 0, got %d", cfg.FetcherConcurrency)

@@ -131,8 +131,8 @@ type ThrottleMode int
 
 const (
 	ThrottleAggressive ThrottleMode = iota // < 50% quota used: full speed
-	ThrottleBalanced                        // 50–80% quota used: dynamic BPS
-	ThrottleEco                             // > 80% quota used: minimal heartbeat
+	ThrottleBalanced                       // 50–80% quota used: dynamic BPS
+	ThrottleEco                            // > 80% quota used: minimal heartbeat
 )
 
 func (m ThrottleMode) String() string {

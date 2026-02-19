@@ -235,6 +235,12 @@ func (dw *DeadlockWatchdog) checkAndHeal(ctx context.Context) error {
 	Logger.Info("🔧 DeadlockWatchdog: Step 3/3: Buffer cleanup")
 	dw.sequencer.ClearBuffer()
 
+	// 🔥 SSOT: 通过 Orchestrator 更新系统状态（单一控制面）
+	orchestrator := GetOrchestrator()
+	if orchestrator != nil {
+		orchestrator.SetSystemState(SystemStateHealing)
+	}
+
 	// 🔧 Step 4/3 (补充): 重新调度 [dbHeight+1, rpcHeight] 范围的抓取任务。
 	// UpdateSyncCursor 只移动了 sync_checkpoints 游标，但 blocks 表里没有
 	// 对应行，GetMaxStoredBlock 仍会返回旧水位线（如 33490）。

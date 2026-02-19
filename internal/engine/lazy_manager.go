@@ -145,6 +145,12 @@ func (lm *LazyManager) Trigger() {
 		if lm.OnStatus != nil {
 			go lm.OnStatus(lm.getStatusLocked())
 		}
+
+		// 🔥 SSOT: 通过 Orchestrator 广播 Wake 事件（单一控制面）
+		orchestrator := GetOrchestrator()
+		if orchestrator != nil {
+			orchestrator.RecordUserActivity()
+		}
 	}
 }
 

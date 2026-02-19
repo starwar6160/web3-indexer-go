@@ -87,7 +87,7 @@ func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
 			"healthy": h.rpcPool.GetHealthyNodeCount(),
 			"total":   h.rpcPool.GetTotalNodeCount(),
 		},
-		"timestamp": time.Now().Format(time.RFC3339),
+		"timestamp":            time.Now().Format(time.RFC3339),
 		"height_oracle_age_ms": snap.UpdatedAt.UnixMilli(),
 	}
 
