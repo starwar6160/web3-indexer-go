@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -50,58 +51,44 @@ func (h *HealthServer) RegisterRoutes(mux *http.ServeMux) {
 
 // Status 返回索引器的实时运行状态
 func (h *HealthServer) Status(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	_, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// 1. 获取链上最新块
-	latestChainBlock, err := h.rpcPool.GetLatestBlockNumber(ctx)
-	if err != nil {
-		Logger.Error("failed_to_get_latest_block_in_health_status", "err", err)
-	}
+	// 🔥 横滨实验室：使用 HeightOracle 快照，确保一致性
+	snap := GetHeightOracle().Snapshot()
 
-	// 2. 获取索引器进度
-	var expectedBlock string
+	// 获取索引器进度
 	bufferSize := 0
 	if h.sequencer != nil {
-		expectedBlock = h.sequencer.GetExpectedBlock().String()
 		bufferSize = h.sequencer.GetBufferSize()
 	}
 
-	// 3. 计算延迟 (Sync Lag)
-	var syncLag int64
-	var timeTravel bool
-	if latestChainBlock != nil && h.sequencer != nil {
-		dbHeight := h.sequencer.GetExpectedBlock().Int64()
-		rpcHeight := latestChainBlock.Int64()
-		syncLag = rpcHeight - dbHeight
-
-		// 🚨 穿越判定：如果数据库跑到了链的前面
-		if dbHeight > rpcHeight {
-			timeTravel = true
-			Logger.Warn("🚨 CRITICAL: Time-travel detected! DB is ahead of Chain.",
-				"db_height", dbHeight,
-				"rpc_height", rpcHeight,
-				"diff", dbHeight-rpcHeight)
-		}
-	}
+	// 🔥 从快照读取数据，避免竞态条件
+	syncLag := snap.SyncLag
+	driftBlocks := snap.DriftBlocks
+	isTimeTravel := snap.IsTimeTravel
+	chainHead := snap.ChainHead
+	indexedHead := snap.IndexedHead
 
 	latestBlockStr := "0"
-	if latestChainBlock != nil {
-		latestBlockStr = latestChainBlock.String()
+	if chainHead > 0 {
+		latestBlockStr = fmt.Sprintf("%d", chainHead)
 	}
 
 	status := map[string]interface{}{
 		"is_healthy":         h.rpcPool.GetHealthyNodeCount() > 0,
 		"latest_chain_block": latestBlockStr,
-		"indexed_block":      expectedBlock,
+		"indexed_block":      fmt.Sprintf("%d", indexedHead),
 		"sync_lag":           syncLag,
-		"time_travel":        timeTravel, // 🚀 暴露给 UI 的穿越标志
+		"drift_blocks":       driftBlocks,
+		"time_travel":        isTimeTravel,
 		"buffer_size":        bufferSize,
 		"rpc_nodes": map[string]int{
 			"healthy": h.rpcPool.GetHealthyNodeCount(),
 			"total":   h.rpcPool.GetTotalNodeCount(),
 		},
 		"timestamp": time.Now().Format(time.RFC3339),
+		"height_oracle_age_ms": snap.UpdatedAt.UnixMilli(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

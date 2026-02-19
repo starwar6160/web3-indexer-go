@@ -47,6 +47,24 @@ type Fetcher struct {
 
 	headerOnlyMode bool          // 低成本模式：仅获取区块头，不获取Logs
 	recorder       *DataRecorder // 💾 原始数据录制器
+
+	// 🔥 横滨实验室：背压检测
+	sequencer *Sequencer // Sequencer 引用（用于检测 buffer 深度）
+}
+
+// 🔥 QueueDepth 返回队列深度（用于上游背压检测）
+func (f *Fetcher) QueueDepth() int {
+	return len(f.jobs)
+}
+
+// 🔥 ResultsDepth 返回结果通道深度（用于上游背压检测）
+func (f *Fetcher) ResultsDepth() int {
+	return len(f.Results)
+}
+
+// 🔥 SetSequencer 设置 Sequencer 引用（用于背压检测）
+func (f *Fetcher) SetSequencer(seq *Sequencer) {
+	f.sequencer = seq
 }
 
 // SetHeaderOnlyMode enables/disables low-cost mode

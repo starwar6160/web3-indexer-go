@@ -460,6 +460,10 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	sm.fetcher.Start(ctx, &wg)
 	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 1), nil, engine.GetMetrics())
 
+	// 🔥 横滨实验室：设置 Sequencer 引用到 Fetcher（用于背压检测）
+	sm.fetcher.SetSequencer(sequencer)
+	slog.Info("🔥 Backpressure sensing enabled: Fetcher → Sequencer linked")
+
 	// 🛡️ Deadlock Watchdog: enabled for all networks (Anvil, Sepolia, production).
 	// Enable() is now unconditional; the old chainID==31337 gate has been removed.
 	watchdog := engine.NewDeadlockWatchdog(

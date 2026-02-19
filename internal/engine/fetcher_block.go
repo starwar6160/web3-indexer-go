@@ -138,8 +138,23 @@ func (f *Fetcher) sendResult(ctx context.Context, data BlockData) {
 		}
 	}
 
+	// 🔥 横滨实验室：非阻塞写入，超时后丢弃遥测数据
+	// 解决 Eco-Mode 下协程泄露问题
+	sendTimeout := time.NewTimer(100 * time.Millisecond) // 100ms 超时
+	defer sendTimeout.Stop()
+
 	select {
 	case f.Results <- data:
+		// 成功发送
+	case <-sendTimeout.C:
+		// 超时：丢弃遥测数据，记录指标
+		if f.metrics != nil {
+			f.metrics.RecordFetcherJobFailed() // 记录丢弃的 job
+		}
+		slog.Warn("🔥 [Fetcher] sendResult TIMEOUT: dropping telemetry data",
+			"block_number", data.Number.String(),
+			"results_depth", len(f.Results),
+			"timeout_ms", 100)
 	case <-ctx.Done():
 	case <-f.stopCh:
 	}
