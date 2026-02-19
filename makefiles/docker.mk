@@ -1,7 +1,7 @@
 PROJECT_NAME=web3-indexer
 # --- 工业级双模流水线 (Local Dev + Docker Production) ---
 
-.PHONY: a1 a2 test-a1 test-a2 test-debug stop-all infra-up clean-testnet
+.PHONY: a1 a2 test-a1 test-a2 test-debug stop-all infra-up clean-testnet clean-state
 
 IMAGE_NAME=web3-indexer-go
 STAGING_TAG=latest
@@ -9,6 +9,11 @@ STABLE_TAG=stable
 
 INFRA_COMPOSE=configs/docker/docker-compose.infra.yml
 TESTNET_COMPOSE=configs/docker/docker-compose.testnet.yml
+
+# 🔥 新增：无状态清理目标
+clean-state:
+	@echo "🔄 完全清理系统状态（无状态模式）..."
+	@./scripts/clean-state.sh
 
 infra-up:
 	@echo "📦 Starting infrastructure (DB, Grafana, Prometheus)..."
@@ -51,9 +56,9 @@ test-a2: infra-up
 	PORT=8092 \
 	RPC_URLS="http://127.0.0.1:8545" \
 	CHAIN_ID=31337 \
-	START_BLOCK=$$ANVIL_HEIGHT \
+	START_BLOCK=latest \
 	DATABASE_URL="postgres://postgres:W3b3_Idx_Secur3_2026_Sec@127.0.0.1:15432/web3_demo?sslmode=disable" \
-	APP_TITLE="🧪 ANVIL-LOCAL (8092) [Block:$$ANVIL_HEIGHT]" \
+	APP_TITLE="🧪 ANVIL-LOCAL (8092) [Latest:$$ANVIL_HEIGHT]" \
 	DEMO_MODE=false \
 	ENABLE_SIMULATOR=true \
 	RPC_RATE_LIMIT=500 \
