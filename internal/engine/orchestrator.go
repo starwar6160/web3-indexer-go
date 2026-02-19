@@ -723,6 +723,18 @@ func (o *Orchestrator) RestoreState(state CoordinatorState) {
 		"eco_mode", state.IsEcoMode)
 }
 
+// ResetToZero 强制归零游标 (用于全内存模式或 Anvil 重置)
+func (o *Orchestrator) ResetToZero() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.state.SyncedCursor = 0
+	o.state.FetchedHeight = 0
+	o.state.LatestHeight = 0
+	o.state.TargetHeight = 0
+	o.snapshot = o.state
+	slog.Warn("🎼 Orchestrator: State reset to zero (EPHEMERAL_MODE)")
+}
+
 // Reset 重置协调器状态（仅用于测试）
 func (o *Orchestrator) Reset() {
 	o.mu.Lock()

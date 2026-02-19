@@ -181,7 +181,7 @@ func run() error {
 
 		// 🔥 横滨实验室：回放模式也启用异步落盘
 		orchestrator := engine.GetOrchestrator()
-		asyncWriter := engine.NewAsyncWriter(db, orchestrator)
+		asyncWriter := engine.NewAsyncWriter(db, orchestrator, cfg.EphemeralMode)
 		orchestrator.SetAsyncWriter(asyncWriter)
 		asyncWriter.Start()
 
@@ -484,7 +484,21 @@ func setupParentAnchor(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClien
 func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, lazyManager *engine.LazyManager, rpcPool engine.RPCClient, wsHub *web.Hub) {
 	var wg sync.WaitGroup
 	sm.fetcher.Start(ctx, &wg)
-	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 1), nil, engine.GetMetrics())
+	fatalErrCh := make(chan error, 1024)
+	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, fatalErrCh, nil, engine.GetMetrics())
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case err := <-fatalErrCh:
+				if err != nil {
+					slog.Error("🚨 [Sequencer] Fatal error reported", "err", err)
+				}
+			}
+		}
+	}()
 
 	// 🔥 横滨实验室：设置 Sequencer 引用到 Fetcher（用于背压检测）
 	sm.fetcher.SetSequencer(sequencer)
@@ -495,13 +509,19 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	orchestrator.Init(ctx, sm.fetcher, sequencer, sm.Processor, lazyManager, nil)
 	slog.Info("🎼 Orchestrator initialized: SSOT control plane active")
 
-	// 🚀 加载初始高度，避免 UI 显示为 0
-	if err := orchestrator.LoadInitialState(sm.db, cfg.ChainID); err != nil {
-		slog.Error("🎼 Orchestrator: Failed to load initial state", "err", err)
+	// 🚀 处理全内存模式与冷启动对齐
+	if cfg.EphemeralMode {
+		orchestrator.ResetToZero()
+		slog.Warn("🔥 EPHEMERAL_MODE ACTIVE: Starting from Block 0. No data will be saved to disk.")
+	} else {
+		// 加载初始高度，避免 UI 显示为 0
+		if err := orchestrator.LoadInitialState(sm.db, cfg.ChainID); err != nil {
+			slog.Error("🎼 Orchestrator: Failed to load initial state", "err", err)
+		}
 	}
 
 	// 🔥 横滨实验室：初始化异步写入器 (Muscle)
-	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator)
+	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator, cfg.EphemeralMode)
 	orchestrator.SetAsyncWriter(asyncWriter)
 	asyncWriter.Start()
 	slog.Info("🔥 AsyncWriter initialized and started: Yokohama Muscle Active")
@@ -591,7 +611,7 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 				// 🔥 SSOT: 通过 Orchestrator 更新链头（单一控制面）
 				orch := engine.GetOrchestrator()
 				orch.UpdateChainHead(tip.Uint64())
-				
+
 				// 🚀 获取考虑安全缓冲后的目标高度
 				snap := orch.GetSnapshot()
 				targetHeight := big.NewInt(int64(snap.TargetHeight))
@@ -611,6 +631,7 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 						"window", schedulingWindow.Int64())
 					if err := fetcher.Schedule(ctx, nextBlock, aggressiveTarget); err != nil {
 						slog.Error("🐕 [TailFollow] Failed to schedule", "err", err)
+						continue
 					}
 					lastScheduled.Set(targetHeight)
 				}

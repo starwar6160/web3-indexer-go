@@ -30,8 +30,9 @@ type AsyncWriter struct {
 	// 1. 输入通道：100,000 深度缓冲，利用 128G 内存彻底消除背压
 	taskChan chan PersistTask
 
-	db           *sqlx.DB
-	orchestrator *Orchestrator
+	db            *sqlx.DB
+	orchestrator  *Orchestrator
+	ephemeralMode bool // 🔥 新增：是否为全内存模式
 
 	// 2. 批处理配置
 	batchSize     int
@@ -48,13 +49,14 @@ type AsyncWriter struct {
 }
 
 // NewAsyncWriter 初始化
-func NewAsyncWriter(db *sqlx.DB, o *Orchestrator) *AsyncWriter {
+func NewAsyncWriter(db *sqlx.DB, o *Orchestrator, ephemeral bool) *AsyncWriter {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &AsyncWriter{
 		// 🚀 16G RAM 调优：提升至 15,000，给予消费端更多缓冲空间
 		taskChan:      make(chan PersistTask, 15000),
 		db:            db,
 		orchestrator:  o,
+		ephemeralMode: ephemeral,
 		batchSize:     200, // 🚀 16G RAM 调优：缩小批次，减少大事务对 I/O 的独占
 		flushInterval: 500 * time.Millisecond,
 		ctx:           ctx,
@@ -120,6 +122,26 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	}
 
 	start := time.Now()
+
+	// 🚀 🔥 Ephemeral Mode (内存黑洞模式)
+	if w.ephemeralMode {
+		maxHeight := uint64(0)
+		totalEvents := 0
+		for _, task := range batch {
+			if task.Height > maxHeight {
+				maxHeight = task.Height
+			}
+			totalEvents += len(task.Transfers)
+			GetMetrics().RecordBlockActivity(1)
+		}
+		
+		// 仍然更新内存水位线和视觉进度
+		w.diskWatermark.Store(maxHeight)
+		w.orchestrator.AdvanceDBCursor(maxHeight)
+		w.orchestrator.DispatchLog("INFO", "🔥 Ephemeral Flush: Metadata Ignored", "height", maxHeight, "dropped_events", totalEvents)
+		return
+	}
+
 	// 开启高性能事务
 	tx, err := w.db.BeginTxx(w.ctx, nil)
 	if err != nil {
@@ -133,9 +155,9 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	}()
 
 	var (
-		maxHeight      uint64 = 0
-		totalTransfers        = 0
-		validBlocks           = 0
+		maxHeight         uint64 = 0
+		totalTransfers           = 0
+		validBlocks              = 0
 		blocksToInsert    []models.Block
 		transfersToInsert []models.Transfer
 	)
@@ -148,32 +170,33 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		// 🚀 即使是空块，也记录处理活动，确保 BPS 指标真实反映同步速度
 		GetMetrics().RecordBlockActivity(1)
 
-		// 🚀 核心优化：空块过滤
-		// 在 Anvil 环境中，95% 以上的块是空的。跳过这些块的 DB 写入可极大提升性能。
-		if len(task.Transfers) == 0 {
-			continue
-		}
-
+		// ✅ 必须始终写入区块元数据（即使空块）
+		// 否则 /api/blocks 会长期停留在旧高度，造成 UI 与链上高度严重不一致。
 		validBlocks++
-		totalTransfers += len(task.Transfers)
 		blocksToInsert = append(blocksToInsert, task.Block)
-		transfersToInsert = append(transfersToInsert, task.Transfers...)
+
+		if len(task.Transfers) > 0 {
+			totalTransfers += len(task.Transfers)
+			transfersToInsert = append(transfersToInsert, task.Transfers...)
+		}
 	}
 
 	if validBlocks > 0 {
 		// 🚀 使用 BulkInserter (COPY 协议) 进行物理落盘
 		inserter := NewBulkInserter(w.db)
-		
+
 		// 1. 批量写入区块
 		if err := inserter.InsertBlocksBatchTx(w.ctx, tx, blocksToInsert); err != nil {
 			slog.Error("📝 AsyncWriter: Bulk insert blocks failed", "err", err)
 			return
 		}
 
-		// 2. 批量写入转账
-		if err := inserter.InsertTransfersBatchTx(w.ctx, tx, transfersToInsert); err != nil {
-			slog.Error("📝 AsyncWriter: Bulk insert transfers failed", "err", err)
-			return
+		// 2. 批量写入转账（有数据时才写）
+		if len(transfersToInsert) > 0 {
+			if err := inserter.InsertTransfersBatchTx(w.ctx, tx, transfersToInsert); err != nil {
+				slog.Error("📝 AsyncWriter: Bulk insert transfers failed", "err", err)
+				return
+			}
 		}
 	}
 

@@ -35,6 +35,7 @@ type Config struct {
 	EnableEnergySaving bool          // 是否开启节能模式（懒惰模式）
 	EnableRecording    bool          // 🚀 新增：是否开启 LZ4 录制
 	RecordingPath      string        // 🚀 新增：录制文件路径
+	EphemeralMode      bool          // 🔥 新增：全内存模式，不写入数据库
 
 	// 🛡️ Deadlock watchdog config
 	DeadlockWatchdogEnabled   bool  // 死锁看门狗开关
@@ -172,6 +173,7 @@ func Load() *Config {
 		EnableEnergySaving: energySaving,
 		EnableRecording:    strings.ToLower(os.Getenv("ENABLE_RECORDING")) == envTrue,
 		RecordingPath:      getEnv("RECORDING_PATH", "trajectory.lz4"),
+		EphemeralMode:      strings.ToLower(os.Getenv("EPHEMERAL_MODE")) == envTrue,
 		// 🛡️ Deadlock watchdog: enabled for all networks
 		DeadlockWatchdogEnabled:   deadlockWatchdogEnabled,
 		DeadlockStallThresholdSec: deadlockStallThresholdSec,
