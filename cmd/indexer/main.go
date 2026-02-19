@@ -179,6 +179,12 @@ func run() error {
 		}
 		processor := engine.NewProcessor(db, nil, 100, cfg.ChainID, false, "replay")
 
+		// 🔥 横滨实验室：回放模式也启用异步落盘
+		orchestrator := engine.GetOrchestrator()
+		asyncWriter := engine.NewAsyncWriter(db, orchestrator)
+		orchestrator.SetAsyncWriter(asyncWriter)
+		asyncWriter.Start()
+
 		slog.Info("🏁 System starting in REPLAY mode.")
 		if err := RunReplayMode(ctx, *replayFile, *replaySpeed, processor); err != nil {
 			slog.Error("Replay failed", "err", err)
@@ -249,24 +255,21 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	// 应用性能配置
 	concurrency := cfg.FetchConcurrency
 	tpsLimit := cfg.RPCRateLimit
-	batchSize := cfg.MaxSyncBatch
 
 	if perfProfile.EnableAggressiveBatch {
 		// 🔥 横滨实验室极限性能配置
 		concurrency = perfProfile.FetchConcurrency
 		tpsLimit = int(perfProfile.TPSLimit)
-		batchSize = perfProfile.BatchSize
 		slog.Info("🔥 YOKOHAMA LAB PROFILE ACTIVATED",
 			"concurrency", concurrency,
 			"tps_limit", tpsLimit,
-			"batch_size", batchSize,
+			"batch_size", perfProfile.BatchSize,
 			"channel_buffer", perfProfile.ChannelBufferSize,
 		)
 	} else if cfg.IsTestnet {
 		// 🛡️ Sepolia 生产环境：极度保守
 		concurrency = 1
 		tpsLimit = 1
-		batchSize = 1
 		slog.Info("🛡️ Quota protection ACTIVE: Enforcing 1.0 TPS strict serial sync")
 	}
 
@@ -327,6 +330,29 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	engine.GetMetrics().SetLabMode(labModeEnabled)
 
 	lazyManager.StartMonitor(ctx)
+
+	// 🎼 SSOT: 订阅 Orchestrator 状态快照，通过 WS 广播
+	orchestrator := engine.GetOrchestrator()
+	snapshotCh := orchestrator.Subscribe()
+	go func() {
+		for snapshot := range snapshotCh {
+			// 将 CoordinatorState 转换为 WS 事件
+			wsEvent := web.WSEvent{
+				Type: "status_update",
+				Data: map[string]interface{}{
+					"latest_height": snapshot.LatestHeight,
+					"synced_cursor": snapshot.SyncedCursor,
+					"transfers":     snapshot.Transfers,
+					"is_eco_mode":   snapshot.IsEcoMode,
+					"progress":      snapshot.Progress,
+					"system_state":  snapshot.SystemState.String(),
+					"updated_at":    snapshot.UpdatedAt.Format(time.RFC3339),
+					"sync_lag":      snapshot.LatestHeight - snapshot.SyncedCursor,
+				},
+			}
+			wsHub.Broadcast(wsEvent)
+		}
+	}()
 
 	// 🚀 Real-time status broadcasting
 	lazyManager.OnStatus = func(status map[string]interface{}) {
@@ -464,6 +490,17 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	sm.fetcher.SetSequencer(sequencer)
 	slog.Info("🔥 Backpressure sensing enabled: Fetcher → Sequencer linked")
 
+	// 🎼 SSOT: 初始化 Orchestrator（单一控制面）
+	orchestrator := engine.GetOrchestrator()
+	orchestrator.Init(ctx, sm.fetcher, sequencer, sm.Processor, lazyManager, nil)
+	slog.Info("🎼 Orchestrator initialized: SSOT control plane active")
+
+	// 🔥 横滨实验室：初始化异步写入器 (Muscle)
+	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator)
+	orchestrator.SetAsyncWriter(asyncWriter)
+	asyncWriter.Start()
+	slog.Info("🔥 AsyncWriter initialized and started: Yokohama Muscle Active")
+
 	// 🛡️ Deadlock Watchdog: enabled for all networks (Anvil, Sepolia, production).
 	// Enable() is now unconditional; the old chainID==31337 gate has been removed.
 	watchdog := engine.NewDeadlockWatchdog(
@@ -540,24 +577,33 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 				if tickCount%10 == 1 {
 					slog.Warn("🐕 [TailFollow] Failed to get tip", "err", err)
 				}
-			} else if tip.Cmp(lastScheduled) > 0 {
-				// 🚀 Update HeightOracle (single source of truth for chain head).
-				// This also keeps Metrics.lastChainHeight in sync via SetChainHead().
-				engine.GetHeightOracle().SetChainHead(tip.Int64())
+			} else {
+				// 🔥 SSOT: 通过 Orchestrator 更新链头（单一控制面）
+				orch := engine.GetOrchestrator()
+				orch.UpdateChainHead(tip.Uint64())
+				
+				// 🚀 获取考虑安全缓冲后的目标高度
+				snap := orch.GetSnapshot()
+				targetHeight := big.NewInt(int64(snap.TargetHeight))
 
-				// 🔥 滑动时间窗口批处理：调度 lastScheduled+1 到 tip+schedulingWindow
-				// 这确保了即使 Anvil 高速出块，Fetcher 也能获取足够大的批次
-				nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
-				aggressiveTip := new(big.Int).Add(tip, schedulingWindow)
+				if targetHeight.Cmp(lastScheduled) > 0 {
+					slog.Debug("🎼 [TailFollow] Chain head update dispatched", "tip", tip.String(), "target", targetHeight.String())
 
-				slog.Info("🐕 [TailFollow] Scheduling new range",
-					"from", nextBlock.String(),
-					"to", aggressiveTip.String(),
-					"window", schedulingWindow.Int64())
-				if err := fetcher.Schedule(ctx, nextBlock, aggressiveTip); err != nil {
-					slog.Error("🐕 [TailFollow] Failed to schedule", "err", err)
+					// 🔥 滑动时间窗口批处理：调度 lastScheduled+1 到 targetHeight+schedulingWindow
+					// 这确保了即便有安全垫，也能批量调度
+					nextBlock := new(big.Int).Add(lastScheduled, big.NewInt(1))
+					aggressiveTarget := new(big.Int).Add(targetHeight, schedulingWindow)
+
+					slog.Info("🐕 [TailFollow] Scheduling new range",
+						"from", nextBlock.String(),
+						"to", aggressiveTarget.String(),
+						"target", targetHeight.String(),
+						"window", schedulingWindow.Int64())
+					if err := fetcher.Schedule(ctx, nextBlock, aggressiveTarget); err != nil {
+						slog.Error("🐕 [TailFollow] Failed to schedule", "err", err)
+					}
+					lastScheduled.Set(targetHeight)
 				}
-				lastScheduled.Set(tip)
 			}
 		}
 	}

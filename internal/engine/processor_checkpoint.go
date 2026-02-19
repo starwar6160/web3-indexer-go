@@ -59,8 +59,7 @@ func (p *Processor) updateCheckpointInTx(ctx context.Context, tx *sqlx.Tx, chain
 		p.metrics.RecordCheckpointUpdate()
 	}
 
-	// Keep HeightOracle in sync so /api/status reads a consistent snapshot
-	// without making a live RPC call.
+	// Keep HeightOracle in sync for backward compatibility
 	GetHeightOracle().SetIndexedHead(syncedBlock)
 
 	return nil

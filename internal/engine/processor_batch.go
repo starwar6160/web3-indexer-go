@@ -2,29 +2,23 @@ package engine
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"log/slog"
 	"math/big"
 	"strings"
+	"time"
 	"web3-indexer-go/internal/models"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/jmoiron/sqlx"
 )
 
 const networkAnvil = "anvil"
 
-// ProcessBatch 批量处理多个区块（用于历史数据同步优化）
+// ProcessBatch 批量处理多个区块 (横滨实验室异步落盘版)
 func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainID int64) error {
 	if len(blocks) == 0 {
 		return nil
 	}
-
-	// 收集有效的 blocks and transfers
-	validBlocks := make([]models.Block, 0, len(blocks))
-	validTransfers := []models.Transfer{}
 
 	for _, data := range blocks {
 		if data.Err != nil || data.Block == nil {
@@ -32,101 +26,60 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 		}
 
 		block := data.Block
-		validBlocks = append(validBlocks, models.Block{
-			Number:     models.BigInt{Int: block.Number()},
-			Hash:       block.Hash().Hex(),
-			ParentHash: block.ParentHash().Hex(),
-			Timestamp:  block.Time(),
-		})
+		blockNum := block.Number()
 
-		// 处理该区块的活动
-		txWithRealLogs := p.processBatchLogs(data, &validTransfers)
-		p.processBatchTransactions(block, chainID, txWithRealLogs, &validTransfers)
-		p.processBatchSynthetic(block, chainID, &validTransfers)
-	}
+		// 1. 提取活动 (内存提取)
+		txWithRealLogs := make(map[string]bool)
+		activities := []models.Transfer{}
 
-	if len(validBlocks) == 0 {
-		return nil
-	}
-
-	dbTx, err := p.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return fmt.Errorf("failed to begin batch transaction: %w", err)
-	}
-	defer func() {
-		if rollbackErr := dbTx.Rollback(); rollbackErr != nil && rollbackErr != sql.ErrTxDone {
-			Logger.Warn("batch_rollback_failed", "err", rollbackErr)
-		}
-	}()
-
-	if err := p.insertBatchData(ctx, dbTx, validBlocks, validTransfers); err != nil {
-		return err
-	}
-
-	// 🚀 防御性检查：查找最后一个有效的 block 更新 checkpoint
-	var lastValidBlock *types.Block
-	for i := len(blocks) - 1; i >= 0; i-- {
-		if blocks[i].Block != nil {
-			lastValidBlock = blocks[i].Block
-			break
-		}
-	}
-
-	if lastValidBlock != nil {
-		if err := p.updateCheckpointInTx(ctx, dbTx, chainID, lastValidBlock.Number()); err != nil {
-			return fmt.Errorf("batch checkpoint update failed: %w", err)
-		}
-		p.blocksSinceLastCheckpoint = 0
-	}
-
-	if err := dbTx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit batch transaction: %w", err)
-	}
-
-	// 🚀 物理直连：将处理完的转账数据灌入内存热池
-	if p.hotBuffer != nil {
-		for _, t := range validTransfers {
-			p.hotBuffer.Add(t)
-		}
-	}
-
-	// 🚀 物理分发：如果配置了 DataSink (如 LZ4 录制), 则进行分发
-	if p.sink != nil {
-		_ = p.sink.WriteBlocks(ctx, validBlocks) // nolint:errcheck // secondary sink failure shouldn't block main flow
-		if len(validTransfers) > 0 {
-			_ = p.sink.WriteTransfers(ctx, validTransfers) // nolint:errcheck // secondary sink failure shouldn't block main flow
-		}
-	}
-
-	p.broadcastBatchEvents(blocks, validTransfers)
-	p.updateBatchMetrics(blocks)
-
-	return nil
-}
-
-func (p *Processor) processBatchLogs(data BlockData, validTransfers *[]models.Transfer) map[string]bool {
-	txWithRealLogs := make(map[string]bool)
-	for _, vLog := range data.Logs {
-		if len(vLog.Topics) == 0 {
-			continue
-		}
-		logAddrLow := strings.ToLower(vLog.Address.Hex())
-		isMatched := false
-		for addr := range p.watchedAddresses {
-			if strings.ToLower(addr.Hex()) == logAddrLow {
-				isMatched = true
-				break
-			}
-		}
-		if isMatched || len(p.watchedAddresses) == 0 {
+		// 提取 Logs
+		for _, vLog := range data.Logs {
 			activity := p.ProcessLog(vLog)
 			if activity != nil {
-				*validTransfers = append(*validTransfers, *activity)
+				activities = append(activities, *activity)
 				txWithRealLogs[activity.TxHash] = true
 			}
 		}
+
+		// 提取 Transactions (Deploy, ETH transfer, etc.)
+		p.processBatchTransactions(block, chainID, txWithRealLogs, &activities)
+
+		// Anvil 模拟数据
+		p.processBatchSynthetic(block, chainID, &activities)
+
+		// 2. 构建 PersistTask
+		var baseFee *models.BigInt
+		if block.BaseFee() != nil {
+			baseFee = &models.BigInt{Int: block.BaseFee()}
+		}
+		mBlock := models.Block{
+			Number:           models.BigInt{Int: block.Number()},
+			Hash:             block.Hash().Hex(),
+			ParentHash:       block.ParentHash().Hex(),
+			Timestamp:        block.Time(),
+			GasLimit:         block.GasLimit(),
+			GasUsed:          block.GasUsed(),
+			BaseFeePerGas:    baseFee,
+			TransactionCount: len(block.Transactions()),
+		}
+
+		task := PersistTask{
+			Height:    blockNum.Uint64(),
+			Block:     mBlock,
+			Transfers: activities,
+			Sequence:  uint64(time.Now().UnixNano()),
+		}
+
+		// 3. 核心分发 (SSOT)
+		GetOrchestrator().Dispatch(CmdCommitBatch, task)
+
+		// 4. 事件推送 (UI 即时响应)
+		p.pushEvents(block, activities, nil)
 	}
-	return txWithRealLogs
+
+	p.updateBatchMetrics(blocks)
+
+	return nil
 }
 
 func (p *Processor) processBatchTransactions(block *types.Block, chainID int64, txWithRealLogs map[string]bool, validTransfers *[]models.Transfer) {
@@ -220,58 +173,6 @@ func (p *Processor) processBatchSynthetic(block *types.Block, chainID int64, val
 			slog.String("to", mockTo),
 			slog.String("amount", mockAmount.String()),
 		)
-	}
-}
-
-func (p *Processor) insertBatchData(ctx context.Context, dbTx *sqlx.Tx, blocks []models.Block, transfers []models.Transfer) error {
-	inserter := NewBulkInserter(p.db)
-	if err := inserter.InsertBlocksBatchTx(ctx, dbTx, blocks); err != nil {
-		return fmt.Errorf("batch insert blocks failed: %w", err)
-	}
-
-	if len(transfers) > 0 {
-		_, err := dbTx.NamedExecContext(ctx, `
-			INSERT INTO transfers
-			(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
-			VALUES
-			(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
-			ON CONFLICT (block_number, log_index) DO NOTHING
-		`, transfers)
-		if err != nil {
-			return fmt.Errorf("batch insert activities failed: %w", err)
-		}
-	}
-	return nil
-}
-
-func (p *Processor) broadcastBatchEvents(blocks []BlockData, transfers []models.Transfer) {
-	if p.EventHook == nil {
-		return
-	}
-	for _, data := range blocks {
-		if data.Block == nil {
-			continue
-		}
-		block := data.Block
-		p.EventHook("block", map[string]interface{}{
-			"number":    block.NumberU64(),
-			"hash":      block.Hash().Hex(),
-			"timestamp": block.Time(),
-			"tx_count":  len(block.Transactions()),
-		})
-	}
-	for _, t := range transfers {
-		p.EventHook("transfer", map[string]interface{}{
-			"tx_hash":       t.TxHash,
-			"from":          t.From,
-			"to":            t.To,
-			"value":         t.Amount.String(),
-			"block_number":  t.BlockNumber.String(),
-			"token_address": t.TokenAddress,
-			"symbol":        t.Symbol,
-			"type":          t.Type,
-			"log_index":     t.LogIndex,
-		})
 	}
 }
 

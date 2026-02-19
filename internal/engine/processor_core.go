@@ -234,6 +234,11 @@ func (p *Processor) SetWatchedAddresses(addresses []string) {
 	}
 }
 
+// GetDB returns the underlying sqlx.DB instance
+func (p *Processor) GetDB() *sqlx.DB {
+	return p.db
+}
+
 // GetRPCClient returns the RPC client used by the processor
 func (p *Processor) GetRPCClient() RPCClient {
 	return p.client

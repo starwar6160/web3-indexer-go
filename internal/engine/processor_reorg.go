@@ -117,6 +117,9 @@ func (p *Processor) HandleDeepReorg(ctx context.Context, blockNum *big.Int) (*bi
 		return nil, fmt.Errorf("failed to commit reorg transaction: %w", err)
 	}
 
+	// 🔥 SSOT: 通过 Orchestrator 强制重置游标 (单一控制面)
+	GetOrchestrator().Dispatch(CmdResetCursor, ancestorNum.Uint64())
+
 	Logger.Info("deep_reorg_handled",
 		slog.String("resume_block", new(big.Int).Add(ancestorNum, big.NewInt(1)).String()),
 	)
