@@ -101,71 +101,26 @@ func (s *Sequencer) handleBlock(ctx context.Context, data BlockData) error {
 }
 
 func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error {
-	blockNum := data.Number
-	if blockNum == nil && data.Block != nil {
-		blockNum = data.Block.Number()
-	}
-	blockLabel := "<nil>"
-	if blockNum != nil {
-		blockLabel = blockNum.String()
-	}
+	blockNum := s.resolveBlockNum(data)
+	blockLabel := s.blockLabel(blockNum)
 
-	// Handle pure range progress signal only when there is no concrete block number.
-	// Normal empty-block items still carry Number and must not teleport expectedBlock.
-	if blockNum == nil && data.Block == nil && data.RangeEnd != nil && data.Err == nil {
-		if data.RangeEnd.Cmp(s.expectedBlock) >= 0 {
-			// Teleport progress forward
-			nextBlock := new(big.Int).Add(data.RangeEnd, big.NewInt(1))
-			s.expectedBlock.Set(nextBlock)
-			s.lastProgressAt = time.Now()
-			Logger.Debug("sequencer_range_teleport",
-				slog.String("from", s.expectedBlock.String()),
-				slog.String("to", data.RangeEnd.String()))
-			s.processBufferContinuationsLocked(ctx)
-		}
+	if s.handleRangeTeleportLocked(ctx, data, blockNum) {
 		return nil
 	}
 
+	data = s.retryFetchIfNeededLocked(ctx, data, blockNum, blockLabel)
 	if data.Err != nil {
-		Logger.Warn("sequencer_fetch_error_retrying", slog.String("block", blockLabel))
-		if blockNum != nil {
-			var err error
-			rpcClient := s.processor.GetRPCClient()
-			data.Block, err = rpcClient.BlockByNumber(ctx, blockNum)
-			if err == nil {
-				q := ethereum.FilterQuery{FromBlock: blockNum, ToBlock: blockNum, Topics: [][]common.Hash{{TransferEventHash}}}
-				data.Logs, err = rpcClient.FilterLogs(ctx, q)
-				if err == nil {
-					data.Err = nil
-					Logger.Info("sequencer_retry_success", slog.String("block", blockNum.String()))
-				}
-			}
-		}
-		if data.Err != nil {
-			// 🚀 🔥 资深修复：不返回错误，仅记录警告并允许继续循环。
-			// 这样可以让系统保持运行，依靠 handleStall 进行自愈或在下个批次重试。
-			Logger.Warn("⚠️ Sequencer: temporary fetch failure, holding block",
-				slog.String("block", blockLabel),
-				slog.String("err", data.Err.Error()))
-			return nil
-		}
+		return nil
 	}
 
-	// Empty blocks may arrive without hydrated Block object.
-	// Fetch the header lazily so sequential processing can still advance per block.
-	if data.Block == nil {
-		if blockNum == nil {
-			return nil
+	if !s.hydrateBlockIfNeededLocked(ctx, &data, blockNum, blockLabel) {
+		// Hydration failed but we still have a valid block number
+		// Buffer the data anyway for gap bypass to work
+		if blockNum != nil && blockNum.Cmp(s.expectedBlock) > 0 {
+			s.buffer[blockNum.String()] = data
+			s.enforceBufferLimitLocked()
 		}
-		rpcClient := s.processor.GetRPCClient()
-		block, err := rpcClient.BlockByNumber(ctx, blockNum)
-		if err != nil {
-			Logger.Warn("sequencer_block_refetch_failed",
-				slog.String("block", blockLabel),
-				slog.String("err", err.Error()))
-			return nil
-		}
-		data.Block = block
+		return nil
 	}
 
 	blockNum = data.Block.Number()
@@ -182,32 +137,124 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 	}
 
 	s.buffer[blockNum.String()] = data
+	s.enforceBufferLimitLocked()
+	return nil
+}
 
-	// 🔥 Anvil 环境使用更大的 buffer 限制（利用 16G/128G RAM）
+func (s *Sequencer) resolveBlockNum(data BlockData) *big.Int {
+	if data.Number != nil {
+		return data.Number
+	}
+	if data.Block != nil {
+		return data.Block.Number()
+	}
+	return nil
+}
+
+func (s *Sequencer) blockLabel(blockNum *big.Int) string {
+	if blockNum == nil {
+		return "<nil>"
+	}
+	return blockNum.String()
+}
+
+func (s *Sequencer) handleRangeTeleportLocked(ctx context.Context, data BlockData, blockNum *big.Int) bool {
+	if blockNum != nil || data.Block != nil || data.RangeEnd == nil || data.Err != nil {
+		return false
+	}
+	if data.RangeEnd.Cmp(s.expectedBlock) < 0 {
+		return true
+	}
+	nextBlock := new(big.Int).Add(data.RangeEnd, big.NewInt(1))
+	s.expectedBlock.Set(nextBlock)
+	s.lastProgressAt = time.Now()
+	Logger.Debug("sequencer_range_teleport",
+		slog.String("from", s.expectedBlock.String()),
+		slog.String("to", data.RangeEnd.String()))
+	s.processBufferContinuationsLocked(ctx)
+	return true
+}
+
+func (s *Sequencer) retryFetchIfNeededLocked(ctx context.Context, data BlockData, blockNum *big.Int, blockLabel string) BlockData {
+	if data.Err == nil {
+		return data
+	}
+	Logger.Warn("sequencer_fetch_error_retrying", slog.String("block", blockLabel))
+	if blockNum == nil {
+		return data
+	}
+	if s.processor == nil {
+		return data
+	}
+	rpcClient := s.processor.GetRPCClient()
+	if rpcClient == nil {
+		return data
+	}
+	block, err := rpcClient.BlockByNumber(ctx, blockNum)
+	if err != nil {
+		return data
+	}
+	q := ethereum.FilterQuery{FromBlock: blockNum, ToBlock: blockNum, Topics: [][]common.Hash{{TransferEventHash}}}
+	logs, err := rpcClient.FilterLogs(ctx, q)
+	if err != nil {
+		return data
+	}
+	data.Block = block
+	data.Logs = logs
+	data.Err = nil
+	Logger.Info("sequencer_retry_success", slog.String("block", blockNum.String()))
+	return data
+}
+
+func (s *Sequencer) hydrateBlockIfNeededLocked(ctx context.Context, data *BlockData, blockNum *big.Int, blockLabel string) bool {
+	if data.Block != nil {
+		return true
+	}
+	if blockNum == nil {
+		return false
+	}
+	if s.processor == nil {
+		return false
+	}
+	rpcClient := s.processor.GetRPCClient()
+	if rpcClient == nil {
+		return false
+	}
+	block, err := rpcClient.BlockByNumber(ctx, blockNum)
+	if err != nil {
+		Logger.Warn("sequencer_block_refetch_failed",
+			slog.String("block", blockLabel),
+			slog.String("err", err.Error()))
+		return false
+	}
+	data.Block = block
+	return true
+}
+
+func (s *Sequencer) enforceBufferLimitLocked() {
 	bufferLimit := 1000
 	if s.chainID == 31337 {
 		bufferLimit = 50000
 	}
-
-	if len(s.buffer) > bufferLimit {
-		// 🚀 不崩溃，而是跳过 gap 到最小缓冲块
-		var minBuffered *big.Int
-		for numStr := range s.buffer {
-			if n, ok := new(big.Int).SetString(numStr, 10); ok {
-				if minBuffered == nil || n.Cmp(minBuffered) < 0 {
-					minBuffered = n
-				}
+	if len(s.buffer) <= bufferLimit {
+		return
+	}
+	var minBuffered *big.Int
+	for numStr := range s.buffer {
+		if n, ok := new(big.Int).SetString(numStr, 10); ok {
+			if minBuffered == nil || n.Cmp(minBuffered) < 0 {
+				minBuffered = n
 			}
 		}
-		if minBuffered != nil {
-			Logger.Warn("🚧 BUFFER_OVERFLOW_SKIP: Jumping expectedBlock to min buffered",
-				slog.String("old_expected", s.expectedBlock.String()),
-				slog.String("new_expected", minBuffered.String()),
-				slog.Int("buffer_size", len(s.buffer)))
-			s.expectedBlock.Set(minBuffered)
-			s.buffer = make(map[string]BlockData) // 清空 buffer，重新收集
-			s.lastProgressAt = time.Now()
-		}
 	}
-	return nil
+	if minBuffered == nil {
+		return
+	}
+	Logger.Warn("🚧 BUFFER_OVERFLOW_SKIP: Jumping expectedBlock to min buffered",
+		slog.String("old_expected", s.expectedBlock.String()),
+		slog.String("new_expected", minBuffered.String()),
+		slog.Int("buffer_size", len(s.buffer)))
+	s.expectedBlock.Set(minBuffered)
+	s.buffer = make(map[string]BlockData)
+	s.lastProgressAt = time.Now()
 }

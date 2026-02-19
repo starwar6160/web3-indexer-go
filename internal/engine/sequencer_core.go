@@ -153,8 +153,8 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 					}
 				}()
 				s.gapFillCount++
-			} else if bufferLen > 0 {
-				// 🚀 强制空洞跳过（Forced Gap Bypass）
+			} else {
+				// 🚀 强制空洞跳过（Forced Gap Bypass）- 适用于 nil fetcher 或重试耗尽
 				// 设计理念：在博彩/交易系统中，"阻塞（Stall）"比"延迟"更可怕
 				// 让流水线继续流，把缺失的块标记为"待补偿"
 				// 注意：lastProgressAt 必须在修改 expectedBlock 之前重置
