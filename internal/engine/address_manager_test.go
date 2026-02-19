@@ -121,19 +121,22 @@ func TestAddressManager_GetStats(t *testing.T) {
 	am.GetLabel("0x1234567890123456789012345678901234567890") // miss
 	
 	stats := am.GetStats()
-	
-	if stats["total_labels"].(int) == 0 {
+
+	totalLabels, ok := stats["total_labels"].(int)
+	if !ok || totalLabels == 0 {
 		t.Error("AI_FIX_REQUIRED: Total labels should be > 0")
 	}
-	
-	if stats["hits"].(int64) == 0 {
+
+	hits, ok := stats["hits"].(int64)
+	if !ok || hits == 0 {
 		t.Error("AI_FIX_REQUIRED: Should have at least 1 hit")
 	}
-	
-	if stats["misses"].(int64) == 0 {
+
+	misses, ok := stats["misses"].(int64)
+	if !ok || misses == 0 {
 		t.Error("AI_FIX_REQUIRED: Should have at least 1 miss")
 	}
 	
 	t.Logf("✅ SUCCESS: Stats correct - Labels: %d, Hits: %d, Misses: %d, Hit Rate: %.1f%%",
-		stats["total_labels"], stats["hits"], stats["misses"], stats["hit_rate"])
+		totalLabels, hits, misses, stats["hit_rate"])
 }
