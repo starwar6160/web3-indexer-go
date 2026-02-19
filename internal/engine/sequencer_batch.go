@@ -105,16 +105,21 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 	if blockNum == nil && data.Block != nil {
 		blockNum = data.Block.Number()
 	}
+	blockLabel := "<nil>"
+	if blockNum != nil {
+		blockLabel = blockNum.String()
+	}
 
-	// Handle pure Range progress signal (empty blocks)
-	if data.Block == nil && data.RangeEnd != nil && data.Err == nil {
+	// Handle pure range progress signal only when there is no concrete block number.
+	// Normal empty-block items still carry Number and must not teleport expectedBlock.
+	if blockNum == nil && data.Block == nil && data.RangeEnd != nil && data.Err == nil {
 		if data.RangeEnd.Cmp(s.expectedBlock) >= 0 {
 			// Teleport progress forward
 			nextBlock := new(big.Int).Add(data.RangeEnd, big.NewInt(1))
 			s.expectedBlock.Set(nextBlock)
 			s.lastProgressAt = time.Now()
 			Logger.Debug("sequencer_range_teleport",
-				slog.String("from", blockNum.String()),
+				slog.String("from", s.expectedBlock.String()),
 				slog.String("to", data.RangeEnd.String()))
 			s.processBufferContinuationsLocked(ctx)
 		}
@@ -122,7 +127,7 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 	}
 
 	if data.Err != nil {
-		Logger.Warn("sequencer_fetch_error_retrying", slog.String("block", blockNum.String()))
+		Logger.Warn("sequencer_fetch_error_retrying", slog.String("block", blockLabel))
 		if blockNum != nil {
 			var err error
 			rpcClient := s.processor.GetRPCClient()
@@ -139,11 +144,28 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 		if data.Err != nil {
 			// 🚀 🔥 资深修复：不返回错误，仅记录警告并允许继续循环。
 			// 这样可以让系统保持运行，依靠 handleStall 进行自愈或在下个批次重试。
-			Logger.Warn("⚠️ Sequencer: temporary fetch failure, holding block", 
-				slog.String("block", blockNum.String()), 
+			Logger.Warn("⚠️ Sequencer: temporary fetch failure, holding block",
+				slog.String("block", blockLabel),
 				slog.String("err", data.Err.Error()))
-			return nil 
+			return nil
 		}
+	}
+
+	// Empty blocks may arrive without hydrated Block object.
+	// Fetch the header lazily so sequential processing can still advance per block.
+	if data.Block == nil {
+		if blockNum == nil {
+			return nil
+		}
+		rpcClient := s.processor.GetRPCClient()
+		block, err := rpcClient.BlockByNumber(ctx, blockNum)
+		if err != nil {
+			Logger.Warn("sequencer_block_refetch_failed",
+				slog.String("block", blockLabel),
+				slog.String("err", err.Error()))
+			return nil
+		}
+		data.Block = block
 	}
 
 	blockNum = data.Block.Number()
