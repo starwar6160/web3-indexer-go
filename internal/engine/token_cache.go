@@ -6,8 +6,8 @@ import (
 	"sync"
 )
 
-// TokenInfo 代币元数据
-type TokenInfo struct {
+// TokenMetadata 代币元数据
+type TokenMetadata struct {
 	Symbol   string // 代币符号（如 USDT）
 	Decimals int    // 小数位数
 	Name     string // 代币全称
@@ -27,7 +27,7 @@ type tokenCache struct {
 
 type cacheItem struct {
 	address string
-	info    TokenInfo
+	info    TokenMetadata
 }
 
 // NewTokenCache 创建代币缓存
@@ -41,7 +41,7 @@ func NewTokenCache(capacity int) *tokenCache {
 }
 
 // Get 获取代币信息
-func (c *tokenCache) Get(address string) (TokenInfo, bool) {
+func (c *tokenCache) Get(address string) (TokenMetadata, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -53,11 +53,11 @@ func (c *tokenCache) Get(address string) (TokenInfo, bool) {
 	}
 
 	c.misses++
-	return TokenInfo{}, false
+	return TokenMetadata{}, false
 }
 
 // Set 设置代币信息
-func (c *tokenCache) Set(address string, info TokenInfo) {
+func (c *tokenCache) Set(address string, info TokenMetadata) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -128,15 +128,15 @@ func InitTokenCache(capacity int) {
 }
 
 // GetTokenInfo 获取代币信息（优先从缓存）
-func GetTokenInfo(address string) (TokenInfo, bool) {
+func GetTokenInfo(address string) (TokenMetadata, bool) {
 	if globalTokenCache != nil {
 		return globalTokenCache.Get(address)
 	}
-	return TokenInfo{}, false
+	return TokenMetadata{}, false
 }
 
 // SetTokenInfo 设置代币信息
-func SetTokenInfo(address string, info TokenInfo) {
+func SetTokenInfo(address string, info TokenMetadata) {
 	if globalTokenCache != nil {
 		globalTokenCache.Set(address, info)
 	}

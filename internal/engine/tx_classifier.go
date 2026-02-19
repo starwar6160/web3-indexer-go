@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"encoding/hex"
 	"log/slog"
 	"strings"
 )

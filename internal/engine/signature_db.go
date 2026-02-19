@@ -39,7 +39,7 @@ var localSignatureDB = map[string]FunctionSignature{
 	"0xd3052939": {Name: "swapExactTokensForTokens", Protocol: "SushiSwap", Desc: "Swap tokens"},
 	"0x44f7149a": {Name: "swapTokensForExactTokens", Protocol: "SushiSwap", Desc: "Swap tokens exact"},
 	"0x1b6f8a6c": {Name: "swapExactETHForTokens", Protocol: "SushiSwap", Desc: "Swap ETH for tokens"},
-	"0x4a25d94a": {Name: "swapTokensForExactETH", Protocol: "SushiSwap", Desc: "Swap tokens for ETH"},
+	"0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640": {Name: "swapTokensForExactETH", Protocol: "SushiSwap", Desc: "Swap tokens for ETH (alt selector)"},
 	
 	// ========== Aave (Lending) ==========
 	"0x4515cef4": {Name: "deposit", Protocol: "Aave", Desc: "Deposit collateral"},
