@@ -15,12 +15,12 @@ func SafeInt64Diff(a, b uint64) int64 {
 		}
 		return int64(diff)
 	}
-	
+
 	diff := b - a
 	if diff > 9223372036854775808 { // abs(int64 min)
 		return -9223372036854775808
 	}
-	return -int64(diff)
+	return -int64(diff) // #nosec G115 - diff is checked to be within int64 range above
 }
 
 // secureIntn 生成一个安全的随机整数 [0, n)

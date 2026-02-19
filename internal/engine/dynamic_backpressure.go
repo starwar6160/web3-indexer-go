@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 	"runtime"
 	"sync"
@@ -42,7 +43,14 @@ func NewBackpressureManager() *BackpressureManager {
 
 	// 每 GB 内存分配 1000 个缓冲区槽位
 	memGB := memStats.Sys / (1024 * 1024 * 1024)
-	maxResultsCapacity := int(memGB * 1000) // 128G → 128,000
+	capacityU64 := memGB * 1000
+	if capacityU64 > uint64(math.MaxInt) {
+		capacityU64 = uint64(math.MaxInt)
+	}
+	if capacityU64 > math.MaxInt32 {
+		capacityU64 = math.MaxInt32
+	}
+	maxResultsCapacity := int(capacityU64) // #nosec G115 - value clamped to MaxInt32 above
 
 	// 保守一点，设置上限为 100,000
 	if maxResultsCapacity > 100000 {

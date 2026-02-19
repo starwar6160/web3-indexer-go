@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 )
 
@@ -11,7 +12,11 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	// 🚀 🔥 边界卫兵：绝对禁止抓取还未产生的块 (Ghost Chase Defense)
 	orch := GetOrchestrator()
 	snap := orch.GetSnapshot()
-	chainHeight := big.NewInt(int64(snap.LatestHeight))
+	latest := snap.LatestHeight
+	if latest > math.MaxInt64 {
+		latest = math.MaxInt64
+	}
+	chainHeight := big.NewInt(int64(latest)) // #nosec G115 - value clamped to MaxInt64 above
 
 	if start.Cmp(chainHeight) > 0 {
 		// 如果是 Anvil 模式，仅记录 Debug 而非 Error，减少日志噪音

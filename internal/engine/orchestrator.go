@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -18,20 +19,20 @@ import (
 type MsgType int
 
 const (
-	CmdUpdateChainHeight  MsgType = iota // 发现新块高度
-	CmdCommitBatch                       // 成功同步了一批交易 (逻辑完成)
-	CmdCommitDisk                        // 成功落盘 (物理完成) - 🔥 横滨实验室 SSOT 关键
-	CmdResetCursor                       // 强制重置游标 (用于 Reorg)
-	CmdIncrementTransfers                // 增加转账计数
-	CmdToggleEcoMode                     // 环境/配额触发休眠切换
-	CmdSetSystemState                    // 设置系统状态
-	CmdFetchFailed                       // 抓取失败 (用于调整安全缓冲)
-	CmdFetchSuccess                      // 抓取成功 (用于重置失败计数)
-	CmdNotifyFetched                     // 🚀 🔥 内存同步高度 (Fetcher 进度)
-	CmdNotifyFetchProgress               // 🚀 🔥 新增：影子进度 (用于 UI 先行跳动)
-	CmdLogEvent                          // 🚀 🔥 实时日志事件 (用于 UI 日志流)
-	ReqGetStatus                         // UI 查询状态 (REQ/REP)
-	ReqGetSnapshot                       // 获取状态快照 (REQ/REP)
+	CmdUpdateChainHeight   MsgType = iota // 发现新块高度
+	CmdCommitBatch                        // 成功同步了一批交易 (逻辑完成)
+	CmdCommitDisk                         // 成功落盘 (物理完成) - 🔥 横滨实验室 SSOT 关键
+	CmdResetCursor                        // 强制重置游标 (用于 Reorg)
+	CmdIncrementTransfers                 // 增加转账计数
+	CmdToggleEcoMode                      // 环境/配额触发休眠切换
+	CmdSetSystemState                     // 设置系统状态
+	CmdFetchFailed                        // 抓取失败 (用于调整安全缓冲)
+	CmdFetchSuccess                       // 抓取成功 (用于重置失败计数)
+	CmdNotifyFetched                      // 🚀 🔥 内存同步高度 (Fetcher 进度)
+	CmdNotifyFetchProgress                // 🚀 🔥 新增：影子进度 (用于 UI 先行跳动)
+	CmdLogEvent                           // 🚀 🔥 实时日志事件 (用于 UI 日志流)
+	ReqGetStatus                          // UI 查询状态 (REQ/REP)
+	ReqGetSnapshot                        // 获取状态快照 (REQ/REP)
 )
 
 // Message ZeroMQ 风格的消息结构
@@ -53,12 +54,12 @@ type CoordinatorState struct {
 	IsEcoMode        bool    // 是否处于休眠模式
 	Progress         float64 // 同步进度百分比（统一计算，避免前端悖论）
 	SystemState      SystemStateEnum
-	UpdatedAt        time.Time // 状态更新时间
-	LastUserActivity time.Time // 🔥 最后一次用户活动时间（用于休眠决策）
-	SafetyBuffer     uint64    // 🚀 动态安全缓冲 (解决追尾 404)
-	SuccessCount     uint64    // 🚀 🔥 新增：连续成功计数
-	JobsDepth        int       // 🔥 任务队列深度
-	ResultsDepth     int       // 🔥 结果队列深度
+	UpdatedAt        time.Time              // 状态更新时间
+	LastUserActivity time.Time              // 🔥 最后一次用户活动时间（用于休眠决策）
+	SafetyBuffer     uint64                 // 🚀 动态安全缓冲 (解决追尾 404)
+	SuccessCount     uint64                 // 🚀 🔥 新增：连续成功计数
+	JobsDepth        int                    // 🔥 任务队列深度
+	ResultsDepth     int                    // 🔥 结果队列深度
 	LogEntry         map[string]interface{} // 🚀 🔥 新增：最新的日志条目
 }
 
@@ -92,7 +93,7 @@ type Orchestrator struct {
 
 	// 🔥 组件引用 (用于监控)
 	fetcher  *Fetcher
-	strategy EngineStrategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
+	strategy Strategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
 }
 
 var (
@@ -129,7 +130,7 @@ func GetOrchestrator() *Orchestrator {
 }
 
 // Init 初始化协调器（设置环境感知配置）
-func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, strategy EngineStrategy) {
+func (o *Orchestrator) Init(_ context.Context, fetcher *Fetcher, strategy Strategy) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -143,7 +144,7 @@ func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, strategy Engi
 func (o *Orchestrator) LoadInitialState(db *sqlx.DB, chainID int64) error {
 	var lastSyncedBlock string
 	err := db.GetContext(context.Background(), &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
-	
+
 	// 🚀 增强逻辑：如果 checkpoint 没找到，尝试从 blocks 表直接获取最大值
 	if err != nil || lastSyncedBlock == "" || lastSyncedBlock == "0" {
 		var maxInDB int64
@@ -215,179 +216,194 @@ func (o *Orchestrator) loop() {
 
 // process 处理消息（状态机核心逻辑）
 func (o *Orchestrator) process(msg Message) {
-	// 记录每一个状态脉动的处理耗时
 	start := time.Now()
+	o.handleMessage(msg)
+	o.updateDerivedMetrics()
+	o.broadcastUpdate()
+	o.profileSlowProcessing(start, msg)
+}
 
+func (o *Orchestrator) handleMessage(msg Message) {
 	switch msg.Type {
 	case CmdUpdateChainHeight:
-		// 🔥 消息合并策略：缓存高度更新,批量处理（防止 Anvil 高频推送溢出）
-		h, ok := msg.Data.(uint64)
-		if !ok {
-			slog.Error("🎼 Orchestrator: Invalid height data type", "type", fmt.Sprintf("%T", msg.Data))
-			return
-		}
-
-		if h > o.state.LatestHeight {
-			o.pendingHeightUpdate = &h
-			o.lastHeightMergeTime = time.Now()
-
-			// 🚀 计算目标高度 (Latest - SafetyBuffer)
-			if h > o.state.SafetyBuffer {
-				o.state.TargetHeight = h - o.state.SafetyBuffer
-			} else {
-				o.state.TargetHeight = 0
-			}
-			slog.Debug("🎼 Height update cached", "val", h, "target", o.state.TargetHeight, "seq", msg.Sequence)
-		}
-
+		o.handleUpdateChainHeight(msg)
 	case CmdFetchFailed:
-		errType, ok := msg.Data.(string)
-		if !ok {
-			return
-		}
-		if errType == "not_found" {
-			// 连续抓不到块，说明追得太紧，增加安全缓冲
-			o.state.SuccessCount = 0 // 重置成功计数
-			if o.state.SafetyBuffer < 20 { // 提升上限到 20
-				o.state.SafetyBuffer++
-				slog.Warn("🎼 Safety: Increasing buffer due to 404", "new_val", o.state.SafetyBuffer)
-			}
-		}
-
+		o.handleFetchFailed(msg)
 	case CmdFetchSuccess:
-		// 🚀 资深调优：不再暴力重置，改为缓慢缩减
-		o.state.SuccessCount++
-		if o.state.SuccessCount >= 50 && o.state.SafetyBuffer > 1 {
-			o.state.SafetyBuffer--
-			o.state.SuccessCount = 0
-			slog.Info("🎼 Safety: Gradually reducing buffer", "new_val", o.state.SafetyBuffer)
-		}
-
-	case CmdNotifyFetched:
-		// 🔥 内存同步进度：由 Fetcher 汇报，通常跑得比 SyncedCursor 快得多
-		h, ok := msg.Data.(uint64)
-		if ok && h > o.state.FetchedHeight {
-			o.state.FetchedHeight = h
-		}
-
-	case CmdNotifyFetchProgress:
-		// 🚀 影子同步：Fetcher 刚拿到数据，还没入库，先让 UI 动起来
-		h, ok := msg.Data.(uint64)
-		if ok && h > o.state.FetchedHeight {
-			o.state.FetchedHeight = h
-		}
-
+		o.handleFetchSuccess()
+	case CmdNotifyFetched, CmdNotifyFetchProgress:
+		o.handleNotifyFetched(msg)
 	case CmdLogEvent:
-		// 🚀 实时日志流：包装成特殊的日志事件发送给 WS
-		logData, ok := msg.Data.(map[string]interface{})
-		if !ok {
-			return
-		}
-		o.state.LogEntry = logData
-		// 强制触发一次更新
-		o.state.UpdatedAt = time.Now()
-
+		o.handleLogEvent(msg)
 	case CmdCommitBatch:
-		// 🔥 关键点：在单一入口强制逻辑一致性
-		// 逻辑完成：提取数据并推入异步写入器
-		task, ok := msg.Data.(PersistTask)
-		if !ok {
-			slog.Error("🎼 Orchestrator: Invalid PersistTask data type", "type", fmt.Sprintf("%T", msg.Data))
-			return
-		}
-
-		// 逻辑确认：通知异步写入器落盘
-		if o.asyncWriter != nil {
-			if err := o.asyncWriter.Enqueue(task); err != nil {
-				slog.Error("🎼 Orchestrator: AsyncWriter enqueue failed", "err", err, "height", task.Height)
-			}
-		}
-
-		slog.Debug("🎼 State: Logical Commit", "height", task.Height, "seq", msg.Sequence)
-
+		o.handleCommitBatch(msg)
 	case CmdCommitDisk:
-		// 🔥 物理完成：这是真正的 SSOT 游标更新点
-		diskHeight, ok := msg.Data.(uint64)
-		if !ok {
-			return
-		}
-		if diskHeight > o.state.SyncedCursor {
-			o.state.SyncedCursor = diskHeight
-			slog.Info("🎼 StateChange: Synced (Disk)", "cursor", diskHeight, "seq", msg.Sequence)
-		}
-
+		o.handleCommitDisk(msg)
 	case CmdResetCursor:
-		// 🔥 强制重置：用于 Reorg 回滚
-		resetHeight, ok := msg.Data.(uint64)
-		if !ok {
-			return
-		}
-		o.state.SyncedCursor = resetHeight
-		slog.Warn("🎼 StateChange: Cursor RESET (Reorg)", "to", resetHeight, "seq", msg.Sequence)
-
+		o.handleResetCursor(msg)
 	case CmdIncrementTransfers:
-		count, ok := msg.Data.(uint64)
-		if !ok {
-			return
-		}
-		o.state.Transfers += count
-		slog.Debug("🎼 StateChange: Transfers", "count", count, "total", o.state.Transfers, "seq", msg.Sequence)
-
+		o.handleIncrementTransfers(msg)
 	case CmdToggleEcoMode:
-		active, ok := msg.Data.(bool)
-		if !ok {
-			return
-		}
-		o.state.IsEcoMode = active
-		slog.Warn("🎼 StateChange: EcoMode", "active", active, "seq", msg.Sequence)
-
+		o.handleToggleEcoMode(msg)
 	case CmdSetSystemState:
-		state, ok := msg.Data.(SystemStateEnum)
-		if !ok {
-			return
-		}
-		o.state.SystemState = state
-		slog.Info("🎼 StateChange: SystemState", "state", state.String(), "seq", msg.Sequence)
-
+		o.handleSetSystemState(msg)
 	case ReqGetStatus, ReqGetSnapshot:
-		// REQ/REP: 即使是读操作，也通过消息队列保证看到的是逻辑一致的断面
-		if msg.Reply != nil {
-			msg.Reply <- o.state
+		o.handleReply(msg)
+	}
+}
+
+func (o *Orchestrator) handleUpdateChainHeight(msg Message) {
+	h, ok := msg.Data.(uint64)
+	if !ok {
+		slog.Error("🎼 Orchestrator: Invalid height data type", "type", fmt.Sprintf("%T", msg.Data))
+		return
+	}
+	if h <= o.state.LatestHeight {
+		return
+	}
+	o.pendingHeightUpdate = &h
+	o.lastHeightMergeTime = time.Now()
+	if h > o.state.SafetyBuffer {
+		o.state.TargetHeight = h - o.state.SafetyBuffer
+	} else {
+		o.state.TargetHeight = 0
+	}
+	slog.Debug("🎼 Height update cached", "val", h, "target", o.state.TargetHeight, "seq", msg.Sequence)
+}
+
+func (o *Orchestrator) handleFetchFailed(msg Message) {
+	errType, ok := msg.Data.(string)
+	if !ok || errType != "not_found" {
+		return
+	}
+	o.state.SuccessCount = 0
+	if o.state.SafetyBuffer < 20 {
+		o.state.SafetyBuffer++
+		slog.Warn("🎼 Safety: Increasing buffer due to 404", "new_val", o.state.SafetyBuffer)
+	}
+}
+
+func (o *Orchestrator) handleFetchSuccess() {
+	o.state.SuccessCount++
+	if o.state.SuccessCount >= 50 && o.state.SafetyBuffer > 1 {
+		o.state.SafetyBuffer--
+		o.state.SuccessCount = 0
+		slog.Info("🎼 Safety: Gradually reducing buffer", "new_val", o.state.SafetyBuffer)
+	}
+}
+
+func (o *Orchestrator) handleNotifyFetched(msg Message) {
+	h, ok := msg.Data.(uint64)
+	if ok && h > o.state.FetchedHeight {
+		o.state.FetchedHeight = h
+	}
+}
+
+func (o *Orchestrator) handleLogEvent(msg Message) {
+	logData, ok := msg.Data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	o.state.LogEntry = logData
+	o.state.UpdatedAt = time.Now()
+}
+
+func (o *Orchestrator) handleCommitBatch(msg Message) {
+	task, ok := msg.Data.(PersistTask)
+	if !ok {
+		slog.Error("🎼 Orchestrator: Invalid PersistTask data type", "type", fmt.Sprintf("%T", msg.Data))
+		return
+	}
+	if o.asyncWriter != nil {
+		if err := o.asyncWriter.Enqueue(task); err != nil {
+			slog.Error("🎼 Orchestrator: AsyncWriter enqueue failed", "err", err, "height", task.Height)
 		}
 	}
+	slog.Debug("🎼 State: Logical Commit", "height", task.Height, "seq", msg.Sequence)
+}
 
-	// 🔥 统一计算派生指标：彻底解决 15483/50151 = 100% 的悖论
+func (o *Orchestrator) handleCommitDisk(msg Message) {
+	diskHeight, ok := msg.Data.(uint64)
+	if !ok {
+		return
+	}
+	if diskHeight > o.state.SyncedCursor {
+		o.state.SyncedCursor = diskHeight
+		slog.Info("🎼 StateChange: Synced (Disk)", "cursor", diskHeight, "seq", msg.Sequence)
+	}
+}
+
+func (o *Orchestrator) handleResetCursor(msg Message) {
+	resetHeight, ok := msg.Data.(uint64)
+	if !ok {
+		return
+	}
+	o.state.SyncedCursor = resetHeight
+	slog.Warn("🎼 StateChange: Cursor RESET (Reorg)", "to", resetHeight, "seq", msg.Sequence)
+}
+
+func (o *Orchestrator) handleIncrementTransfers(msg Message) {
+	count, ok := msg.Data.(uint64)
+	if !ok {
+		return
+	}
+	o.state.Transfers += count
+	slog.Debug("🎼 StateChange: Transfers", "count", count, "total", o.state.Transfers, "seq", msg.Sequence)
+}
+
+func (o *Orchestrator) handleToggleEcoMode(msg Message) {
+	active, ok := msg.Data.(bool)
+	if !ok {
+		return
+	}
+	o.state.IsEcoMode = active
+	slog.Warn("🎼 StateChange: EcoMode", "active", active, "seq", msg.Sequence)
+}
+
+func (o *Orchestrator) handleSetSystemState(msg Message) {
+	state, ok := msg.Data.(SystemStateEnum)
+	if !ok {
+		return
+	}
+	o.state.SystemState = state
+	slog.Info("🎼 StateChange: SystemState", "state", state.String(), "seq", msg.Sequence)
+}
+
+func (o *Orchestrator) handleReply(msg Message) {
+	if msg.Reply != nil {
+		msg.Reply <- o.state
+	}
+}
+
+func (o *Orchestrator) updateDerivedMetrics() {
 	if o.state.LatestHeight > 0 {
-		// 🚀 G115 安全转换与计算
 		latest := float64(o.state.LatestHeight)
 		synced := float64(o.state.SyncedCursor)
 		o.state.Progress = (synced / latest) * 100
-		// 限制最大为 100%
 		if o.state.Progress > 100.0 {
 			o.state.Progress = 100.0
 		}
 	}
 	o.state.UpdatedAt = time.Now()
+}
 
-	// 更新对外只读快照
+func (o *Orchestrator) broadcastUpdate() {
 	o.mu.Lock()
 	o.snapshot = o.state
 	o.mu.Unlock()
-
-	// 触发广播（非阻塞）
 	select {
 	case o.broadcastCh <- o.snapshot:
-		// 成功入队
 	default:
-		// 广播通道满，跳过本次推送
 		slog.Debug("🎼 Broadcast channel full, skipping")
 	}
+}
 
-	// 🔥 自动追踪慢处理（性能监控）
-	if o.enableProfiling {
-		if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
-			slog.Warn("🎼 Slow Process", "seq", msg.Sequence, "dur", elapsed, "type", msg.Type)
-		}
+func (o *Orchestrator) profileSlowProcessing(start time.Time, msg Message) {
+	if !o.enableProfiling {
+		return
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
+		slog.Warn("🎼 Slow Process", "seq", msg.Sequence, "dur", elapsed, "type", msg.Type)
 	}
 }
 
@@ -498,20 +514,20 @@ func (o *Orchestrator) UpdateChainHead(height uint64) {
 	o.mu.Lock()
 	if height > o.state.LatestHeight {
 		o.state.LatestHeight = height
-		
+
 		// 🚀 计算目标高度 (Latest - SafetyBuffer)
 		if height > o.state.SafetyBuffer {
 			o.state.TargetHeight = height - o.state.SafetyBuffer
 		} else {
 			o.state.TargetHeight = 0
 		}
-		
+
 		// 🚀 物理对齐：立即更新 snapshot，让 GetUIStatus 拿到的总是最新值
 		o.snapshot = o.state
 		o.state.UpdatedAt = time.Now()
 	}
 	o.mu.Unlock()
-	
+
 	// 仍然发送一个轻量级消息以触发 loop 里的 evaluate 逻辑（可选）
 }
 
@@ -553,7 +569,15 @@ func (o *Orchestrator) GetSyncLag() int64 {
 	if snap.LatestHeight == 0 {
 		return 0
 	}
-	lag := int64(snap.LatestHeight) - int64(snap.SyncedCursor)
+	latest := snap.LatestHeight
+	if latest > math.MaxInt64 {
+		latest = math.MaxInt64
+	}
+	synced := snap.SyncedCursor
+	if synced > math.MaxInt64 {
+		synced = math.MaxInt64
+	}
+	lag := int64(latest) - int64(synced) // #nosec G115 - values clamped to MaxInt64 above
 	if lag < 0 {
 		return 0 // 时间旅行场景
 	}
@@ -603,11 +627,9 @@ func (o *Orchestrator) DumpSystemState() map[string]interface{} {
 
 // GetStatus 返回一个全面的 API 响应 Map
 
-func (o *Orchestrator) GetStatus(ctx context.Context, db *sqlx.DB, rpcPool RPCClient, version string) map[string]interface{} {
+func (o *Orchestrator) GetStatus(_ context.Context, _ *sqlx.DB, rpcPool RPCClient, version string) map[string]interface{} {
 
 	snap := o.GetSnapshot()
-
-
 
 	// 🚀 G115 安全计算
 
@@ -618,8 +640,6 @@ func (o *Orchestrator) GetStatus(ctx context.Context, db *sqlx.DB, rpcPool RPCCl
 		syncLag = 0
 
 	}
-
-
 
 	fetchProgress := 0.0
 
@@ -635,61 +655,55 @@ func (o *Orchestrator) GetStatus(ctx context.Context, db *sqlx.DB, rpcPool RPCCl
 
 	}
 
-
-
 	status := map[string]interface{}{
 
-		"version":        version,
+		"version": version,
 
-		"state":          snap.SystemState.String(),
+		"state": snap.SystemState.String(),
 
-		"latest_block":   fmt.Sprintf("%d", snap.LatestHeight),
+		"latest_block": fmt.Sprintf("%d", snap.LatestHeight),
 
-		"target_height":  fmt.Sprintf("%d", snap.TargetHeight),
+		"target_height": fmt.Sprintf("%d", snap.TargetHeight),
 
 		"latest_fetched": fmt.Sprintf("%d", snap.FetchedHeight), // 🚀 内存扫描进度
 
 		"fetch_progress": fetchProgress,
 
-		"safety_buffer":  snap.SafetyBuffer,
+		"safety_buffer": snap.SafetyBuffer,
 
 		"latest_indexed": fmt.Sprintf("%d", snap.SyncedCursor),
 
-		"sync_lag":       syncLag,
+		"sync_lag": syncLag,
 
-		"transfers":      snap.Transfers,
+		"transfers": snap.Transfers,
 
-		"is_eco_mode":    snap.IsEcoMode,
+		"is_eco_mode": snap.IsEcoMode,
 
-		"progress":       snap.Progress,
+		"progress": snap.Progress,
 
-		"updated_at":     snap.UpdatedAt.Format(time.RFC3339),
+		"updated_at": snap.UpdatedAt.Format(time.RFC3339),
 
-		"is_healthy":     rpcPool.GetHealthyNodeCount() > 0,
+		"is_healthy": rpcPool.GetHealthyNodeCount() > 0,
 
 		"rpc_nodes": map[string]int{
 
 			"healthy": rpcPool.GetHealthyNodeCount(),
 
-			"total":   rpcPool.GetTotalNodeCount(),
-
+			"total": rpcPool.GetTotalNodeCount(),
 		},
 
-		"jobs_depth":       snap.JobsDepth,
+		"jobs_depth": snap.JobsDepth,
 
-		"results_depth":    snap.ResultsDepth,
+		"results_depth": snap.ResultsDepth,
 
-		"jobs_capacity":    160, // 💡 5600U 专供
+		"jobs_capacity": 160, // 💡 5600U 专供
 
 		"results_capacity": 15000,
 
-		"tps":              GetMetrics().GetWindowTPS(),
+		"tps": GetMetrics().GetWindowTPS(),
 
-		"bps":              GetMetrics().GetWindowBPS(),
-
+		"bps": GetMetrics().GetWindowBPS(),
 	}
-
-
 
 	// 注入 AsyncWriter 指标
 
@@ -704,8 +718,6 @@ func (o *Orchestrator) GetStatus(ctx context.Context, db *sqlx.DB, rpcPool RPCCl
 		}
 
 	}
-
-
 
 	return status
 
@@ -744,8 +756,8 @@ func (o *Orchestrator) RestoreState(state CoordinatorState) {
 func (o *Orchestrator) SnapToReality(rpcHeight uint64) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	
-	if o.state.LatestHeight > rpcHeight + 1000 {
+
+	if o.state.LatestHeight > rpcHeight+1000 {
 		slog.Warn("🎼 Orchestrator: Ghost state detected! Snapping to reality", "ghost", o.state.LatestHeight, "real", rpcHeight)
 		o.state.LatestHeight = rpcHeight
 		o.state.FetchedHeight = rpcHeight
@@ -801,16 +813,22 @@ func (o *Orchestrator) evaluateSystemState() {
 
 	// 🚀 🔥 同步到 GlobalState 以供 UIProjection 和其他组件使用
 	// 注意：此处我们需要获取 Sequencer 的深度，但 Orchestrator 暂时没存，先填 0
-	GetGlobalState().UpdatePipelineDepth(int32(jobsDepth), int32(resultsDepth), 0)
+	if jobsDepth > math.MaxInt32 {
+		jobsDepth = math.MaxInt32
+	}
+	if resultsDepth > math.MaxInt32 {
+		resultsDepth = math.MaxInt32
+	}
+	GetGlobalState().UpdatePipelineDepth(int32(jobsDepth), int32(resultsDepth), 0) // #nosec G115 - values clamped to MaxInt32 above
 
 	snap := GetGlobalState().Snapshot()
-	
+
 	// 1. 背压检查
 	if snap.ResultsDepth > snap.PipelineDepth*80/100 {
 		o.state.SystemState = SystemStateThrottled
 		return
 	}
-	
+
 	// 如果安全缓冲开启，说明正在优化追尾
 	if o.state.SafetyBuffer > 1 {
 		o.state.SystemState = SystemStateOptimizing
@@ -864,9 +882,11 @@ func (o *Orchestrator) evaluateEcoMode() {
 		if shouldBeEco {
 			// 通知 LazyManager 进入休眠
 			// TODO: 通过事件系统通知 LazyManager
+			_ = 1
 		} else {
 			// 通知 LazyManager 唤醒
 			// TODO: 通过事件系统通知 LazyManager
+			_ = 0
 		}
 	}
 }

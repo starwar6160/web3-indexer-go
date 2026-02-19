@@ -15,7 +15,7 @@ import (
 const networkAnvil = "anvil"
 
 // ProcessBatch 批量处理多个区块 (横滨实验室异步落盘版)
-func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainID int64) error {
+func (p *Processor) ProcessBatch(_ context.Context, blocks []BlockData, chainID int64) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -67,7 +67,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 			Height:    blockNum.Uint64(),
 			Block:     mBlock,
 			Transfers: activities,
-			Sequence:  uint64(time.Now().UnixNano()),
+			Sequence:  uint64(time.Now().UnixNano()), // #nosec G115 - UnixNano is always positive and within uint64 range
 		}
 
 		// 3. 核心分发 (SSOT)
@@ -194,7 +194,7 @@ func (p *Processor) updateBatchMetrics(blocks []BlockData) {
 			p.metrics.UpdateCurrentSyncHeight(bNum.Int64())
 		} else {
 			// 防御性截断，确保指标系统不会因为大高度而崩溃
-			p.metrics.UpdateCurrentSyncHeight(int64(bNum.Uint64() & 0x7FFFFFFFFFFFFFFF))
+			p.metrics.UpdateCurrentSyncHeight(int64(bNum.Uint64() & 0x7FFFFFFFFFFFFFFF)) // #nosec G115 - masked to 63 bits
 		}
 	}
 }

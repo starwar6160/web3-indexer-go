@@ -34,11 +34,12 @@ func TestStage1_Ingestion_Pulse(t *testing.T) {
 func TestStage2_Scheduler_Saturation(t *testing.T) {
 	o := GetOrchestrator()
 	o.Reset()
-	
+
 	// 获取一个真实的 Fetcher 实例 (由 ServiceManager 模拟)
-	rpcPool, _ := NewRPCClientPool([]string{"http://localhost:8545"})
+	rpcPool, err := NewRPCClientPool([]string{"http://localhost:8545"})
+	assert.NoError(t, err)
 	f := NewFetcher(rpcPool, 4)
-	
+
 	// 0. 准备：设置足够高的链高以通过边界检查
 	o.UpdateChainHead(100000)
 	time.Sleep(100 * time.Millisecond)
@@ -51,7 +52,7 @@ func TestStage2_Scheduler_Saturation(t *testing.T) {
 	}
 
 	// 2. 尝试调度
-	err := f.Schedule(context.Background(), models.NewBigInt(60000).Int, models.NewBigInt(60100).Int)
+	err = f.Schedule(context.Background(), models.NewBigInt(60000).Int, models.NewBigInt(60100).Int)
 
 	if err == nil || !strings.Contains(err.Error(), "backpressure") {
 		t.Fatalf("AI_FIX_REQUIRED [Stage 2]: Scheduler failed to trigger backpressure. Got err: %v", err)
@@ -83,7 +84,7 @@ func TestStage4_Persistence_Finalization(t *testing.T) {
 
 	o := GetOrchestrator()
 	o.Reset()
-	
+
 	// 模拟物理确认
 	o.AdvanceDBCursor(66)
 
@@ -111,7 +112,7 @@ func TestStage5_UI_Logic_Invariants(t *testing.T) {
 	o.UpdateChainHead(10000)
 	o.Dispatch(CmdNotifyFetchProgress, uint64(9500))
 	o.AdvanceDBCursor(9000)
-	
+
 	// 强制刷新一次快照
 	o.Dispatch(CmdNotifyFetched, uint64(9500))
 
@@ -127,5 +128,5 @@ func TestStage5_UI_Logic_Invariants(t *testing.T) {
 	// 2. 数学自洽约束
 	// SyncedHeight (9000) + SyncLag (1000) == LatestOnChain (10000)
 	expectedLatest := 9000 + status.SyncLag
-	assert.Equal(t, uint64(10000), uint64(expectedLatest), "Math paradox: Synced + Lag != Latest")
+	assert.Equal(t, uint64(10000), expectedLatest, "Math paradox: Synced + Lag != Latest")
 }

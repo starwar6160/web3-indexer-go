@@ -23,18 +23,18 @@ func TestIntegration_BackpressureFlow(t *testing.T) {
 
 	orchestrator := GetOrchestrator()
 	orchestrator.Reset()
-	
+
 	writer := NewAsyncWriter(db, orchestrator, false)
 	orchestrator.SetAsyncWriter(writer)
-	
+
 	// 🚀 模拟生产者：填满 AsyncWriter 的队列
 	capacity := cap(writer.taskChan)
-	fillCount := capacity * 85 / 100 
-	
+	fillCount := capacity * 85 / 100
+
 	t.Logf("🚀 Filling task channel with %d tasks to trigger pressure limit", fillCount)
-	for i := uint64(1); i <= uint64(fillCount); i++ {
+	for i := 1; i <= fillCount; i++ {
 		writer.taskChan <- PersistTask{
-			Height: i,
+			Height: uint64(i), // #nosec G115 - i is small and positive
 			Block: models.Block{
 				Number: models.NewBigInt(int64(i)),
 				Hash:   fmt.Sprintf("0x%d", i),
@@ -43,7 +43,7 @@ func TestIntegration_BackpressureFlow(t *testing.T) {
 	}
 
 	// 🚀 模拟背压感知：手动同步深度到 GlobalState (模拟 evaluateSystemState 的动作)
-	GetGlobalState().UpdatePipelineDepth(0, int32(fillCount), 0)
+	GetGlobalState().UpdatePipelineDepth(0, int32(fillCount), 0) // #nosec G115 - fillCount is bounded by channel capacity
 
 	// 验证状态
 	status := orchestrator.GetUIStatus(context.Background(), db, "test-v1")
@@ -65,14 +65,15 @@ func TestIntegration_WatermarkLogic(t *testing.T) {
 	orchestrator.SetAsyncWriter(writer)
 	writer.Start() // 启动写入器
 	defer func() {
-		_ = writer.Shutdown(1 * time.Second)
+		err := writer.Shutdown(1 * time.Second)
+		assert.NoError(t, err)
 	}()
 
 	// 模拟连续数据流
 	for i := uint64(1); i <= 50; i++ {
 		// 1. 模拟抓取完成 (MemorySync)
 		orchestrator.Dispatch(CmdNotifyFetched, i)
-		
+
 		// 2. 模拟逻辑处理完成并提交落盘任务
 		task := PersistTask{
 			Height: i,
@@ -82,7 +83,7 @@ func TestIntegration_WatermarkLogic(t *testing.T) {
 			},
 		}
 		orchestrator.Dispatch(CmdCommitBatch, task)
-		
+
 		// 验证快照：在任何时刻，FetchedHeight >= SyncedCursor
 		// 由于异步性，我们给一点点处理时间
 		time.Sleep(5 * time.Millisecond)
@@ -99,18 +100,19 @@ func TestIntegration_ReliefValve(t *testing.T) {
 	orchestrator := GetOrchestrator()
 	orchestrator.Reset()
 	writer := NewAsyncWriter(db, orchestrator, false)
-	
+
 	capacity := cap(writer.taskChan)
 	fillCount := capacity * 95 / 100 // 填充 95%
-	
+
 	t.Logf("🚀 Filling channel with %d tasks to trigger relief valve (capacity: %d)", fillCount, capacity)
-	
+
 	for i := 1; i <= fillCount; i++ {
+		height := uint64(i) // #nosec G115 - i is small and positive
 		writer.taskChan <- PersistTask{
-			Height: uint64(i),
+			Height: height,
 			Block: models.Block{
-				Number: models.NewBigInt(int64(i)),
-				Hash:   fmt.Sprintf("0x%d", i),
+				Number: models.NewBigInt(int64(height)), // #nosec G115 - height is small and positive
+				Hash:   fmt.Sprintf("0x%d", height),
 			},
 		}
 	}
@@ -125,11 +127,11 @@ func TestIntegration_ReliefValve(t *testing.T) {
 	currentDepth := len(writer.taskChan)
 	targetDepth := capacity * 50 / 100
 	assert.LessOrEqual(t, currentDepth, targetDepth+1, "泄压阀应将深度降至 50% 附近")
-	
+
 	snap := orchestrator.GetSnapshot()
 	// lastHeight 是在循环中记录的最后一个被弹出的高度
 	// 由于我们填充了 1..fillCount，弹出了 (fillCount - targetDepth) 个元素
 	// 所以最后一个被弹出元素的高度应该是 (fillCount - targetDepth)
-	expectedHeight := uint64(fillCount - currentDepth)
+	expectedHeight := uint64(fillCount - currentDepth) // #nosec G115 - result is non-negative and small
 	assert.GreaterOrEqual(t, snap.SyncedCursor, expectedHeight, "游标应跳跃至最后丢弃的高度")
 }

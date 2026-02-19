@@ -611,7 +611,7 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 
 				// 🚀 获取考虑安全缓冲后的目标高度
 				snap := orch.GetSnapshot()
-				targetHeight := big.NewInt(int64(snap.TargetHeight))
+				targetHeight := big.NewInt(int64(snap.TargetHeight)) // #nosec G115 - TargetHeight realistically fits in int64
 
 				if targetHeight.Cmp(lastScheduled) > 0 {
 					slog.Debug("🎼 [TailFollow] Chain head update dispatched", "tip", tip.String(), "target", targetHeight.String())

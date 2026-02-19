@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strings"
@@ -54,7 +55,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		Height:    blockNum.Uint64(),
 		Block:     mBlock,
 		Transfers: activities,
-		Sequence:  uint64(time.Now().UnixNano()),
+		Sequence:  uint64(time.Now().UnixNano()), // #nosec G115 - UnixNano is always positive and within uint64 range
 	}
 
 	// 4. 🔥 核心调度：通过 Orchestrator 分发落盘任务 (SSOT)
@@ -159,7 +160,7 @@ func (p *Processor) extractActivities(ctx context.Context, blockNum *big.Int, lo
 }
 
 // detectFaucetNoDB 不写库的 faucet 检测
-func (p *Processor) detectFaucetNoDB(ctx context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
+func (p *Processor) detectFaucetNoDB(_ context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
 	faucetLabel := GetAddressLabel(fromAddr)
 	if faucetLabel == "" {
 		return nil
@@ -184,7 +185,7 @@ func (p *Processor) detectFaucetNoDB(ctx context.Context, blockNum *big.Int, tx 
 }
 
 // detectDeployNoDB 不写库的合约部署检测
-func (p *Processor) detectDeployNoDB(ctx context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
+func (p *Processor) detectDeployNoDB(_ context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
 	if tx.To() != nil {
 		return nil
 	}
@@ -202,7 +203,7 @@ func (p *Processor) detectDeployNoDB(ctx context.Context, blockNum *big.Int, tx 
 }
 
 // detectEthTransferNoDB 不写库的 ETH 转账检测
-func (p *Processor) detectEthTransferNoDB(ctx context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint, txWithRealLogs map[string]bool) *models.Transfer {
+func (p *Processor) detectEthTransferNoDB(_ context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint, txWithRealLogs map[string]bool) *models.Transfer {
 	if tx.Value().Cmp(big.NewInt(0)) <= 0 || txWithRealLogs[tx.Hash().Hex()] || tx.To() == nil {
 		return nil
 	}
@@ -220,7 +221,7 @@ func (p *Processor) detectEthTransferNoDB(ctx context.Context, blockNum *big.Int
 }
 
 // processAnvilSyntheticNoDB 不写库的 Anvil 模拟逻辑
-func (p *Processor) processAnvilSyntheticNoDB(ctx context.Context, blockNum *big.Int, block *types.Block, activities []models.Transfer) []models.Transfer {
+func (p *Processor) processAnvilSyntheticNoDB(_ context.Context, blockNum *big.Int, block *types.Block, activities []models.Transfer) []models.Transfer {
 	if len(activities) > 0 || !p.enableSimulator || p.networkMode != "anvil" {
 		return activities
 	}
@@ -234,7 +235,7 @@ func (p *Processor) processAnvilSyntheticNoDB(ctx context.Context, blockNum *big
 		anvilTransfer := models.Transfer{
 			BlockNumber:  models.BigInt{Int: blockNum},
 			TxHash:       common.BytesToHash(append(block.Hash().Bytes(), []byte(fmt.Sprintf("ANVIL_MOCK_%d", i))...)).Hex(),
-			LogIndex:     uint(99990 + i),
+			LogIndex:     uint(99990) + uint(i), // #nosec G115 - i is small (0-5) and sum fits in uint
 			From:         strings.ToLower(mockFrom),
 			To:           strings.ToLower(mockTo),
 			Amount:       models.NewUint256FromBigInt(mockAmount),
@@ -262,7 +263,11 @@ func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer,
 	if p.EventHook == nil {
 		return
 	}
-	latencyMs := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
+	blockTime := block.Time()
+	if blockTime > math.MaxInt64 {
+		blockTime = math.MaxInt64
+	}
+	latencyMs := time.Since(time.Unix(int64(blockTime), 0)).Milliseconds() // #nosec G115 - blockTime clamped to MaxInt64 above
 	if latencyMs < 0 {
 		latencyMs = 0
 	}
@@ -276,7 +281,7 @@ func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer,
 	syncLag := int64(0)
 	if p.metrics != nil {
 		latestChain = p.metrics.lastChainHeight.Load()
-		syncLag = latestChain - int64(block.NumberU64())
+		syncLag = latestChain - int64(block.NumberU64()) // #nosec G115 - block number realistically fits in int64
 		if syncLag < 0 {
 			syncLag = 0
 		}
@@ -320,7 +325,7 @@ func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
 		p.metrics.UpdateCurrentSyncHeight(num.Int64())
 	} else {
 		// 防御性处理：截断为正数最大值，保持指标跳动
-		p.metrics.UpdateCurrentSyncHeight(int64(num.Uint64() & 0x7FFFFFFFFFFFFFFF))
+		p.metrics.UpdateCurrentSyncHeight(int64(num.Uint64() & 0x7FFFFFFFFFFFFFFF)) // #nosec G115 - masked to 63 bits
 	}
 
 	// 🚀 确保时间戳转换安全
@@ -329,7 +334,7 @@ func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
 		blockTime = 9223372036854775807
 	}
 
-	latency := time.Since(time.Unix(int64(blockTime), 0)).Seconds()
+	latency := time.Since(time.Unix(int64(blockTime), 0)).Seconds() // #nosec G115 - blockTime clamped to MaxInt64 above
 	if latency < 0 {
 		latency = 0
 	}
