@@ -91,9 +91,10 @@ type Orchestrator struct {
 	// 🔥 异步持久化流水线
 	asyncWriter *AsyncWriter // 异步写入器引用
 
-	// 🔥 组件引用 (用于监控)
-	fetcher  *Fetcher
-	strategy Strategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
+	// 🔥 时空连续性守卫（检测"位点倒挂"）
+	linearityGuard *LinearityGuard
+	fetcher        *Fetcher // 🚀 🔥 组件引用
+	strategy       Strategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
 }
 
 var (
@@ -113,7 +114,6 @@ func GetOrchestrator() *Orchestrator {
 				LastUserActivity: time.Now(), // 初始化为当前时间
 				SafetyBuffer:     1,          // 初始保持 1 个块的距离
 			},
-			broadcastCh:         make(chan CoordinatorState, 1000),
 			subscribers:         make([]chan CoordinatorState, 0, 8),
 			ctx:                 ctx,
 			cancel:              cancel,
@@ -122,6 +122,8 @@ func GetOrchestrator() *Orchestrator {
 			pendingHeightUpdate: nil,
 			lastHeightMergeTime: time.Now(),
 		}
+		// 🔥 在 orchestrator 创建后再初始化 LinearityGuard
+		orchestrator.linearityGuard = NewLinearityGuard(orchestrator)
 		go orchestrator.loop()
 		go orchestrator.broadcaster()
 		slog.Info("🎼 Orchestrator SSOT initialized", "channel_depth", 100000)
@@ -509,7 +511,12 @@ func (o *Orchestrator) Subscribe() <-chan CoordinatorState {
 
 // UpdateChainHead 更新链头高度（兼容方法）
 func (o *Orchestrator) UpdateChainHead(height uint64) {
-	// 🚀 🔥 资深调优：不再走 cmdChan 异步队列，而是立即通过锁更新 state 和 snapshot
+	// � 首先检查时空连续性（防止位点倒挂）
+	if o.linearityGuard != nil {
+		o.linearityGuard.CheckLinearity(height)
+	}
+
+	// �� 🔥 资深调优：不再走 cmdChan 异步队列，而是立即通过锁更新 state 和 snapshot
 	// 这解决了 UI 上 'Latest: 0' 滞后的问题，确保链脉搏瞬时响应
 	o.mu.Lock()
 	if height > o.state.LatestHeight {
