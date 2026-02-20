@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/time/rate"
 )
 
 // Strategy 定义了不同运行环境下的行为差异
@@ -15,6 +16,10 @@ type Strategy interface {
 	ShouldPersist() bool
 	GetConfirmations() uint64
 	GetBatchSize() int
+	// 🔥 新增：环境特定的性能参数
+	GetRPCConfig() (rate.Limit, int) // (QPS limit, Burst)
+	GetBackpressureThreshold() int   // 背压触发阈值
+	GetSeqBufferSize() int           // Sequencer 缓冲区大小
 }
 
 // AnvilStrategy: 针对本地开发优化（极速、易失、0 确认）
@@ -88,6 +93,19 @@ func (s *AnvilStrategy) ShouldPersist() bool      { return false } // 🔥 Anvil
 func (s *AnvilStrategy) GetConfirmations() uint64 { return 0 }
 func (s *AnvilStrategy) GetBatchSize() int        { return 200 }
 
+// 🔥 Anvil 模式：全速运行，12 核算力全开
+func (s *AnvilStrategy) GetRPCConfig() (rate.Limit, int) {
+	return rate.Limit(1000), 100 // 1000 QPS, Burst 100
+}
+
+func (s *AnvilStrategy) GetBackpressureThreshold() int {
+	return 5000 // 16G 内存，不怕积压
+}
+
+func (s *AnvilStrategy) GetSeqBufferSize() int {
+	return 10000 // 大缓冲区
+}
+
 // TestnetStrategy: 针对测试网优化（稳健、持久、断点续传）
 type TestnetStrategy struct{}
 
@@ -101,6 +119,19 @@ func (s *TestnetStrategy) OnStartup(_ context.Context, o *Orchestrator, db *sqlx
 func (s *TestnetStrategy) ShouldPersist() bool      { return true }
 func (s *TestnetStrategy) GetConfirmations() uint64 { return 6 } // 等待 6 个块确认
 func (s *TestnetStrategy) GetBatchSize() int        { return 50 }
+
+// 🔥 Testnet 模式：配额敏感，保守运行
+func (s *TestnetStrategy) GetRPCConfig() (rate.Limit, int) {
+	return rate.Limit(2), 1 // 2 QPS, Burst 1 (省钱模式)
+}
+
+func (s *TestnetStrategy) GetBackpressureThreshold() int {
+	return 100 // 内存敏感，快速触发节流
+}
+
+func (s *TestnetStrategy) GetSeqBufferSize() int {
+	return 500 // 小缓冲区
+}
 
 // GetStrategy 根据 ChainID 自动选择策略
 func GetStrategy(chainID int64) Strategy {
