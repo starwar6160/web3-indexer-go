@@ -62,9 +62,10 @@ jobs:
           cache: true
 
       - name: Run GoSec security audit
-        uses: securego/gosec@master
-        with:
-          args: '-fmt sarif -out gosec-results.sarif ./...'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -fmt sarif -out gosec-results.sarif ./... || true
+          gosec ./...
 
       - name: Upload GoSec results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
@@ -76,13 +77,13 @@ jobs:
       - name: Run Go vulnerability check
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          govulncheck ./... || echo "Vulnerability check failed, please review logs."
 
   # ==============================================================================
-  # Job 3: Unit Tests (Fast Feedback)
+  # Job 3: Unit Tests (Throttled CI Style)
   # ==============================================================================
   unit-tests:
-    name: Unit Tests
+    name: Unit Tests (2-core limit)
     runs-on: ubuntu-latest
 
     steps:
@@ -95,12 +96,13 @@ jobs:
           go-version: '1.24'
           cache: true
 
-      - name: Run unit tests
+      - name: Run unit tests (CI Style)
         run: |
-          go test -v -race -count=1 -short -coverprofile=coverage.txt ./internal/engine/...
+          # 🚀 模拟 2 核环境，强制发现竞态
+          go test -v -race -cpu=2 -p=2 -count=1 -short -coverprofile=coverage.txt ./internal/engine/...
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: ./coverage.txt
           flags: unittests

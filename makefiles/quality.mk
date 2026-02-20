@@ -18,7 +18,28 @@ YELLOW := \033[33m
 RED := \033[31m
 NC := \033[0m # No Color
 
-.PHONY: qa lint lint-fix sec-scan vuln-check qa-race qa-consistency qa-full complexity-audit
+.PHONY: qa lint lint-fix sec-scan vuln-check qa-race qa-consistency qa-full complexity-audit qa-strict test-ci-style
+
+# -----------------------------------------------------------------------------
+# 🔥 严格模式 (Strict Mode) - 模拟 CI 纯净环境
+# -----------------------------------------------------------------------------
+qa-strict:
+	@echo "$(RED)🧹 清理所有本地残留，模拟 CI 纯净环境...$(NC)"
+	go clean -testcache
+	go clean -modcache
+	rm -rf *.db *.sarif coverage.txt
+	@echo "$(YELLOW)🚀 启动严格质量检查 (GITHUB_ACTIONS=true)...$(NC)"
+	export GITHUB_ACTIONS=true; \
+	export EPHEMERAL_MODE=true; \
+	$(MAKE) qa-full
+
+# -----------------------------------------------------------------------------
+# 🏁 资源限制测试 (CI Style) - 模拟 2-core 环境
+# -----------------------------------------------------------------------------
+test-ci-style:
+	@echo "$(BLUE)🏁 运行资源限制测试 (2-core simulation)...$(NC)"
+	go test -cpu=2 -p=2 -race -count=1 -short ./internal/engine/...
+	@echo "$(GREEN)✅ CI 风格测试通过$(NC)"
 
 # -----------------------------------------------------------------------------
 # 🔥 综合质量检查 - 运行所有检查 (推荐在 CI 前本地预检)
@@ -83,7 +104,9 @@ sec-scan:
 	@echo "$(BLUE)   🛡️ 运行 GoSec 安全扫描$(NC)"
 	@echo "$(BLUE)════════════════════════════════════════════════════════════$(NC)"
 	@which gosec >/dev/null 2>&1 || go install github.com/securego/gosec/v2/cmd/gosec@latest
-	@echo "$(YELLOW)🔍 扫描安全漏洞...$(NC)"
+	@echo "$(YELLOW)🔍 扫描并生成 SARIF 报告...$(NC)"
+	@gosec -fmt sarif -out gosec-results.sarif -tests=false ./... || true
+	@echo "$(YELLOW)📊 终端摘要显示:$(NC)"
 	@gosec -fmt text -tests=false ./...
 	@echo "$(GREEN)✅ GoSec 扫描完成$(NC)"
 
