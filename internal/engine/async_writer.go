@@ -151,7 +151,12 @@ func (w *AsyncWriter) flushToDB(batch []PersistTask) {
 	start := time.Now()
 	tx, err := w.db.BeginTxx(w.ctx, nil)
 	if err != nil {
-		slog.Error("📝 AsyncWriter: BeginTx failed", "err", err)
+		// 🔥 资深写法：如果是 context canceled，说明是主动关闭，不应报错
+		if errors.Is(err, context.Canceled) {
+			slog.Info("📝 AsyncWriter: BeginTx skipped", "reason", "context canceled (graceful shutdown)")
+		} else {
+			slog.Error("📝 AsyncWriter: BeginTx failed", "err", err)
+		}
 		return
 	}
 	defer func() {
