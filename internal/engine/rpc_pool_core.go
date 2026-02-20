@@ -61,16 +61,24 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 	forceRPS := os.Getenv("FORCE_RPS") == EnvTrue
 
 	if isLocal {
-		globalRPS = 500.0
+		// 🚀 EPHEMERAL_ANVIL mode: unleash throughput for local 5600U 12-core
+		// Goroutine dump showed workers blocked on rate limiter - increase 2x
+		globalRPS = 1000.0 // was 500, now 1000
 	} else if isTestnet && !forceRPS {
 		globalRPS = 15.0
 	} else {
 		globalRPS = 20.0
 	}
 
+	// Burst = 100 for local, 2xRPS for remote
+	burst := int(globalRPS * 2)
+	if isLocal {
+		burst = 100 // fixed burst for Anvil to prevent thundering herd
+	}
+
 	pool := &EnhancedRPCClientPool{
 		clients:           make([]*rpcNode, 0, len(urls)),
-		globalRateLimiter: rate.NewLimiter(rate.Limit(globalRPS), int(globalRPS*2)),
+		globalRateLimiter: rate.NewLimiter(rate.Limit(globalRPS), burst),
 		nodeRateLimiters:  make(map[string]*rate.Limiter),
 		metrics:           GetMetrics(),
 		isTestnetMode:     isTestnet && !isLocal,
@@ -81,7 +89,7 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 	}
 
 	for _, url := range urls {
-		pool.nodeRateLimiters[url] = rate.NewLimiter(rate.Limit(globalRPS), int(globalRPS*2))
+		pool.nodeRateLimiters[url] = rate.NewLimiter(rate.Limit(globalRPS), burst)
 		client, err := ethclient.Dial(url)
 		if err != nil {
 			log.Printf("Warning: failed to connect to %s: %v", url, err)

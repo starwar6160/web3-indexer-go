@@ -14,8 +14,8 @@ type BackpressureConfig struct {
 
 	// 水位线百分比（0-100）
 	// 只有当使用率超过此百分比时才触发背压
-	JobsWatermarkPercent    int
-	ResultsWatermarkPercent int
+	JobsWatermarkPercent      int
+	ResultsWatermarkPercent   int
 	SeqBufferWatermarkPercent int
 
 	// 强制节流阈值（更高）
@@ -35,27 +35,27 @@ func DefaultBackpressureConfig() *BackpressureConfig {
 	// 对于 16G 内存系统：
 	// - Jobs: 160 (原始值)
 	// - Results: 15000 (原始值)
-	// - SeqBuffer: 10000 (大幅提升)
+	// - SeqBuffer: 5000 (大幅提升，解决196就报critical的问题)
 
 	cfg := &BackpressureConfig{
 		MaxJobsCapacity:           160,
 		MaxResultsCapacity:        15000,
-		MaxSeqBuffer:              10000,  // 🔥 从 800 提升到 10000
+		MaxSeqBuffer:              5000, // 🔥 从 800 提升到 5000
 		JobsWatermarkPercent:      80,   // 80% 时触发警告
-		ResultsWatermarkPercent:     80,
-		SeqBufferWatermarkPercent:   80,
-		HardLimitPercent:            95,   // 95% 时完全停止
+		ResultsWatermarkPercent:   80,
+		SeqBufferWatermarkPercent: 80,
+		HardLimitPercent:          95, // 95% 时完全停止
 	}
 
 	// 对于大内存系统，进一步放宽限制
 	if totalMem > 8*1024*1024*1024 { // > 8GB
-		cfg.MaxSeqBuffer = 50000     // 50K 缓冲区
+		cfg.MaxSeqBuffer = 10000 // 10K 缓冲区
 		cfg.SeqBufferWatermarkPercent = 90
 		cfg.HardLimitPercent = 98
 	}
 
 	if totalMem > 16*1024*1024*1024 { // > 16GB
-		cfg.MaxSeqBuffer = 100000    // 100K 缓冲区
+		cfg.MaxSeqBuffer = 50000 // 50K 缓冲区
 		cfg.SeqBufferWatermarkPercent = 95
 		cfg.HardLimitPercent = 99
 	}
