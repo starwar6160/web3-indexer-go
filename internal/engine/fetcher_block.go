@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"math/big"
 	"strings"
@@ -14,94 +13,75 @@ import (
 )
 
 // fetchRangeWithLogs fetches logs for a range of blocks and processes them.
-// If no logs are found, it fetches the header of the latest block in range to update progress.
 func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 	startTime := time.Now()
-
 	GetOrchestrator().DispatchLog("DEBUG", "🌀 Fetcher: Starting block range", "from", start.String(), "to", end.String())
 
-	// Step 1: Range Filter
-	filterQuery := ethereum.FilterQuery{
-		FromBlock: start,
-		ToBlock:   end,
+	// Step 1: Execute FilterLogs with retry
+	logs, err := f.executeFilterLogsWithRetry(ctx, start, end)
+	if err != nil {
+		f.reportRangeError(ctx, start, end, err)
+		return
 	}
 
+	// Step 2: Group logs and process the range
+	logsByBlock := f.groupLogsByBlock(logs)
+	f.processBlockRange(ctx, start, end, logsByBlock)
+
+	if f.metrics != nil {
+		f.metrics.RecordFetcherJobCompleted(time.Since(startTime))
+	}
+}
+
+func (f *Fetcher) buildFilterQuery(start, end *big.Int) ethereum.FilterQuery {
+	q := ethereum.FilterQuery{FromBlock: start, ToBlock: end}
 	if len(f.watchedAddresses) > 0 {
-		filterQuery.Addresses = f.watchedAddresses
-		// For specific addresses, we still filter by Transfer event to save RPC weight
-		filterQuery.Topics = [][]common.Hash{{TransferEventHash}}
-		Logger.Debug("🔍 Fetching logs with address filter",
-			slog.String("from", start.String()),
-			slog.String("to", end.String()),
-			slog.Int("watched_count", len(f.watchedAddresses)))
-	} else {
-		// 🚀 Industrial Grade: Unfiltered mode captures EVERYTHING
-		// No Topics = No Filter = All contract events captured
-		filterQuery.Topics = nil
-		Logger.Debug("🌍 Fetching logs for ALL events (Full Sniffing)",
-			slog.String("from", start.String()),
-			slog.String("to", end.String()))
+		q.Addresses = f.watchedAddresses
+		q.Topics = [][]common.Hash{{TransferEventHash}}
 	}
+	return q
+}
 
+func (f *Fetcher) executeFilterLogsWithRetry(ctx context.Context, start, end *big.Int) ([]types.Log, error) {
+	query := f.buildFilterQuery(start, end)
 	var logs []types.Log
 	var err error
 
-	// 🚀 [Elegant Retry] for FilterLogs
 	for retries := 0; retries < 5; retries++ {
-		// 🛡️ 5600U 保护：增加硬超时，防止网络层挂起导致整个 Jobs 队列堵死
 		reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		logs, err = f.pool.FilterLogs(reqCtx, filterQuery)
+		logs, err = f.pool.FilterLogs(reqCtx, query)
 		cancel()
 
 		if err == nil {
 			GetOrchestrator().Dispatch(CmdFetchSuccess, nil)
-			// 🚀 🔥 新增：通知扫描进度 (内存水位)
 			GetOrchestrator().Dispatch(CmdNotifyFetched, end.Uint64())
-			break
+			return logs, nil
 		}
 
 		if isNotFound(err) {
 			backoff := time.Duration(50*(1<<uint(retries))) * time.Millisecond
-			slog.Debug("⏳ [Fetcher] FilterLogs not found, retrying...", "from", start, "to", end, "backoff", backoff)
 			GetOrchestrator().Dispatch(CmdFetchFailed, "not_found")
 			select {
 			case <-time.After(backoff):
 				continue
 			case <-ctx.Done():
-				return
+				return nil, ctx.Err()
 			}
 		}
-		break // Other errors handled by normal flow
+		break
 	}
+	return nil, err
+}
 
-	if err != nil {
-		// Log error and send results back
-		select {
-		case f.Results <- BlockData{Number: start, RangeEnd: end, Err: err}:
-		case <-ctx.Done():
-		case <-f.stopCh:
-		}
-		return
+func (f *Fetcher) groupLogsByBlock(logs []types.Log) map[uint64][]types.Log {
+	m := make(map[uint64][]types.Log)
+	for _, l := range logs {
+		m[l.BlockNumber] = append(m[l.BlockNumber], l)
 	}
+	return m
+}
 
-	Logger.Debug("📊 RPC response received",
-		slog.String("from", start.String()),
-		slog.String("to", end.String()),
-		slog.Int("logs_found", len(logs)),
-		slog.Int("watched_addresses", len(f.watchedAddresses)))
-
-	GetOrchestrator().DispatchLog("INFO", "📡 RPC response received",
-		"range", fmt.Sprintf("%s-%s", start.String(), end.String()),
-		"logs", len(logs))
-
-	// Step 2: Group logs by block number
-	logsByBlock := make(map[uint64][]types.Log)
-	for _, vLog := range logs {
-		logsByBlock[vLog.BlockNumber] = append(logsByBlock[vLog.BlockNumber], vLog)
-	}
-
-	// Step 3 & 4: Sequential Reporting (The Serpentine Ingestion)
-	// We MUST report every block in chronological order to prevent Sequencer bursts.
+func (f *Fetcher) processBlockRange(ctx context.Context, start, end *big.Int, logsByBlock map[uint64][]types.Log) {
 	for i := new(big.Int).Set(start); i.Cmp(end) <= 0; i.Add(i, big.NewInt(1)) {
 		bn := new(big.Int).Set(i)
 		blockLogs := logsByBlock[bn.Uint64()]
@@ -109,37 +89,8 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 		var block *types.Block
 		var err error
 
-		// Only fetch full block if it has logs or it's the range end (to update UI time)
 		if len(blockLogs) > 0 || bn.Cmp(end) == 0 {
-			// 🚀 [Elegant Retry] for BlockByNumber
-			for retries := 0; retries < 5; retries++ {
-				// 🛡️ 5600U 保护：增加硬超时，防止网络层挂起导致消费端死锁
-				reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-				block, err = f.pool.BlockByNumber(reqCtx, bn)
-				cancel()
-
-				if err == nil {
-					GetOrchestrator().Dispatch(CmdFetchSuccess, nil)
-					break
-				}
-
-				if isNotFound(err) {
-					backoff := time.Duration(50*(1<<uint(retries))) * time.Millisecond
-					slog.Debug("⏳ [Fetcher] BlockByNumber not found, retrying...", "block", bn, "backoff", backoff)
-					GetOrchestrator().Dispatch(CmdFetchFailed, "not_found")
-					select {
-					case <-time.After(backoff):
-						continue
-					case <-ctx.Done():
-						return
-					}
-				}
-				break
-			}
-
-			if err != nil {
-				slog.Warn("⚠️ [FETCHER] Block fetch failed after retries", "block", bn, "err", err)
-			}
+			block, err = f.fetchBlockWithRetry(ctx, bn)
 		}
 
 		if !f.sendResult(ctx, BlockData{
@@ -149,15 +100,45 @@ func (f *Fetcher) fetchRangeWithLogs(ctx context.Context, start, end *big.Int) {
 			Logs:     blockLogs,
 			Err:      err,
 		}) {
-			return // ctx cancelled or stopped — abort remaining blocks in this job
+			return
 		}
-
-		// 🚀 🔥 新增：影子进度更新 (用于 UI 先行跳动)
 		GetOrchestrator().Dispatch(CmdNotifyFetchProgress, bn.Uint64())
 	}
+}
 
-	if f.metrics != nil {
-		f.metrics.RecordFetcherJobCompleted(time.Since(startTime))
+func (f *Fetcher) fetchBlockWithRetry(ctx context.Context, bn *big.Int) (*types.Block, error) {
+	var block *types.Block
+	var err error
+	for retries := 0; retries < 5; retries++ {
+		reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		block, err = f.pool.BlockByNumber(reqCtx, bn)
+		cancel()
+
+		if err == nil {
+			GetOrchestrator().Dispatch(CmdFetchSuccess, nil)
+			return block, nil
+		}
+
+		if isNotFound(err) {
+			backoff := time.Duration(50*(1<<uint(retries))) * time.Millisecond
+			GetOrchestrator().Dispatch(CmdFetchFailed, "not_found")
+			select {
+			case <-time.After(backoff):
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		break
+	}
+	return nil, err
+}
+
+func (f *Fetcher) reportRangeError(ctx context.Context, start, end *big.Int, err error) {
+	select {
+	case f.Results <- BlockData{Number: start, RangeEnd: end, Err: err}:
+	case <-ctx.Done():
+	case <-f.stopCh:
 	}
 }
 
