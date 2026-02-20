@@ -57,146 +57,139 @@ type Config struct {
 }
 
 func Load() *Config {
-	// 🚀 工业级增强：递归寻找 .env 文件，解决从不同子目录启动时的路径问题
-	if err := godotenv.Load(); err != nil {
-		if err := godotenv.Load("../.env"); err != nil {
-			if err := godotenv.Load("../../.env"); err != nil {
-				log.Printf("Note: .env file not found in current or parent directories")
-			}
-		}
-	}
+	loadDotEnv()
 
 	const envTrue = "true"
-
-	// 明确模式
-	demoMode := strings.ToLower(os.Getenv("DEMO_MODE")) == envTrue || strings.ToLower(os.Getenv("EMULATOR_ENABLED")) == envTrue
-	energySaving := strings.ToLower(os.Getenv("ENABLE_ENERGY_SAVING")) == envTrue
+	demoMode := isEnvTrue("DEMO_MODE") || isEnvTrue("EMULATOR_ENABLED")
+	energySaving := isEnvTrue("ENABLE_ENERGY_SAVING")
 	chainID := getEnvAsInt64("CHAIN_ID", 1)
 	networkMode := strings.ToLower(getEnv("NETWORK_MODE", "mainnet"))
 
-	// 解析模拟器开关
-	enableSimulatorStr := os.Getenv("ENABLE_SIMULATOR")
-	var enableSimulator bool
-	if enableSimulatorStr != "" {
-		enableSimulator = strings.EqualFold(enableSimulatorStr, envTrue)
-	} else {
-		// 默认逻辑：Demo 模式或本地 Anvil 自动开启
-		enableSimulator = demoMode || chainID == 31337
-	}
+	enableSimulator := resolveSimulatorFlag(demoMode, chainID)
+	enableSimulator = applySecurityLock(networkMode, chainID, enableSimulator)
 
-	// 🛡️ 物理隔绝锁：非 Anvil 模式下强制禁止模拟器
-	if networkMode != "anvil" && chainID != 31337 {
-		if enableSimulator {
-			log.Printf("🔒 SECURITY_LOCK: NetworkMode=%s detected. Forcing ENABLE_SIMULATOR=false", networkMode)
-			enableSimulator = false
-		}
-	}
-
-	// 解析RPC URL列表
-	rpcUrlsStr := getEnv("RPC_URLS", "https://eth.llamarpc.com")
-	rpcUrls := strings.Split(rpcUrlsStr, ",")
-	for i, url := range rpcUrls {
-		rpcUrls[i] = strings.TrimSpace(url)
-	}
-
-	rpcTimeoutSeconds := getEnvAsInt64("RPC_TIMEOUT_SECONDS", 10)
-	rpcRateLimit := int(getEnvAsInt64("RPC_RATE_LIMIT", 20))
-	fetchConcurrency := int(getEnvAsInt64("FETCH_CONCURRENCY", 10))
-	fetchBatchSize := int(getEnvAsInt64("FETCH_BATCH_SIZE", 200))
-	maxGasPrice := getEnvAsInt64("MAX_GAS_PRICE", 500)
-	gasSafetyMargin := int(getEnvAsInt64("GAS_SAFETY_MARGIN", 20))
-	checkpointBatch := int(getEnvAsInt64("CHECKPOINT_BATCH", 100))
-	retryQueueSize := int(getEnvAsInt64("RETRY_QUEUE_SIZE", 500))
-	maxSyncBatch := int(getEnvAsInt64("MAX_SYNC_BATCH", 20)) // 提高至 20 块，对抗 1.0 TPS 限制
-
-	// 🛡️ Deadlock watchdog 配置
-	deadlockWatchdogEnabled := strings.ToLower(os.Getenv("DEADLOCK_WATCHDOG_ENABLED")) == envTrue
-	deadlockStallThresholdSec := getEnvAsInt64("DEADLOCK_STALL_THRESHOLD_SECONDS", 120)
-	deadlockCheckIntervalSec := getEnvAsInt64("DEADLOCK_CHECK_INTERVAL_SECONDS", 30)
-
-	// 🔥 Anvil Lab Mode 配置
-	forceAlwaysActive := strings.ToLower(os.Getenv("FORCE_ALWAYS_ACTIVE")) == envTrue
-
-	// Check if we're connecting to a testnet
-	isTestnet := false
-	for _, url := range rpcUrls {
-		if strings.Contains(strings.ToLower(url), "sepolia") ||
-			strings.Contains(strings.ToLower(url), "holesky") ||
-			strings.Contains(strings.ToLower(url), "goerli") {
-			isTestnet = true
-			break
-		}
-	}
-
-	// Handle START_BLOCK with special "latest" keyword
-	startBlockStr := getEnv("START_BLOCK", "0")
-	var startBlock int64
-
-	if startBlockStr == "latest" {
-		startBlock = -1 // Special value to indicate "latest" - will be resolved at runtime
-	} else {
-		startBlock = getEnvAsInt64("START_BLOCK", 0)
-	}
-
-	// 解析监控的代币地址
-	watchedTokensStr := getEnv("WATCHED_TOKEN_ADDRESSES", "")
-	var watchedTokens []string
-	if watchedTokensStr != "" {
-		watchedTokens = strings.Split(watchedTokensStr, ",")
-		for i, addr := range watchedTokens {
-			watchedTokens[i] = strings.TrimSpace(addr)
-		}
-	}
+	rpcUrls := parseRPCUrls(demoMode)
+	isTestnet := detectTestnet(rpcUrls)
+	startBlock, startBlockStr := parseStartBlock()
 
 	cfg := &Config{
-		DatabaseURL:        getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
-		RPCURLs:            rpcUrls,
-		WSSURL:             getEnv("WSS_URL", ""),
-		ChainID:            chainID,
-		StartBlock:         startBlock,
-		StartBlockStr:      startBlockStr,
-		LogLevel:           getEnv("LOG_LEVEL", "info"),
-		LogFormat:          getEnv("LOG_FORMAT", "json"),
-		RPCTimeout:         time.Duration(rpcTimeoutSeconds) * time.Second,
-		RPCRateLimit:       rpcRateLimit,
-		FetchConcurrency:   fetchConcurrency,
-		FetchBatchSize:     fetchBatchSize,
-		MaxGasPrice:        maxGasPrice,
-		GasSafetyMargin:    gasSafetyMargin,
-		CheckpointBatch:    checkpointBatch,
-		RetryQueueSize:     retryQueueSize,
-		DemoMode:           demoMode,
-		EnableSimulator:    enableSimulator,
-		NetworkMode:        networkMode,
-		IsTestnet:          isTestnet,
-		MaxSyncBatch:       maxSyncBatch,
-		EnableEnergySaving: energySaving,
-		EnableRecording:    strings.ToLower(os.Getenv("ENABLE_RECORDING")) == envTrue,
-		RecordingPath:      getEnv("RECORDING_PATH", "trajectory.lz4"),
-		EphemeralMode:      strings.ToLower(os.Getenv("EPHEMERAL_MODE")) == envTrue,
-		// 🛡️ Deadlock watchdog: enabled for all networks
-		DeadlockWatchdogEnabled:   deadlockWatchdogEnabled,
-		DeadlockStallThresholdSec: deadlockStallThresholdSec,
-		DeadlockCheckIntervalSec:  deadlockCheckIntervalSec,
-		// 🔥 Anvil Lab Mode
-		ForceAlwaysActive:     forceAlwaysActive,
-		StrictHeightCheck:     strings.ToLower(os.Getenv("STRICT_HEIGHT_CHECK")) != "false", // default true
-		DriftTolerance:        getEnvAsInt64("DRIFT_TOLERANCE", 5),
-		WatchedTokenAddresses: watchedTokens,
-		TokenFilterMode:       getEnv("TOKEN_FILTER_MODE", "whitelist"), // 默认启用过滤
-		Port:                  getEnv("PORT", "8080"),
-		AppTitle:              getEnv("APP_TITLE", "🚀 Web3 Indexer Dashboard"),
+		DatabaseURL:               getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/indexer?sslmode=disable"),
+		RPCURLs:                   rpcUrls,
+		WSSURL:                    getEnv("WSS_URL", ""),
+		ChainID:                   chainID,
+		StartBlock:                startBlock,
+		StartBlockStr:             startBlockStr,
+		LogLevel:                  getEnv("LOG_LEVEL", "info"),
+		LogFormat:                 getEnv("LOG_FORMAT", "json"),
+		RPCTimeout:                time.Duration(getEnvAsInt64("RPC_TIMEOUT_SECONDS", 10)) * time.Second,
+		RPCRateLimit:              int(getEnvAsInt64("RPC_RATE_LIMIT", 20)),
+		FetchConcurrency:          int(getEnvAsInt64("FETCH_CONCURRENCY", 10)),
+		FetchBatchSize:            int(getEnvAsInt64("FETCH_BATCH_SIZE", 200)),
+		MaxGasPrice:               getEnvAsInt64("MAX_GAS_PRICE", 500),
+		GasSafetyMargin:           int(getEnvAsInt64("GAS_SAFETY_MARGIN", 20)),
+		CheckpointBatch:           int(getEnvAsInt64("CHECKPOINT_BATCH", 100)),
+		RetryQueueSize:            int(getEnvAsInt64("RETRY_QUEUE_SIZE", 500)),
+		DemoMode:                  demoMode,
+		EnableSimulator:           enableSimulator,
+		NetworkMode:               networkMode,
+		IsTestnet:                 isTestnet,
+		MaxSyncBatch:              int(getEnvAsInt64("MAX_SYNC_BATCH", 20)),
+		EnableEnergySaving:        energySaving,
+		EnableRecording:           isEnvTrue("ENABLE_RECORDING"),
+		RecordingPath:             getEnv("RECORDING_PATH", "trajectory.lz4"),
+		EphemeralMode:             isEnvTrue("EPHEMERAL_MODE"),
+		DeadlockWatchdogEnabled:   isEnvTrue("DEADLOCK_WATCHDOG_ENABLED"),
+		DeadlockStallThresholdSec: getEnvAsInt64("DEADLOCK_STALL_THRESHOLD_SECONDS", 120),
+		DeadlockCheckIntervalSec:  getEnvAsInt64("DEADLOCK_CHECK_INTERVAL_SECONDS", 30),
+		ForceAlwaysActive:         isEnvTrue("FORCE_ALWAYS_ACTIVE"),
+		StrictHeightCheck:         strings.ToLower(os.Getenv("STRICT_HEIGHT_CHECK")) != "false",
+		DriftTolerance:            getEnvAsInt64("DRIFT_TOLERANCE", 5),
+		WatchedTokenAddresses:     parseWatchedTokens(),
+		TokenFilterMode:           getEnv("TOKEN_FILTER_MODE", "whitelist"),
+		Port:                      getEnv("PORT", "8080"),
+		AppTitle:                  getEnv("APP_TITLE", "🚀 Web3 Indexer Dashboard"),
 	}
 
-	// 🚨 优先级锁定：优先信任显式传入的 RPC_URLS 环境变量
+	applyLocalAnvilFallback(cfg)
+	logArchitecture(cfg)
+
+	return cfg
+}
+
+func loadDotEnv() {
+	_ = godotenv.Load()             // nolint:errcheck // optional loading
+	_ = godotenv.Load("../.env")    // nolint:errcheck // optional loading
+	_ = godotenv.Load("../../.env") // nolint:errcheck // optional loading
+}
+
+func isEnvTrue(key string) bool {
+	return strings.ToLower(os.Getenv(key)) == "true"
+}
+
+func resolveSimulatorFlag(demoMode bool, chainID int64) bool {
+	if val := os.Getenv("ENABLE_SIMULATOR"); val != "" {
+		return strings.EqualFold(val, "true")
+	}
+	return demoMode || chainID == 31337
+}
+
+func applySecurityLock(networkMode string, chainID int64, current bool) bool {
+	if networkMode != "anvil" && chainID != 31337 && current {
+		log.Printf("🔒 SECURITY_LOCK: NetworkMode=%s detected. Forcing ENABLE_SIMULATOR=false", networkMode)
+		return false
+	}
+	return current
+}
+
+func parseRPCUrls(_ bool) []string {
+	urlsStr := getEnv("RPC_URLS", "https://eth.llamarpc.com")
+	urls := strings.Split(urlsStr, ",")
+	for i, u := range urls {
+		urls[i] = strings.TrimSpace(u)
+	}
+	return urls
+}
+
+func detectTestnet(urls []string) bool {
+	for _, u := range urls {
+		l := strings.ToLower(u)
+		if strings.Contains(l, "sepolia") || strings.Contains(l, "holesky") || strings.Contains(l, "goerli") {
+			return true
+		}
+	}
+	return false
+}
+
+func parseStartBlock() (int64, string) {
+	val := getEnv("START_BLOCK", "0")
+	if val == "latest" {
+		return -1, val
+	}
+	return getEnvAsInt64("START_BLOCK", 0), val
+}
+
+func parseWatchedTokens() []string {
+	val := getEnv("WATCHED_TOKEN_ADDRESSES", "")
+	if val == "" {
+		return nil
+	}
+	tokens := strings.Split(val, ",")
+	for i, t := range tokens {
+		tokens[i] = strings.TrimSpace(t)
+	}
+	return tokens
+}
+
+func applyLocalAnvilFallback(cfg *Config) {
 	if os.Getenv("RPC_URLS") == "" && cfg.DemoMode {
 		cfg.RPCURLs = []string{"http://127.0.0.1:8545"}
 		cfg.ChainID = 31337
-		cfg.RPCRateLimit = 200 // 本地环境，火力全开
+		cfg.RPCRateLimit = 200
 		log.Printf("🔒 SECURITY_LOCK: NO RPC_URLS FOUND, FALLING BACK TO LOCAL ANVIL (targets=%v)", cfg.RPCURLs)
 	}
+}
 
-	// 打印确定性启动日志
+func logArchitecture(cfg *Config) {
 	networkName := "Mainnet"
 	if cfg.ChainID == 11155111 {
 		networkName = "Sepolia"
@@ -205,8 +198,6 @@ func Load() *Config {
 	}
 	log.Printf("🚀 Architecture Loaded: mode=%v network=%s rps=%d targets=%d",
 		cfg.DemoMode, networkName, cfg.RPCRateLimit, len(cfg.RPCURLs))
-
-	return cfg
 }
 
 func getEnv(key, defaultValue string) string {
