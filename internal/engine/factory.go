@@ -20,16 +20,46 @@ type StrategyFactory struct {
 // NewStrategyFactory 创建策略工厂
 func NewStrategyFactory() *StrategyFactory {
 	mode := os.Getenv("APP_MODE")
+	rpcURL := os.Getenv("RPC_URL")
+	rpcURLs := os.Getenv("RPC_URLS")
+
+	slog.Debug("🔍 StrategyFactory: Environment check",
+		"app_mode_env", mode,
+		"rpc_url_env", rpcURL,
+		"rpc_urls_env", rpcURLs)
+
 	if mode == "" {
-		// 尝试从 RPC_URL 推断模式
-		rpcURL := os.Getenv("RPC_URL")
-		if strings.Contains(rpcURL, "localhost") || strings.Contains(rpcURL, "127.0.0.1") || strings.Contains(rpcURL, "anvil") {
+		// 尝试从 RPC_URL 或 RPC_URLS 推断模式
+		targetURL := rpcURL
+		if targetURL == "" && rpcURLs != "" {
+			// 取第一个 URL
+			urls := strings.Split(rpcURLs, ",")
+			if len(urls) > 0 {
+				targetURL = strings.TrimSpace(urls[0])
+			}
+		}
+
+		slog.Debug("🔍 StrategyFactory: Auto-detect from RPC", "target_url", targetURL)
+
+		if targetURL == "" {
+			// 🔥 关键修复：如果没有检测到 RPC URL，检查是否是 Anvil 的默认端口
+			// demo2 环境通常使用 8545 或类似的本地端口
+			mode = "EPHEMERAL_ANVIL" // 默认为 Anvil 模式以支持演示
+			slog.Info("🔍 StrategyFactory: No RPC URL found, defaulting to ANVIL for demo")
+		} else if strings.Contains(targetURL, "localhost") ||
+			strings.Contains(targetURL, "127.0.0.1") ||
+			strings.Contains(targetURL, "anvil") ||
+			strings.Contains(targetURL, ":8545") || // Anvil 默认端口
+			strings.Contains(targetURL, ":8546") { // Anvil WS 端口
 			mode = "EPHEMERAL_ANVIL"
+			slog.Info("🔍 StrategyFactory: Detected Anvil from RPC URL", "url", targetURL)
 		} else {
 			mode = "PERSISTENT_TESTNET"
+			slog.Info("🔍 StrategyFactory: Detected Testnet from RPC URL", "url", targetURL)
 		}
 	}
-	
+
+	slog.Info("🔍 StrategyFactory: Final mode selected", "mode", mode)
 	return &StrategyFactory{mode: mode}
 }
 
@@ -38,19 +68,19 @@ func NewStrategyFactory() *StrategyFactory {
 func (f *StrategyFactory) CreateStrategy() Strategy {
 	switch f.mode {
 	case "EPHEMERAL_ANVIL", "ANVIL", "LOCAL":
-		slog.Info("🏭 StrategyFactory: Manufacturing [Anvil-Speed] strategy", 
+		slog.Info("🏭 StrategyFactory: Manufacturing [Anvil-Speed] strategy",
 			"mode", f.mode,
 			"qps", 1000,
 			"backpressure", 5000)
 		return &AnvilStrategy{}
-		
+
 	case "PERSISTENT_TESTNET", "TESTNET", "SEPOLIA":
 		slog.Info("🏭 StrategyFactory: Manufacturing [Sepolia-Eco] strategy",
 			"mode", f.mode,
 			"qps", 2,
 			"backpressure", 100)
 		return &TestnetStrategy{}
-		
+
 	default:
 		// 🔥 防御性设计：未知模式默认使用最保守的策略
 		slog.Warn("⚠️ StrategyFactory: Unknown APP_MODE, defaulting to SAFE_TESTNET",
@@ -86,11 +116,11 @@ func (f *StrategyFactory) ApplyToOrchestrator(orch *Orchestrator, strategy Strat
 		"burst", burst,
 		"backpressure_threshold", strategy.GetBackpressureThreshold(),
 		"seq_buffer", strategy.GetSeqBufferSize())
-	
+
 	// 这里可以扩展到全局限流器
 	_ = limit
 	_ = burst
-	
+
 	// 2. 记录策略信息到 orchestrator（通过日志而非状态存储）
 	slog.Info("🚀 Engine Primed",
 		"strategy", strategy.Name(),
@@ -107,15 +137,15 @@ func (f *StrategyFactory) GetGlobalRateLimiter(strategy Strategy) *rate.Limiter 
 
 // StrategyInfo 策略信息结构（用于监控和 UI 展示）
 type StrategyInfo struct {
-	Name               string  `json:"name"`
-	Mode               string  `json:"mode"`
-	QPSLimit           float64 `json:"qps_limit"`
-	Burst              int     `json:"burst"`
-	BackpressureThreshold int `json:"backpressure_threshold"`
-	SeqBufferSize      int     `json:"seq_buffer_size"`
-	ShouldPersist      bool    `json:"should_persist"`
-	Confirmations      uint64  `json:"confirmations"`
-	BatchSize          int     `json:"batch_size"`
+	Name                  string  `json:"name"`
+	Mode                  string  `json:"mode"`
+	QPSLimit              float64 `json:"qps_limit"`
+	Burst                 int     `json:"burst"`
+	BackpressureThreshold int     `json:"backpressure_threshold"`
+	SeqBufferSize         int     `json:"seq_buffer_size"`
+	ShouldPersist         bool    `json:"should_persist"`
+	Confirmations         uint64  `json:"confirmations"`
+	BatchSize             int     `json:"batch_size"`
 }
 
 // GetStrategyInfo 获取策略信息（用于 /api/status）

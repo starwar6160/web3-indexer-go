@@ -110,7 +110,7 @@ func captureGoroutineSnapshot() GoroutineSnapshot {
 		if strings.HasPrefix(line, "goroutine ") {
 			_, err := fmt.Sscanf(line, "goroutine %d [%[^]]]", &currentID, &currentState)
 			if err != nil {
-				slog.Warn("failed_to_parse_goroutine_header", "err", err)
+				slog.Warn("failed_to_parse_goroutine_header", "err", err.Error())
 			}
 		}
 
