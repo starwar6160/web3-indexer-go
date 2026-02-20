@@ -177,17 +177,46 @@ func (me *MetadataEnricher) batchWorker() {
 // processBatch 批量处理（使用 Multicall3 优化）
 func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 	startTime := time.Now()
-	addrCount := len(addresses)
 
-	// 1. 构造 Multicall 调用列表 (每个地址请求 Symbol 和 Decimals)
-	// 使用 struct 匹配 Multicall3 Result ABI
-	type Call3 struct {
-		Target       common.Address
-		AllowFailure bool
-		CallData     []byte
+	// 1. 构造与打包
+	input, err := me.prepareMulticallInput(addresses)
+	if err != nil {
+		return
 	}
-	calls := make([]Call3, 0, addrCount*2)
 
+	// 2. 执行 RPC
+	output, err := me.executeMulticall(input)
+	if err != nil {
+		return
+	}
+
+	// 3. 解析结果结构
+	multiRes, err := me.unpackMulticallResults(output)
+	if err != nil {
+		return
+	}
+
+	// 4. 分发处理每个代币
+	me.parseAndDistribute(addresses, multiRes)
+
+	me.logger.Debug("📦 [MetadataEnricher] batch processed",
+		"addr_count", len(addresses),
+		"duration", time.Since(startTime))
+}
+
+type call3 struct {
+	Target       common.Address
+	AllowFailure bool
+	CallData     []byte
+}
+
+type multiResult struct {
+	Success    bool
+	ReturnData []byte
+}
+
+func (me *MetadataEnricher) prepareMulticallInput(addresses []common.Address) ([]byte, error) {
+	calls := make([]call3, 0, len(addresses)*2)
 	for _, addr := range addresses {
 		symData, err := me.erc20ABI.Pack("symbol")
 		if err != nil {
@@ -198,94 +227,81 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 			continue
 		}
 		calls = append(calls,
-			Call3{addr, true, symData},
-			Call3{addr, true, decData},
+			call3{addr, true, symData},
+			call3{addr, true, decData},
 		)
 	}
-
-	// 2. 打包并发送请求
 	input, err := me.multicallABI.Pack("aggregate3", calls)
 	if err != nil {
 		me.logger.Error("❌ [MetadataEnricher] Pack failed", "err", err)
-		return
 	}
+	return input, err
+}
 
+func (me *MetadataEnricher) executeMulticall(input []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(me.ctx, 10*time.Second)
 	defer cancel()
-
 	msg := ethereum.CallMsg{To: &Multicall3Address, Data: input}
 	output, err := me.client.CallContract(ctx, msg, nil)
 	if err != nil {
 		me.logger.Warn("⚠️ [MetadataEnricher] Multicall3 execution failed", "err", err)
-		return
 	}
+	return output, err
+}
 
-	// 3. 解析结果
-	type MultiResult struct {
-		Success    bool
-		ReturnData []byte
-	}
-	var multiRes []MultiResult
-	if err := me.multicallABI.UnpackIntoInterface(&multiRes, "aggregate3", output); err != nil {
+func (me *MetadataEnricher) unpackMulticallResults(output []byte) ([]multiResult, error) {
+	var res []multiResult
+	err := me.multicallABI.UnpackIntoInterface(&res, "aggregate3", output)
+	if err != nil {
 		me.logger.Error("❌ [MetadataEnricher] Unpack failed", "err", err)
-		return
 	}
+	return res, err
+}
 
-	// 4. 对齐结果并分发更新
+func (me *MetadataEnricher) parseAndDistribute(addresses []common.Address, results []multiResult) {
 	for i, addr := range addresses {
-		addrHex := addr.Hex()
-		meta := models.TokenMetadata{Symbol: "UNKNOWN", Decimals: 18}
-		found := false
-
-		// 解析 Symbol (结果索引为 i*2)
-		if multiRes[i*2].Success && len(multiRes[i*2].ReturnData) >= 64 {
-			// ERC20 symbol 返回 string，需要 Unpack
-			if out, err := me.erc20ABI.Unpack("symbol", multiRes[i*2].ReturnData); err == nil && len(out) > 0 {
-				if s, ok := out[0].(string); ok {
-					meta.Symbol = s
-					found = true
-				}
-			}
-		}
-
-		// 解析 Decimals (结果索引为 i*2+1)
-		if multiRes[i*2+1].Success && len(multiRes[i*2+1].ReturnData) >= 32 {
-			// decimals 返回 uint8
-			if out, err := me.erc20ABI.Unpack("decimals", multiRes[i*2+1].ReturnData); err == nil && len(out) > 0 {
-				if d, ok := out[0].(uint8); ok {
-					meta.Decimals = d
-					found = true
-				}
-			}
-		}
-
+		meta, found := me.parseTokenPair(results[i*2], results[i*2+1])
 		if found {
-			// 更新 L1 缓存 (Memory)
-			me.cache.Store(addrHex, meta)
-
-			// 🚀 工业级故障隔离：持久化到 L2 (DB) 采用“尽力而为”模式
-			// 即使数据库表不存在或写入失败，也不应导致整个同步逻辑回滚
-			if me.db != nil {
-				if err := me.db.SaveTokenMetadata(meta, addrHex); err != nil {
-					me.logger.Warn("⚠️ [MetadataEnricher] L2 persistence failed (non-blocking)",
-						"address", addrHex[:10],
-						"err", err)
-				}
-			}
-
-			me.logger.Debug("🎯 [MetadataEnricher] discovered",
-				"address", addrHex[:10],
-				"symbol", meta.Symbol,
-				"decimals", meta.Decimals)
+			me.updateCacheAndDB(addr, meta)
 		}
+		me.inflight.Delete(addr.Hex())
+	}
+}
 
-		// 任务完成，移除 inflight 标记
-		me.inflight.Delete(addrHex)
+func (me *MetadataEnricher) parseTokenPair(symRes, decRes multiResult) (models.TokenMetadata, bool) {
+	meta := models.TokenMetadata{Symbol: "UNKNOWN", Decimals: 18}
+	found := false
+
+	// Symbol
+	if symRes.Success && len(symRes.ReturnData) >= 64 {
+		if out, err := me.erc20ABI.Unpack("symbol", symRes.ReturnData); err == nil && len(out) > 0 {
+			if s, ok := out[0].(string); ok {
+				meta.Symbol = s
+				found = true
+			}
+		}
 	}
 
-	me.logger.Debug("📦 [MetadataEnricher] batch processed",
-		"addr_count", addrCount,
-		"duration", time.Since(startTime))
+	// Decimals
+	if decRes.Success && len(decRes.ReturnData) >= 32 {
+		if out, err := me.erc20ABI.Unpack("decimals", decRes.ReturnData); err == nil && len(out) > 0 {
+			if d, ok := out[0].(uint8); ok {
+				meta.Decimals = d
+				found = true
+			}
+		}
+	}
+	return meta, found
+}
+
+func (me *MetadataEnricher) updateCacheAndDB(addr common.Address, meta models.TokenMetadata) {
+	addrHex := addr.Hex()
+	me.cache.Store(addrHex, meta)
+	if me.db != nil {
+		if err := me.db.SaveTokenMetadata(meta, addrHex); err != nil {
+			me.logger.Warn("⚠️ [MetadataEnricher] L2 persistence failed", "address", addrHex[:10], "err", err)
+		}
+	}
 }
 
 // Stop 停止丰富器
