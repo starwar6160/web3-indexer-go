@@ -259,6 +259,10 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		return
 	}
 
+	// 🔥 初始化热调优管理器（必须在 RPC pool 创建之后）
+	engine.InitHotTuneManager(rpcPool)
+	slog.Info("🔥 HotTuneManager ready", "endpoint", "/debug/hotune/apply")
+
 	if err := verifyNetworkWithRetry(); err != nil {
 		return
 	}

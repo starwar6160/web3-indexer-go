@@ -76,6 +76,9 @@ func (d *DebugServer) RegisterDebugRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/race/check", d.handleRaceCheck)
 	mux.HandleFunc("/debug/goroutines/dump", d.handleGoroutineDump)
 	mux.HandleFunc("/debug/goroutines/snapshot", d.handleGoroutineSnapshot)
+
+	// 🔥 热调优 API 端点
+	RegisterHotTuneRoutes(mux)
 }
 
 // ─── 数据结构 ─────────────────────────────────────────────────────────────────
