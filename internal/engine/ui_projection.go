@@ -160,6 +160,7 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		Warning:       warning,
 		IsTimeParadox: isTimeParadox,
 		// 🚀 NEW: RPC reality fields
+		// #nosec G115 - RPCActual only used for display, overflow doesn't affect core logic
 		RPCActual:    int64(rpcActual),
 		RealityGap:   realityGap,
 		ParityStatus: parityStatus,

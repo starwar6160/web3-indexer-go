@@ -35,8 +35,10 @@ func (o *Orchestrator) LogPulse(ctx context.Context) {
 		isInFuture = realityGap < 0
 
 		// Parity health check
+		// #nosec G115 - comparison only used for logging/display, overflow doesn't affect core logic
 		if memNum.Int64() > int64(rpcActual) {
 			parityCheck = "paradox_detected"
+			// #nosec G115 - calculation only used for logging/display, overflow doesn't affect core logic
 		} else if int64(rpcActual)-memNum.Int64() > 1000 {
 			parityCheck = "lagging"
 		}

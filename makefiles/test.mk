@@ -1,6 +1,6 @@
 # --- 质量保证流 (QA & Testing) ---
 
-.PHONY: test test-api lint security check
+.PHONY: test test-api check
 
 # Integration Test: API Logic Guards (Python-based)
 test-api:
@@ -20,19 +20,6 @@ test-api:
 	fi
 	@echo "✅ All API Logic Guards Passed."
 
-lint:
-	@echo "🔍 Running golangci-lint..."
-	golangci-lint run ./...
-
-security:
-	@echo "🔒 Running security scans..."
-	# G104: Errors unhandled (too many in docs_index tools)
-	# G304: File path injection (common in CLI tools like docs_index)
-	# G302: File permissions (0644 is standard for public docs/logs)
-	# G117: Struct field matches secret (common in mock configs)
-	$(shell go env GOPATH)/bin/gosec -exclude=G104,G304,G302,G117 ./...
-	# $(shell go env GOPATH)/bin/govulncheck ./...
-
 test:
 	@echo "🧪 Running Go unit tests..."
 	go test -v ./internal/...
@@ -41,5 +28,5 @@ test-integration:
 	@echo "🧪 Running Industrial Grade Integration Tests..."
 	go test -v -tags=integration ./internal/engine
 
-check: lint security test test-integration test-api
+check: qa test test-integration test-api
 	@echo "✅ All quality gates passed!"
