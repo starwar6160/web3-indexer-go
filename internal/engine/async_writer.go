@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -124,116 +123,51 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		return
 	}
 
-	start := time.Now()
-
-	// 🚀 🔥 Ephemeral Mode (内存黑洞模式)
 	if w.ephemeralMode {
-		maxHeight := uint64(0)
-		totalEvents := 0
-		for _, task := range batch {
-			if task.Height > maxHeight {
-				maxHeight = task.Height
-			}
-			totalEvents += len(task.Transfers)
-			GetMetrics().RecordBlockActivity(1)
-		}
-
-		// 仍然更新内存水位线和视觉进度
-		w.diskWatermark.Store(maxHeight)
-		w.orchestrator.AdvanceDBCursor(maxHeight)
-		w.orchestrator.DispatchLog("INFO", "🔥 Ephemeral Flush: Metadata Ignored", "height", maxHeight, "dropped_events", totalEvents)
+		w.flushEphemeral(batch)
 		return
 	}
 
-	// 开启高性能事务
+	w.flushToDB(batch)
+}
+
+func (w *AsyncWriter) flushEphemeral(batch []PersistTask) {
+	maxHeight := uint64(0)
+	totalEvents := 0
+	for _, task := range batch {
+		if task.Height > maxHeight {
+			maxHeight = task.Height
+		}
+		totalEvents += len(task.Transfers)
+		GetMetrics().RecordBlockActivity(1)
+	}
+
+	w.diskWatermark.Store(maxHeight)
+	w.orchestrator.AdvanceDBCursor(maxHeight)
+	w.orchestrator.DispatchLog("INFO", "🔥 Ephemeral Flush: Metadata Ignored", "height", maxHeight, "dropped_events", totalEvents)
+}
+
+func (w *AsyncWriter) flushToDB(batch []PersistTask) {
+	start := time.Now()
 	tx, err := w.db.BeginTxx(w.ctx, nil)
 	if err != nil {
 		slog.Error("📝 AsyncWriter: BeginTx failed", "err", err)
 		return
 	}
 	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil && rollbackErr != sql.ErrTxDone {
-			slog.Debug("📝 AsyncWriter: Rollback skipped", "reason", "already_committed")
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+			slog.Debug("📝 AsyncWriter: Rollback skipped", "reason", "committed")
 		}
 	}()
 
-	var (
-		maxHeight         uint64
-		totalTransfers    = 0
-		validBlocks       = 0
-		blocksToInsert    = make([]models.Block, 0, len(batch))
-		transfersToInsert = make([]models.Transfer, 0)
-	)
+	blocks, transfers, maxHeight := w.prepareBatch(batch)
 
-	for _, task := range batch {
-		if task.Height > maxHeight {
-			maxHeight = task.Height
-		}
-
-		// 🚀 即使是空块，也记录处理活动，确保 BPS 指标真实反映同步速度
-		GetMetrics().RecordBlockActivity(1)
-
-		// ✅ 必须始终写入区块元数据（即使空块）
-		// 否则 /api/blocks 会长期停留在旧高度，造成 UI 与链上高度严重不一致。
-		validBlocks++
-		blocksToInsert = append(blocksToInsert, task.Block)
-
-		if len(task.Transfers) > 0 {
-			totalTransfers += len(task.Transfers)
-			transfersToInsert = append(transfersToInsert, task.Transfers...)
-		}
-	}
-
-	if validBlocks > 0 {
-		// 🚀 使用 BulkInserter (COPY 协议) 进行物理落盘
-		inserter := NewBulkInserter(w.db)
-
-		// 1. 批量写入区块
-		if err := inserter.InsertBlocksBatchTx(w.ctx, tx, blocksToInsert); err != nil {
-			slog.Error("📝 AsyncWriter: Bulk insert blocks failed", "err", err)
-			return
-		}
-
-		// 2. 批量写入转账（有数据时才写）
-		if len(transfersToInsert) > 0 {
-			if err := inserter.InsertTransfersBatchTx(w.ctx, tx, transfersToInsert); err != nil {
-				slog.Error("📝 AsyncWriter: Bulk insert transfers failed", "err", err)
-				return
-			}
-		}
-	}
-
-	// 3. 更新同步检查点 (SSOT 物理确认)
-	// 🛡️ SQL 编码修复：显式转换为字符串，避免 PostgreSQL 驱动对 uint64 的编码歧义
-	maxHeightStr := fmt.Sprintf("%d", maxHeight)
-	if _, err := tx.ExecContext(w.ctx,
-		`INSERT INTO sync_checkpoints (chain_id, last_synced_block)
-		 VALUES (1, $1)
-		 ON CONFLICT (chain_id) DO UPDATE SET
-			last_synced_block = EXCLUDED.last_synced_block,
-			updated_at = NOW()`,
-		maxHeightStr); err != nil {
-		slog.Error("📝 AsyncWriter: Update checkpoint failed", "err", err)
+	if err := w.persistBatch(tx, blocks, transfers); err != nil {
 		return
 	}
 
-	// 🚀 Grafana 对齐：更新 sync_status 表 (非致命操作)
-	syncedBlock := int64(math.MaxInt64)
-	if maxHeight <= uint64(math.MaxInt64) {
-		syncedBlock = int64(maxHeight)
-	}
-
-	// 🛡️ 资深调优：使用独立的 Exec 而非合并在主逻辑中，确保即便此表报错也不影响主位点更新
-	_, err = tx.ExecContext(w.ctx, `
-		INSERT INTO sync_status (chain_id, last_processed_block, last_processed_timestamp, status)
-		VALUES ($1, $2, NOW(), 'syncing')
-		ON CONFLICT (chain_id) DO UPDATE SET
-			last_processed_block = EXCLUDED.last_processed_block,
-			last_processed_timestamp = NOW(),
-			status = EXCLUDED.status
-	`, 1, syncedBlock)
-	if err != nil {
-		slog.Debug("📝 AsyncWriter: sync_status update skipped (non-fatal)", "err", err)
+	if err := w.updateCheckpoints(tx, maxHeight); err != nil {
+		return
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -241,37 +175,74 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		return
 	}
 
-	// 更新磁盘水位线
 	w.diskWatermark.Store(maxHeight)
 	w.writeDuration.Store(int64(time.Since(start)))
-
-	// --- 4. 闭环通知 (SSOT) ---
-	// 无论是否写入了数据库（空块也算同步成功），都要通知 Orchestrator
-	// 只有收到 CmdCommitDisk，SyncedCursor 才会真正推进
 	w.orchestrator.Dispatch(CmdCommitDisk, maxHeight)
+	w.logFlushStats(batch, maxHeight, len(transfers), time.Since(start))
+}
 
-	// 性能日志
-	dur := time.Since(start)
-	if dur > 500*time.Millisecond {
-		slog.Warn("📝 AsyncWriter: SLOW WRITE DETECTED",
-			"batch_len", len(batch),
-			"valid_blocks", validBlocks,
-			"tip", maxHeight,
-			"dur", dur)
+func (w *AsyncWriter) prepareBatch(batch []PersistTask) ([]models.Block, []models.Transfer, uint64) {
+	blocks := make([]models.Block, 0, len(batch))
+	transfers := make([]models.Transfer, 0)
+	var maxHeight uint64
+
+	for _, task := range batch {
+		if task.Height > maxHeight {
+			maxHeight = task.Height
+		}
+		GetMetrics().RecordBlockActivity(1)
+		blocks = append(blocks, task.Block)
+		if len(task.Transfers) > 0 {
+			transfers = append(transfers, task.Transfers...)
+		}
+	}
+	return blocks, transfers, maxHeight
+}
+
+func (w *AsyncWriter) persistBatch(tx *sqlx.Tx, blocks []models.Block, transfers []models.Transfer) error {
+	inserter := NewBulkInserter(w.db)
+	if err := inserter.InsertBlocksBatchTx(w.ctx, tx, blocks); err != nil {
+		slog.Error("📝 AsyncWriter: Bulk insert blocks failed", "err", err)
+		return err
+	}
+	if len(transfers) > 0 {
+		if err := inserter.InsertTransfersBatchTx(w.ctx, tx, transfers); err != nil {
+			slog.Error("📝 AsyncWriter: Bulk insert transfers failed", "err", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *AsyncWriter) updateCheckpoints(tx *sqlx.Tx, maxHeight uint64) error {
+	maxHeightStr := fmt.Sprintf("%d", maxHeight)
+	_, err := tx.ExecContext(w.ctx,
+		`INSERT INTO sync_checkpoints (chain_id, last_synced_block)
+		 VALUES (1, $1) ON CONFLICT (chain_id) DO UPDATE SET last_synced_block = EXCLUDED.last_synced_block, updated_at = NOW()`,
+		maxHeightStr)
+	if err != nil {
+		slog.Error("📝 AsyncWriter: Update checkpoint failed", "err", err)
+		return err
 	}
 
-	if validBlocks > 0 || dur > 100*time.Millisecond {
-		slog.Info("📝 AsyncWriter: Batch Flushed",
-			"batch_len", len(batch),
-			"valid_blocks", validBlocks,
-			"transfers", totalTransfers,
-			"tip", maxHeight,
-			"dur", dur)
+	syncedBlock, _ := SafeCastUint64ToInt64(maxHeight) // nolint:errcheck // display only
+	_, err = tx.ExecContext(w.ctx, `
+		INSERT INTO sync_status (chain_id, last_processed_block, last_processed_timestamp, status)
+		VALUES ($1, $2, NOW(), 'syncing')
+		ON CONFLICT (chain_id) DO UPDATE SET
+			last_processed_block = EXCLUDED.last_processed_block,
+			last_processed_timestamp = NOW()`,
+		1, syncedBlock)
+	if err != nil {
+		slog.Debug("📝 AsyncWriter: sync_status update skipped", "err", err)
+	}
+	return nil
+}
 
-		w.orchestrator.DispatchLog("SUCCESS", "💾 Batch Flushed to Disk",
-			"blocks", len(batch),
-			"transfers", totalTransfers,
-			"tip", maxHeight)
+func (w *AsyncWriter) logFlushStats(batch []PersistTask, tip uint64, txCount int, dur time.Duration) {
+	if len(batch) > 0 || dur > 100*time.Millisecond {
+		slog.Info("📝 AsyncWriter: Batch Flushed", "size", len(batch), "txs", txCount, "tip", tip, "dur", dur)
+		w.orchestrator.DispatchLog("SUCCESS", "💾 Batch Flushed to Disk", "blocks", len(batch), "transfers", txCount, "tip", tip)
 	}
 }
 
