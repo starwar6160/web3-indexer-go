@@ -403,7 +403,6 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	// 🚀 IMPORTANT: Strategy OnStartup MUST run BEFORE GetStartBlock
 	// because AnvilStrategy performs a "Nuclear Reset" that wipes the DB.
 	strategy := engine.GetStrategy(cfg.ChainID)
-	orchestrator := engine.GetOrchestrator()
 	orchestrator.Init(ctx, sm.fetcher, strategy)
 
 	if err := strategy.OnStartup(ctx, orchestrator, sm.db, cfg.ChainID); err != nil {
