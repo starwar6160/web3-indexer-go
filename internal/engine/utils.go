@@ -23,6 +23,15 @@ func SafeInt64Diff(a, b uint64) int64 {
 	return -int64(diff) // #nosec G115 - diff is checked to be within int64 range above
 }
 
+// clampToInt64 将 uint64 安全转换为 int64，超出范围时钳制到 math.MaxInt64
+// 用于区块高度转换，避免 gosec G115 整数溢出警告
+func clampToInt64(v uint64) int64 {
+	if v > 9223372036854775807 { // math.MaxInt64
+		return 9223372036854775807
+	}
+	return int64(v) // #nosec G115 - value clamped to MaxInt64 above
+}
+
 // secureIntn 生成一个安全的随机整数 [0, n)
 func secureIntn(n int) int {
 	if n <= 0 {
