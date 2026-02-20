@@ -95,6 +95,9 @@ type Orchestrator struct {
 	linearityGuard *LinearityGuard
 	fetcher        *Fetcher // 🚀 🔥 组件引用
 	strategy       Strategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
+
+	// 运行时自适应参数（与静态 IndexerConfig 分离）
+	runtimeParams RuntimeParams
 }
 
 var (
@@ -106,14 +109,16 @@ var (
 func GetOrchestrator() *Orchestrator {
 	orchestratorOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
+		rp := DefaultRuntimeParams(DefaultConfig())
 		orchestrator = &Orchestrator{
 			cmdChan: make(chan Message, 50000), // 🚀 16G RAM 调优：适中缓冲区
 			state: CoordinatorState{
 				UpdatedAt:        time.Now(),
 				SystemState:      SystemStateUnknown,
-				LastUserActivity: time.Now(), // 初始化为当前时间
-				SafetyBuffer:     1,          // 初始保持 1 个块的距离
+				LastUserActivity: time.Now(),      // 初始化为当前时间
+				SafetyBuffer:     rp.SafetyBuffer, // 来自 RuntimeParams
 			},
+			runtimeParams:       rp,
 			subscribers:         make([]chan CoordinatorState, 0, 8),
 			ctx:                 ctx,
 			cancel:              cancel,
@@ -142,20 +147,35 @@ func (o *Orchestrator) Init(_ context.Context, fetcher *Fetcher, strategy Strate
 	slog.Info("🎼 Orchestrator initialized", "strategy", strategy.Name())
 }
 
-// LoadInitialState 从数据库加载初始状态
-func (o *Orchestrator) LoadInitialState(db *sqlx.DB, chainID int64) error {
-	var lastSyncedBlock string
-	err := db.GetContext(context.Background(), &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
+// LoadInitialState 从数据库加载初始状态（通过 Repository 接口，不直接操作 SQL）
+func (o *Orchestrator) LoadInitialState(repo IndexerRepository, chainID int64) error {
+	cursor, err := repo.GetSyncCursor(context.Background(), chainID)
+	if err != nil {
+		slog.Warn("🎼 Orchestrator: GetSyncCursor failed, starting from 0", "err", err)
+		return nil
+	}
+	if cursor > 0 {
+		o.mu.Lock()
+		o.state.SyncedCursor = uint64(cursor) //nolint:gosec // cursor is a valid block height
+		o.snapshot = o.state
+		o.mu.Unlock()
+		slog.Info("🎼 Orchestrator: Initial state aligned from DB", "cursor", cursor)
+	}
+	return nil
+}
 
-	// 🚀 增强逻辑：如果 checkpoint 没找到，尝试从 blocks 表直接获取最大值
+// LoadInitialStateFromDB 兼容方法：接受 *sqlx.DB（供现有调用方使用，内部构造 adapter）
+func (o *Orchestrator) LoadInitialStateFromDB(db *sqlx.DB, chainID int64) error {
+	// 延迟导入避免循环依赖：通过直接 SQL 实现（保留原始逻辑作为 fallback）
+	var lastSyncedBlock string
+	err := db.GetContext(context.Background(), &lastSyncedBlock,
+		"SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
 	if err != nil || lastSyncedBlock == "" || lastSyncedBlock == "0" {
 		var maxInDB int64
-		err = db.GetContext(context.Background(), &maxInDB, "SELECT COALESCE(MAX(number), 0) FROM blocks")
-		if err == nil && maxInDB > 0 {
+		if err2 := db.GetContext(context.Background(), &maxInDB, "SELECT COALESCE(MAX(number), 0) FROM blocks"); err2 == nil && maxInDB > 0 {
 			lastSyncedBlock = fmt.Sprintf("%d", maxInDB)
 		}
 	}
-
 	if lastSyncedBlock != "" && lastSyncedBlock != "0" {
 		height, ok := new(big.Int).SetString(lastSyncedBlock, 10)
 		if ok {
@@ -231,158 +251,6 @@ func (o *Orchestrator) process(msg Message) {
 	o.updateDerivedMetrics()
 	o.broadcastUpdate()
 	o.profileSlowProcessing(start, msg)
-}
-
-func (o *Orchestrator) handleMessage(msg Message) {
-	switch msg.Type {
-	case CmdUpdateChainHeight:
-		o.handleUpdateChainHeight(msg)
-	case CmdFetchFailed:
-		o.handleFetchFailed(msg)
-	case CmdFetchSuccess:
-		o.handleFetchSuccess()
-	case CmdNotifyFetched, CmdNotifyFetchProgress:
-		o.handleNotifyFetched(msg)
-	case CmdLogEvent:
-		o.handleLogEvent(msg)
-	case CmdCommitBatch:
-		o.handleCommitBatch(msg)
-	case CmdCommitDisk:
-		o.handleCommitDisk(msg)
-	case CmdResetCursor:
-		o.handleResetCursor(msg)
-	case CmdIncrementTransfers:
-		o.handleIncrementTransfers(msg)
-	case CmdToggleEcoMode:
-		o.handleToggleEcoMode(msg)
-	case CmdSetSystemState:
-		o.handleSetSystemState(msg)
-	case ReqGetStatus, ReqGetSnapshot:
-		o.handleReply(msg)
-	}
-}
-
-func (o *Orchestrator) handleUpdateChainHeight(msg Message) {
-	h, ok := msg.Data.(uint64)
-	if !ok {
-		slog.Error("🎼 Orchestrator: Invalid height data type", "type", fmt.Sprintf("%T", msg.Data))
-		return
-	}
-	if h <= o.state.LatestHeight {
-		return
-	}
-	o.pendingHeightUpdate = &h
-	o.lastHeightMergeTime = time.Now()
-	if h > o.state.SafetyBuffer {
-		o.state.TargetHeight = h - o.state.SafetyBuffer
-	} else {
-		o.state.TargetHeight = 0
-	}
-	slog.Debug("🎼 Height update cached", "val", h, "target", o.state.TargetHeight, "seq", msg.Sequence)
-}
-
-func (o *Orchestrator) handleFetchFailed(msg Message) {
-	errType, ok := msg.Data.(string)
-	if !ok || errType != "not_found" {
-		return
-	}
-	o.state.SuccessCount = 0
-	if o.state.SafetyBuffer < 20 {
-		o.state.SafetyBuffer++
-		slog.Warn("🎼 Safety: Increasing buffer due to 404", "new_val", o.state.SafetyBuffer)
-	}
-}
-
-func (o *Orchestrator) handleFetchSuccess() {
-	o.state.SuccessCount++
-	if o.state.SuccessCount >= 50 && o.state.SafetyBuffer > 1 {
-		o.state.SafetyBuffer--
-		o.state.SuccessCount = 0
-		slog.Info("🎼 Safety: Gradually reducing buffer", "new_val", o.state.SafetyBuffer)
-	}
-}
-
-func (o *Orchestrator) handleNotifyFetched(msg Message) {
-	h, ok := msg.Data.(uint64)
-	if ok && h > o.state.FetchedHeight {
-		o.state.FetchedHeight = h
-	}
-}
-
-func (o *Orchestrator) handleLogEvent(msg Message) {
-	logData, ok := msg.Data.(map[string]interface{})
-	if !ok {
-		return
-	}
-	o.state.LogEntry = logData
-	o.state.UpdatedAt = time.Now()
-}
-
-func (o *Orchestrator) handleCommitBatch(msg Message) {
-	task, ok := msg.Data.(PersistTask)
-	if !ok {
-		slog.Error("🎼 Orchestrator: Invalid PersistTask data type", "type", fmt.Sprintf("%T", msg.Data))
-		return
-	}
-	if o.asyncWriter != nil {
-		if err := o.asyncWriter.Enqueue(task); err != nil {
-			slog.Error("🎼 Orchestrator: AsyncWriter enqueue failed", "err", err, "height", task.Height)
-		}
-	}
-	slog.Debug("🎼 State: Logical Commit", "height", task.Height, "seq", msg.Sequence)
-}
-
-func (o *Orchestrator) handleCommitDisk(msg Message) {
-	diskHeight, ok := msg.Data.(uint64)
-	if !ok {
-		return
-	}
-	if diskHeight > o.state.SyncedCursor {
-		o.state.SyncedCursor = diskHeight
-		slog.Info("🎼 StateChange: Synced (Disk)", "cursor", diskHeight, "seq", msg.Sequence)
-	}
-}
-
-func (o *Orchestrator) handleResetCursor(msg Message) {
-	resetHeight, ok := msg.Data.(uint64)
-	if !ok {
-		return
-	}
-	o.state.SyncedCursor = resetHeight
-	slog.Warn("🎼 StateChange: Cursor RESET (Reorg)", "to", resetHeight, "seq", msg.Sequence)
-}
-
-func (o *Orchestrator) handleIncrementTransfers(msg Message) {
-	count, ok := msg.Data.(uint64)
-	if !ok {
-		return
-	}
-	o.state.Transfers += count
-	slog.Debug("🎼 StateChange: Transfers", "count", count, "total", o.state.Transfers, "seq", msg.Sequence)
-}
-
-func (o *Orchestrator) handleToggleEcoMode(msg Message) {
-	active, ok := msg.Data.(bool)
-	if !ok {
-		return
-	}
-	o.state.IsEcoMode = active
-	slog.Warn("🎼 StateChange: EcoMode", "active", active, "seq", msg.Sequence)
-}
-
-func (o *Orchestrator) handleSetSystemState(msg Message) {
-	state, ok := msg.Data.(SystemStateEnum)
-	if !ok {
-		return
-	}
-	o.state.SystemState = state
-	slog.Info("🎼 StateChange: SystemState", "state", state.String(), "seq", msg.Sequence)
-}
-
-func (o *Orchestrator) handleReply(msg Message) {
-	if msg.Reply != nil {
-		msg.Reply <- o.state
-	}
 }
 
 func (o *Orchestrator) updateDerivedMetrics() {
@@ -504,6 +372,13 @@ func (o *Orchestrator) GetSnapshot() CoordinatorState {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.snapshot
+}
+
+// GetRuntimeParams 返回运行时自适应参数快照（线程安全）
+func (o *Orchestrator) GetRuntimeParams() RuntimeSnapshot {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.runtimeParams.Snapshot()
 }
 
 // Subscribe 订阅状态快照（用于 WebSocket 推送）

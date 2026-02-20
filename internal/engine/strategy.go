@@ -95,7 +95,7 @@ func (s *TestnetStrategy) Name() string { return "PERSISTENT_TESTNET" }
 
 func (s *TestnetStrategy) OnStartup(_ context.Context, o *Orchestrator, db *sqlx.DB, chainID int64) error {
 	slog.Info("💾 Strategy: TESTNET mode detected. Aligning with disk cursor.")
-	return o.LoadInitialState(db, chainID)
+	return o.LoadInitialStateFromDB(db, chainID)
 }
 
 func (s *TestnetStrategy) ShouldPersist() bool      { return true }
