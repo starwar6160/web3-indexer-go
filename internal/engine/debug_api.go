@@ -74,6 +74,8 @@ func (d *DebugServer) RegisterDebugRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/pipeline/trace", d.handlePipelineTrace)
 	mux.HandleFunc("/debug/config/audit", d.handleConfigAudit)
 	mux.HandleFunc("/debug/race/check", d.handleRaceCheck)
+	mux.HandleFunc("/debug/goroutines/dump", d.handleGoroutineDump)
+	mux.HandleFunc("/debug/goroutines/snapshot", d.handleGoroutineSnapshot)
 }
 
 // ─── 数据结构 ─────────────────────────────────────────────────────────────────
@@ -609,6 +611,24 @@ func (d *DebugServer) BuildRaceCheck() map[string]interface{} {
 			"system_state":   last.SystemState.String(),
 		},
 	}
+}
+
+func (d *DebugServer) handleGoroutineDump(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(ExportFullGoroutineDump()))
+}
+
+func (d *DebugServer) handleGoroutineSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, GetLatestSnapshot())
 }
 
 // writeJSON 统一 JSON 响应写入
