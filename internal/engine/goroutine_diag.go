@@ -48,14 +48,14 @@ func StartGoroutineMonitor(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			snapshot := captureGoroutineSnapshot()
 			globalGoroutineDiagnostics.addSnapshot(snapshot)
-			
+
 			// 检测异常阻塞
 			if blocked := detectBlockedGoroutines(snapshot); len(blocked) > 0 {
-				slog.Warn("🔍 GOROUTINE_BLOCK_DETECTED", 
+				slog.Warn("🔍 GOROUTINE_BLOCK_DETECTED",
 					"blocked_count", len(blocked),
 					"sample", blocked[0].Stack[:min(200, len(blocked[0].Stack))])
 			}
@@ -67,19 +67,19 @@ func StartGoroutineMonitor(interval time.Duration) {
 func captureGoroutineSnapshot() GoroutineSnapshot {
 	buf := make([]byte, 1<<20) // 1MB buffer for stack traces
 	n := runtime.Stack(buf, true)
-	
+
 	stackText := string(buf[:n])
 	lines := strings.Split(stackText, "\n")
-	
+
 	snapshot := GoroutineSnapshot{
 		Timestamp: time.Now(),
 		ByState:   make(map[string]int),
 	}
-	
+
 	var currentID int64
 	var currentState string
 	var stackBuilder strings.Builder
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -87,12 +87,12 @@ func captureGoroutineSnapshot() GoroutineSnapshot {
 			if currentID != 0 {
 				snapshot.Total++
 				snapshot.ByState[currentState]++
-				
+
 				// 检测阻塞状态
-				if strings.Contains(currentState, "chan send") || 
-				   strings.Contains(currentState, "chan receive") ||
-				   strings.Contains(currentState, "select") ||
-				   strings.Contains(currentState, "sync") {
+				if strings.Contains(currentState, "chan send") ||
+					strings.Contains(currentState, "chan receive") ||
+					strings.Contains(currentState, "select") ||
+					strings.Contains(currentState, "sync") {
 					snapshot.Blocked = append(snapshot.Blocked, BlockedGoroutineInfo{
 						ID:       currentID,
 						WaitTime: "unknown",
@@ -105,34 +105,37 @@ func captureGoroutineSnapshot() GoroutineSnapshot {
 			stackBuilder.Reset()
 			continue
 		}
-		
+
 		// 解析协程头部: goroutine X [state]:
 		if strings.HasPrefix(line, "goroutine ") {
-			fmt.Sscanf(line, "goroutine %d [%[^]]]", &currentID, &currentState)
+			_, err := fmt.Sscanf(line, "goroutine %d [%[^]]]", &currentID, &currentState)
+			if err != nil {
+				slog.Warn("failed_to_parse_goroutine_header", "err", err)
+			}
 		}
-		
+
 		stackBuilder.WriteString(line)
 		stackBuilder.WriteString("\n")
 	}
-	
+
 	return snapshot
 }
 
 // detectBlockedGoroutines 检测长时间阻塞的协程
 func detectBlockedGoroutines(snapshot GoroutineSnapshot) []BlockedGoroutineInfo {
 	var critical []BlockedGoroutineInfo
-	
+
 	for _, blocked := range snapshot.Blocked {
 		// 检测关键阻塞点
 		if strings.Contains(blocked.Stack, "Processor") ||
-		   strings.Contains(blocked.Stack, "Sequencer") ||
-		   strings.Contains(blocked.Stack, "AsyncWriter") ||
-		   strings.Contains(blocked.Stack, "database") ||
-		   strings.Contains(blocked.Stack, "sql") {
+			strings.Contains(blocked.Stack, "Sequencer") ||
+			strings.Contains(blocked.Stack, "AsyncWriter") ||
+			strings.Contains(blocked.Stack, "database") ||
+			strings.Contains(blocked.Stack, "sql") {
 			critical = append(critical, blocked)
 		}
 	}
-	
+
 	return critical
 }
 
@@ -159,7 +162,7 @@ func DumpGoroutinesToLog() {
 func (g *GoroutineDiagnostics) addSnapshot(s GoroutineSnapshot) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	
+
 	g.snapshots = append(g.snapshots, s)
 	if len(g.snapshots) > 10 {
 		g.snapshots = g.snapshots[1:]
@@ -170,7 +173,7 @@ func (g *GoroutineDiagnostics) addSnapshot(s GoroutineSnapshot) {
 func (g *GoroutineDiagnostics) getLatest() GoroutineSnapshot {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	
+
 	if len(g.snapshots) == 0 {
 		return GoroutineSnapshot{}
 	}

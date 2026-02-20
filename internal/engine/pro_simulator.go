@@ -61,7 +61,11 @@ func NewProSimulator(rpcURL string, enabled bool, tps int) *ProSimulator {
 	if isAnvil {
 		chainID = big.NewInt(31337)
 	} else if client != nil {
-		chainID, _ = client.ChainID(ctx)
+		var err error
+		chainID, err = client.ChainID(ctx)
+		if err != nil {
+			slog.Warn("failed_to_get_chain_id", "err", err)
+		}
 	}
 
 	// Anvil 默认前 3 个账户
