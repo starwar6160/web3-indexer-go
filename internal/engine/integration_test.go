@@ -26,6 +26,8 @@ func TestMain(m *testing.M) {
 	ctx := context.Background()
 
 	// 1. 启动 Postgres 容器
+	// 注意：容器重用功能已移除以兼容 testcontainers v0.40.0
+	// 如需启用重用，可设置环境变量 TESTCONTAINERS_REUSE=true
 	pgContainer, err := postgres.Run(ctx,
 		"postgres:15-alpine",
 		postgres.WithDatabase("web3_indexer_test"),
@@ -41,14 +43,15 @@ func TestMain(m *testing.M) {
 	}
 
 	// 2. 启动 Anvil 容器
+	anvilReq := testcontainers.ContainerRequest{
+		Image:        "ghcr.io/foundry-rs/foundry:latest",
+		ExposedPorts: []string{"8545/tcp"},
+		Cmd:          []string{"anvil", "--host", "0.0.0.0"},
+		WaitingFor:   wait.ForListeningPort("8545/tcp").WithStartupTimeout(30 * time.Second),
+	}
 	anvilContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "ghcr.io/foundry-rs/foundry:latest",
-			ExposedPorts: []string{"8545/tcp"},
-			Cmd:          []string{"anvil", "--host", "0.0.0.0"},
-			WaitingFor:   wait.ForListeningPort("8545/tcp").WithStartupTimeout(30 * time.Second),
-		},
-		Started: true,
+		ContainerRequest: anvilReq,
+		Started:          true,
 	})
 	if err != nil {
 		if terr := pgContainer.Terminate(ctx); terr != nil {
