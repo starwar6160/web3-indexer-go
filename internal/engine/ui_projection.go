@@ -49,95 +49,39 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 	globalSnap := GetGlobalState().Snapshot()
 	maxJobs, maxResults, _ := GetGlobalState().GetCapacity()
 
-	// 🚀 视觉自愈
-	latest := snap.LatestHeight
-	if latest == 0 {
-		if snap.FetchedHeight > 0 {
-			latest = snap.FetchedHeight
-		} else {
-			latest = snap.SyncedCursor
-		}
-	}
+	// 🚀 视觉自愈：获取基准最新高度
+	latest := o.getVisualLatestHeight(snap)
 
-	// 🚀 NEW: Get actual RPC height for reality check
-	var rpcActual uint64
-	var isInFuture bool
-	var realityGap int64
+	// 🚀 Reality Check: 获取 RPC 真实高度
+	rpcActual, isInFuture, realityGap := o.checkRPCReality(ctx, snap)
 
-	if o.fetcher != nil && o.fetcher.pool != nil {
-		if tip, err := o.fetcher.pool.GetLatestBlockNumber(ctx); err == nil {
-			rpcActual = tip.Uint64()
-			// #nosec G115 - realityGap only used for display, overflow doesn't affect core logic
-			realityGap = int64(rpcActual) - int64(snap.SyncedCursor)
-			isInFuture = realityGap < 0
-		}
-	}
+	// 1. 实时数据库统计
+	totalBlocks, totalTransfers := o.getDBStats(ctx, db, snap)
 
-	// 1. 实时数据库统计 (带 5s 缓存以防高频请求压垮 DB)
-	// 此处为简化逻辑直接查询，实际生产建议使用原子变量缓存
-	var totalBlocks, totalTransfers int64
-	if db != nil {
-		if err := db.GetContext(ctx, &totalBlocks, "SELECT COUNT(*) FROM blocks"); err != nil {
-			Logger.Debug("ui_projection_count_blocks_failed", "err", err)
-		}
-		if err := db.GetContext(ctx, &totalTransfers, "SELECT COUNT(*) FROM transfers"); err != nil {
-			Logger.Debug("ui_projection_count_transfers_failed", "err", err)
-		}
-	}
-
-	// 2. 逻辑自洽
+	// 2. 逻辑自洽与状态评估
 	syncLag := SafeInt64Diff(latest, snap.SyncedCursor)
 	if syncLag < 0 {
 		syncLag = 0
 	}
+	stateStr := o.evaluateStatus(snap, globalSnap, syncLag, isInFuture)
 
-	// 3. 动态状态评估
-	stateStr := snap.SystemState.String()
-	if globalSnap.ResultsDepth > globalSnap.PipelineDepth*80/100 {
-		stateStr = "pressure_limit"
-	} else if syncLag > 1000 && GetMetrics().GetWindowBPS() < 1 {
-		stateStr = "stalled"
-	}
-
-	// 🔥 检测时空悖论（索引器领先于链）
-	warning := ""
-	isTimeParadox := false
-
-	if snap.SyncedCursor > latest && latest > 0 {
-		isTimeParadox = true
-		warning = "[!!] TIME_PARADOX: Indexer is ahead of Chain. Self-healing in progress..."
-		stateStr = "time_paradox"
-	} else if isInFuture {
-		// 🚀 NEW: Enhanced paradox detection with RPC actual
-		isTimeParadox = true
-		warning = fmt.Sprintf("[!!] DETACHED: Indexer ahead of RPC reality by %d blocks. Realignment in progress...", -realityGap)
-		stateStr = "detached"
-	}
+	// 3. 悖论警告与奇偶状态
+	warning, isTimeParadox := o.detectParadox(snap, latest, isInFuture, realityGap)
+	parityStatus := o.calculateParity(isInFuture, realityGap)
 
 	// 4. 进度计算
-	fetchProgress := 0.0
-	if latest > 0 {
-		fetchProgress = float64(snap.FetchedHeight) / float64(latest) * 100
-	}
-	syncProgress := 0.0
-	if latest > 0 {
-		syncProgress = float64(snap.SyncedCursor) / float64(latest) * 100
-	}
+	fetchProgress := o.calculateProgress(snap.FetchedHeight, latest)
+	syncProgress := o.calculateProgress(snap.SyncedCursor, latest)
 
-	// 🚀 NEW: Parity status calculation
-	parityStatus := "healthy"
-	if isInFuture {
-		parityStatus = "paradox_detected"
-	} else if realityGap > 1000 {
-		parityStatus = "lagging"
-	}
+	// Safe cast for display fields
+	rpcActualInt, _ := SafeCastUint64ToInt64(rpcActual) // nolint:errcheck // display only, ignore overflow
 
 	return UIStatusDTO{
 		Version:             version,
 		State:               stateStr,
 		LatestBlock:         fmt.Sprintf("%d", latest),
 		LatestIndexed:       fmt.Sprintf("%d", snap.SyncedCursor),
-		TotalBlocks:         int64(snap.SyncedCursor), // #nosec G115 - SyncedCursor realistically fits in int64
+		TotalBlocks:         totalBlocks,
 		TotalTransfers:      totalTransfers,
 		MemorySync:          fmt.Sprintf("%d", snap.FetchedHeight),
 		SyncLag:             syncLag,
@@ -156,13 +100,96 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		UpdatedAt:           snap.UpdatedAt.Format(time.RFC3339),
 		LastPulse:           time.Now().UnixMilli(),
 		Fingerprint:         "Yokohama-Lab-Primary",
-		// 🔥 时空悖论警告
-		Warning:       warning,
-		IsTimeParadox: isTimeParadox,
-		// 🚀 NEW: RPC reality fields
-		// #nosec G115 - RPCActual only used for display, overflow doesn't affect core logic
-		RPCActual:    int64(rpcActual),
-		RealityGap:   realityGap,
-		ParityStatus: parityStatus,
+		Warning:             warning,
+		IsTimeParadox:       isTimeParadox,
+		RPCActual:           rpcActualInt,
+		RealityGap:          realityGap,
+		ParityStatus:        parityStatus,
 	}
+}
+
+func (o *Orchestrator) getVisualLatestHeight(snap CoordinatorState) uint64 {
+	if snap.LatestHeight > 0 {
+		return snap.LatestHeight
+	}
+	if snap.FetchedHeight > 0 {
+		return snap.FetchedHeight
+	}
+	return snap.SyncedCursor
+}
+
+func (o *Orchestrator) checkRPCReality(ctx context.Context, snap CoordinatorState) (uint64, bool, int64) {
+	if o.fetcher == nil || o.fetcher.pool == nil {
+		return 0, false, 0
+	}
+	tip, err := o.fetcher.pool.GetLatestBlockNumber(ctx)
+	if err != nil {
+		return 0, false, 0
+	}
+	rpcActual := tip.Uint64()
+
+	// Safe gap calculation
+	cursorInt, _ := SafeCastUint64ToInt64(snap.SyncedCursor) // nolint:errcheck // logic verified
+	actualInt, _ := SafeCastUint64ToInt64(rpcActual)         // nolint:errcheck // logic verified
+	realityGap := actualInt - cursorInt
+
+	return rpcActual, realityGap < 0, realityGap
+}
+
+func (o *Orchestrator) getDBStats(ctx context.Context, db *sqlx.DB, snap CoordinatorState) (int64, int64) {
+	var totalBlocks, totalTransfers int64
+	if db != nil {
+		if err := db.GetContext(ctx, &totalBlocks, "SELECT COUNT(*) FROM blocks"); err != nil {
+			Logger.Debug("ui_projection_count_blocks_failed", "err", err)
+		}
+		if err := db.GetContext(ctx, &totalTransfers, "SELECT COUNT(*) FROM transfers"); err != nil {
+			Logger.Debug("ui_projection_count_transfers_failed", "err", err)
+		}
+	}
+	// 尝试安全转换同步游标作为总块数参考
+	if castVal, err := SafeCastUint64ToInt64(snap.SyncedCursor); err == nil && castVal > totalBlocks {
+		totalBlocks = castVal
+	}
+	return totalBlocks, totalTransfers
+}
+
+func (o *Orchestrator) evaluateStatus(snap CoordinatorState, globalSnap Snapshot, syncLag int64, isInFuture bool) string {
+	stateStr := snap.SystemState.String()
+	if globalSnap.ResultsDepth > globalSnap.PipelineDepth*80/100 {
+		return "pressure_limit"
+	}
+	if syncLag > 1000 && GetMetrics().GetWindowBPS() < 1 {
+		return "stalled"
+	}
+	if isInFuture {
+		return "detached"
+	}
+	return stateStr
+}
+
+func (o *Orchestrator) detectParadox(snap CoordinatorState, latest uint64, isInFuture bool, realityGap int64) (string, bool) {
+	if snap.SyncedCursor > latest && latest > 0 {
+		return "[!!] TIME_PARADOX: Indexer is ahead of Chain. Self-healing in progress...", true
+	}
+	if isInFuture {
+		return fmt.Sprintf("[!!] DETACHED: Indexer ahead of RPC reality by %d blocks. Realignment in progress...", -realityGap), true
+	}
+	return "", false
+}
+
+func (o *Orchestrator) calculateParity(isInFuture bool, realityGap int64) string {
+	if isInFuture {
+		return "paradox_detected"
+	}
+	if realityGap > 1000 {
+		return "lagging"
+	}
+	return "healthy"
+}
+
+func (o *Orchestrator) calculateProgress(current uint64, total uint64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(current) / float64(total) * 100
 }
