@@ -67,6 +67,7 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 	if o.fetcher != nil && o.fetcher.pool != nil {
 		if tip, err := o.fetcher.pool.GetLatestBlockNumber(ctx); err == nil {
 			rpcActual = tip.Uint64()
+			// #nosec G115 - realityGap only used for display, overflow doesn't affect core logic
 			realityGap = int64(rpcActual) - int64(snap.SyncedCursor)
 			isInFuture = realityGap < 0
 		}

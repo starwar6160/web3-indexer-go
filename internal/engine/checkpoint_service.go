@@ -158,7 +158,9 @@ func (s *CheckpointService) atomicSave(checkpoint Checkpoint) {
 	finalFile := filepath.Join(s.savePath, fmt.Sprintf("checkpoint.ckp.%d", checkpoint.Height))
 	if err := os.Rename(tempFile, finalFile); err != nil {
 		slog.Error("💾 Failed to rename checkpoint", "err", err)
-		os.Remove(tempFile) // 清理临时文件
+		if rmErr := os.Remove(tempFile); rmErr != nil {
+			slog.Warn("💾 Failed to clean up temp file", "file", tempFile, "err", rmErr)
+		}
 		return
 	}
 
