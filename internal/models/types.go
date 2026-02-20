@@ -132,64 +132,12 @@ func (b *BigInt) Scan(value interface{}) error {
 		b.Int = new(big.Int)
 		return nil
 	}
+
 	switch v := value.(type) {
 	case []byte:
-		s := string(v)
-		// 支持 hex 字符串 (0x...)
-		if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
-			i, ok := new(big.Int).SetString(s[2:], 16)
-			if !ok {
-				return fmt.Errorf("failed to convert hex %s to BigInt", s)
-			}
-			b.Int = i
-			return nil
-		}
-		// 处理科学计数法（PostgreSQL NUMERIC 可能返回）
-		if strings.ContainsAny(s, "eE") {
-			f, _, err := big.ParseFloat(s, 10, 0, big.ToNearestEven)
-			if err != nil {
-				return fmt.Errorf("failed to parse numeric %q: %w", s, err)
-			}
-			bi, acc := f.Int(nil)
-			if acc != big.Exact {
-				return fmt.Errorf("numeric %q is not an integer", s)
-			}
-			b.Int = bi
-			return nil
-		}
-		i, ok := new(big.Int).SetString(s, 10)
-		if !ok {
-			return fmt.Errorf("failed to convert %s to BigInt", s)
-		}
-		b.Int = i
+		return b.parseBigIntString(string(v))
 	case string:
-		// 支持 hex 字符串 (0x...)
-		if len(v) >= 2 && v[0] == '0' && (v[1] == 'x' || v[1] == 'X') {
-			i, ok := new(big.Int).SetString(v[2:], 16)
-			if !ok {
-				return fmt.Errorf("failed to convert hex %s to BigInt", v)
-			}
-			b.Int = i
-			return nil
-		}
-		// 处理科学计数法（PostgreSQL NUMERIC 可能返回）
-		if strings.ContainsAny(v, "eE") {
-			f, _, err := big.ParseFloat(v, 10, 0, big.ToNearestEven)
-			if err != nil {
-				return fmt.Errorf("failed to parse numeric %q: %w", v, err)
-			}
-			bi, acc := f.Int(nil)
-			if acc != big.Exact {
-				return fmt.Errorf("numeric %q is not an integer", v)
-			}
-			b.Int = bi
-			return nil
-		}
-		i, ok := new(big.Int).SetString(v, 10)
-		if !ok {
-			return fmt.Errorf("failed to convert %s to BigInt", v)
-		}
-		b.Int = i
+		return b.parseBigIntString(v)
 	case int64:
 		b.Int = big.NewInt(v)
 	case int:
@@ -197,6 +145,56 @@ func (b *BigInt) Scan(value interface{}) error {
 	default:
 		return fmt.Errorf("unsupported type for BigInt: %T", v)
 	}
+	return nil
+}
+
+// parseBigIntString 解析字符串为 BigInt（支持 hex、科学计数法、十进制）
+func (b *BigInt) parseBigIntString(s string) error {
+	// 支持 hex 字符串 (0x...)
+	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
+		return b.parseHexString(s[2:])
+	}
+
+	// 处理科学计数法（PostgreSQL NUMERIC 可能返回）
+	if strings.ContainsAny(s, "eE") {
+		return b.parseScientificNotation(s)
+	}
+
+	// 普通十进制解析
+	return b.parseDecimalString(s)
+}
+
+// parseHexString 解析十六进制字符串
+func (b *BigInt) parseHexString(hexStr string) error {
+	i, ok := new(big.Int).SetString(hexStr, 16)
+	if !ok {
+		return fmt.Errorf("failed to convert hex %s to BigInt", hexStr)
+	}
+	b.Int = i
+	return nil
+}
+
+// parseScientificNotation 解析科学计数法
+func (b *BigInt) parseScientificNotation(s string) error {
+	f, _, err := big.ParseFloat(s, 10, 0, big.ToNearestEven)
+	if err != nil {
+		return fmt.Errorf("failed to parse numeric %q: %w", s, err)
+	}
+	bi, acc := f.Int(nil)
+	if acc != big.Exact {
+		return fmt.Errorf("numeric %q is not an integer", s)
+	}
+	b.Int = bi
+	return nil
+}
+
+// parseDecimalString 解析十进制字符串
+func (b *BigInt) parseDecimalString(s string) error {
+	i, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		return fmt.Errorf("failed to convert %s to BigInt", s)
+	}
+	b.Int = i
 	return nil
 }
 
