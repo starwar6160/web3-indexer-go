@@ -400,9 +400,20 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	}
 
 	// 🎼 SSOT: 初始化策略与协调器 (单一控制面)
-	// 🚀 IMPORTANT: Strategy OnStartup MUST run BEFORE GetStartBlock
-	// because AnvilStrategy performs a "Nuclear Reset" that wipes the DB.
-	strategy := engine.GetStrategy(cfg.ChainID)
+	// � 使用 StrategyFactory 根据 APP_MODE 自动创建正确策略
+	factory := engine.NewStrategyFactory()
+	strategy := factory.CreateStrategy()
+
+	// 应用策略参数到全局限流器和配置
+	factory.ApplyToOrchestrator(orchestrator, strategy)
+
+	// 如果 RPC pool 支持，应用策略的限流配置
+	if enhancedPool, ok := rpcPool.(*engine.EnhancedRPCClientPool); ok {
+		limit, burst := strategy.GetRPCConfig()
+		enhancedPool.SetRateLimit(float64(limit), burst)
+		slog.Info("🔌 Strategy rate limit applied", "limit", limit, "burst", burst)
+	}
+
 	orchestrator.Init(ctx, sm.fetcher, strategy)
 
 	if err := strategy.OnStartup(ctx, orchestrator, sm.db, cfg.ChainID); err != nil {
