@@ -25,11 +25,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Stage 2: Runtime (Production)
 FROM alpine:3.21
 
-# 🛡️ Minimal runtime dependencies
+# 🛡️ Minimal runtime dependencies + python3 for force_beast
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     curl \
+    python3 \
     && rm -rf /var/cache/apk/*
 
 # 🌍 Set timezone to Japan (Yokohama Lab)
@@ -40,13 +41,16 @@ WORKDIR /app
 # 📥 Copy binary from builder stage
 COPY --from=builder /app/bin/indexer .
 
-# 📋 Copy migrations
+# 📋 Copy migrations and scripts
 COPY migrations ./migrations
+COPY scripts ./scripts
+COPY entrypoint-wrapper.sh ./
 
 # 🛡️ Create non-root user for security
 RUN adduser -D -g '' appuser && \
     mkdir -p logs && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chmod +x /app/entrypoint-wrapper.sh /app/scripts/force_beast.sh
 
 # 🔒 Force secure directory permissions (0o750 = rwxr-x---)
 RUN chmod 0750 logs
@@ -58,5 +62,5 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:${PORT:-8080}/api/status || exit 1
 
-# 🚀 Production entrypoint
-ENTRYPOINT ["./indexer"]
+# 🚀 Production entrypoint with force_beast alignment
+ENTRYPOINT ["./entrypoint-wrapper.sh"]

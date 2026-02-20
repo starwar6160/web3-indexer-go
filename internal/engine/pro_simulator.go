@@ -139,30 +139,32 @@ func (s *ProSimulator) Start() {
 }
 
 func (s *ProSimulator) executeChaosAction(acc *simAccount) {
-	acc.mu.Lock()
-	defer acc.mu.Unlock()
-
 	action := secureIntn(100)
 	var err error
 	var typeLabel string
 
+	// Reserve nonce under lock, but do network IO outside the lock.
+	acc.mu.Lock()
+	nonce := acc.nonce
+	acc.nonce++
+	acc.mu.Unlock()
+
 	switch {
 	case action < 15:
-		err = s.deployDummy(acc)
+		err = s.deployDummy(acc, nonce)
 		typeLabel = "🏗️ DEPLOY"
 	case action < 40:
-		err = s.sendETH(acc)
+		err = s.sendETH(acc, nonce)
 		typeLabel = "⛽ ETH"
 	case action < 60:
-		err = s.approve(acc)
+		err = s.approve(acc, nonce)
 		typeLabel = "🔓 APPROVE"
 	default:
-		err = s.transferERC20(acc)
+		err = s.transferERC20(acc, nonce)
 		typeLabel = "💸 TRANSFER"
 	}
 
 	if err == nil {
-		acc.nonce++
 		// 立即挖矿确保零延迟显示
 		if mineErr := s.mine(); mineErr != nil {
 			slog.Debug("mine_failed", "err", mineErr)
@@ -174,19 +176,21 @@ func (s *ProSimulator) executeChaosAction(acc *simAccount) {
 		// 如果 nonce 过低，重放同步一次
 		n, err := s.client.NonceAt(s.ctx, acc.addr, nil)
 		if err == nil {
+			acc.mu.Lock()
 			acc.nonce = n
+			acc.mu.Unlock()
 		}
 	}
 }
 
-func (s *ProSimulator) sendETH(acc *simAccount) error {
+func (s *ProSimulator) sendETH(acc *simAccount, nonce uint64) error {
 	to := s.accounts[secureIntn(len(s.accounts))].addr
 	amount := new(big.Int).Mul(big.NewInt(int64(1+secureIntn(10))), big.NewInt(1e15)) // 0.001 - 0.01 ETH
-	tx := types.NewTransaction(acc.nonce, to, amount, 21000, big.NewInt(1e9), nil)
+	tx := types.NewTransaction(nonce, to, amount, 21000, big.NewInt(1e9), nil)
 	return s.signAndSend(tx, acc.pk)
 }
 
-func (s *ProSimulator) transferERC20(acc *simAccount) error {
+func (s *ProSimulator) transferERC20(acc *simAccount, nonce uint64) error {
 	token := s.tokens[secureIntn(len(s.tokens))]
 	to := s.accounts[secureIntn(len(s.accounts))].addr
 
@@ -199,11 +203,11 @@ func (s *ProSimulator) transferERC20(acc *simAccount) error {
 	data = append(data, common.LeftPadBytes(to.Bytes(), 32)...)
 	data = append(data, common.LeftPadBytes(amount.Bytes(), 32)...)
 
-	tx := types.NewTransaction(acc.nonce, token.Address, big.NewInt(0), 100000, big.NewInt(1e9), data)
+	tx := types.NewTransaction(nonce, token.Address, big.NewInt(0), 100000, big.NewInt(1e9), data)
 	return s.signAndSend(tx, acc.pk)
 }
 
-func (s *ProSimulator) approve(acc *simAccount) error {
+func (s *ProSimulator) approve(acc *simAccount, nonce uint64) error {
 	token := s.tokens[secureIntn(len(s.tokens))]
 	spender := s.accounts[secureIntn(len(s.accounts))].addr
 
@@ -213,14 +217,14 @@ func (s *ProSimulator) approve(acc *simAccount) error {
 	data = append(data, common.LeftPadBytes(spender.Bytes(), 32)...)
 	data = append(data, common.LeftPadBytes(common.MaxHash.Bytes(), 32)...)
 
-	tx := types.NewTransaction(acc.nonce, token.Address, big.NewInt(0), 100000, big.NewInt(1e9), data)
+	tx := types.NewTransaction(nonce, token.Address, big.NewInt(0), 100000, big.NewInt(1e9), data)
 	return s.signAndSend(tx, acc.pk)
 }
 
-func (s *ProSimulator) deployDummy(acc *simAccount) error {
+func (s *ProSimulator) deployDummy(acc *simAccount, nonce uint64) error {
 	// 极简合约 bytecode
 	data := common.FromHex("6080604052348015600f57600080fd5b50603e80601d6000396000f3fe6080604052600080fd")
-	tx := types.NewContractCreation(acc.nonce, big.NewInt(0), 500000, big.NewInt(1e9), data)
+	tx := types.NewContractCreation(nonce, big.NewInt(0), 500000, big.NewInt(1e9), data)
 	return s.signAndSend(tx, acc.pk)
 }
 

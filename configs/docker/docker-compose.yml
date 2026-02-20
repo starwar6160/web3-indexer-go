@@ -14,6 +14,8 @@ services:
       # 覆盖特定配置（优先级高于 env_file）
       - APP_TITLE=${APP_TITLE:-🚀 Web3 Indexer (Demo)}
       - PORT=${PORT:-8082}  # 8082 端口（演示环境）
+      - FORCE_BEAST_ALIGNMENT=${FORCE_BEAST_ALIGNMENT:-true}  # 🔥 冷启动自动对齐链尖
+      - CLEAR_CHECKPOINTS_ON_START=${CLEAR_CHECKPOINTS_ON_START:-true}  # 启动时清理 checkpoints
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/status"]
       interval: 10s
