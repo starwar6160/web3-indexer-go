@@ -106,11 +106,22 @@ func captureGoroutineSnapshot() GoroutineSnapshot {
 			continue
 		}
 
-		// 解析协程头部: goroutine X [state]:
+		// 解析协程头部: "goroutine 42 [select]:"
 		if strings.HasPrefix(line, "goroutine ") {
-			_, err := fmt.Sscanf(line, "goroutine %d [%[^]]]", &currentID, &currentState)
-			if err != nil {
-				slog.Warn("failed_to_parse_goroutine_header", "err", err.Error())
+			// 手动解析，避免 fmt.Sscanf 不支持 %[^]] 字符集语法
+			// 格式: goroutine <id> [<state>]:
+			rest := line[len("goroutine "):]
+			if spaceIdx := strings.IndexByte(rest, ' '); spaceIdx > 0 {
+				idStr := rest[:spaceIdx]
+				if _, err := fmt.Sscanf(idStr, "%d", &currentID); err != nil {
+					currentID = 0
+				}
+				// 提取 [state] 部分
+				if lbIdx := strings.IndexByte(rest, '['); lbIdx > 0 {
+					if rbIdx := strings.IndexByte(rest, ']'); rbIdx > lbIdx {
+						currentState = rest[lbIdx+1 : rbIdx]
+					}
+				}
 			}
 		}
 

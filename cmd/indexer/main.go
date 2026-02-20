@@ -404,8 +404,9 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	}
 
 	// 🎼 SSOT: 初始化策略与协调器 (单一控制面)
-	// � 使用 StrategyFactory 根据 APP_MODE 自动创建正确策略
-	factory := engine.NewStrategyFactory()
+	// 🔥 使用 ChainID 直接判断（最可靠，避免 URL 误判）
+	// ChainID 31337 = Anvil, 其他 = Testnet
+	factory := engine.NewStrategyFactoryFromChainID(cfg.ChainID)
 	strategy := factory.CreateStrategy()
 
 	// 应用策略参数到全局限流器和配置

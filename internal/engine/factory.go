@@ -63,6 +63,24 @@ func NewStrategyFactory() *StrategyFactory {
 	return &StrategyFactory{mode: mode}
 }
 
+// NewStrategyFactoryFromChainID 根据已知 ChainID 创建工厂（最可靠的检测方式）
+// 在 main.go 中 ChainID 已从配置中读取，直接用此方法避免 URL 误判
+func NewStrategyFactoryFromChainID(chainID int64) *StrategyFactory {
+	var mode string
+	switch chainID {
+	case 31337:
+		mode = "EPHEMERAL_ANVIL"
+		slog.Info("🔍 StrategyFactory: ChainID 31337 = Anvil", "chain_id", chainID)
+	case 1:
+		mode = "PERSISTENT_TESTNET" // mainnet treated conservatively
+		slog.Warn("🔍 StrategyFactory: ChainID 1 = Mainnet (conservative mode)", "chain_id", chainID)
+	default:
+		mode = "PERSISTENT_TESTNET"
+		slog.Info("🔍 StrategyFactory: ChainID detected as testnet", "chain_id", chainID)
+	}
+	return &StrategyFactory{mode: mode}
+}
+
 // CreateStrategy 根据环境创建策略实例
 // 防御性设计：未知模式默认使用最保守的 TestnetStrategy
 func (f *StrategyFactory) CreateStrategy() Strategy {
