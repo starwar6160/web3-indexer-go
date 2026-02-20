@@ -131,6 +131,10 @@ func GetOrchestrator() *Orchestrator {
 		orchestrator.linearityGuard = NewLinearityGuard(orchestrator)
 		go orchestrator.loop()
 		go orchestrator.broadcaster()
+
+		// 🔥 启动 Goroutine 死锁监控（每5秒抓取一次堆栈）
+		StartGoroutineMonitor(5 * time.Second)
+
 		slog.Info("🎼 Orchestrator SSOT initialized", "channel_depth", 100000)
 	})
 	return orchestrator
