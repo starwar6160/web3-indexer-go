@@ -254,23 +254,29 @@ func (o *Orchestrator) process(msg Message) {
 }
 
 func (o *Orchestrator) updateDerivedMetrics() {
-	if o.state.LatestHeight > 0 {
-		latest := float64(o.state.LatestHeight)
-		synced := float64(o.state.SyncedCursor)
-		o.state.Progress = (synced / latest) * 100
-		if o.state.Progress > 100.0 {
-			o.state.Progress = 100.0
+	o.mu.RLock()
+	latest := o.state.LatestHeight
+	synced := o.state.SyncedCursor
+	o.mu.RUnlock()
+
+	if latest > 0 {
+		progress := (float64(synced) / float64(latest)) * 100
+		o.mu.Lock()
+		if progress > 100.0 {
+			progress = 100.0
 		}
+		o.state.Progress = progress
+		o.state.UpdatedAt = time.Now()
+		o.mu.Unlock()
 	}
-	o.state.UpdatedAt = time.Now()
 }
 
 func (o *Orchestrator) broadcastUpdate() {
-	o.mu.Lock()
-	o.snapshot = o.state
-	o.mu.Unlock()
+	o.mu.RLock()
+	snap := o.state
+	o.mu.RUnlock()
 	select {
-	case o.broadcastCh <- o.snapshot:
+	case o.broadcastCh <- snap:
 	default:
 		slog.Debug("🎼 Broadcast channel full, skipping")
 	}
