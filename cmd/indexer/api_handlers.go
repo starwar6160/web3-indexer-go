@@ -85,11 +85,15 @@ func handleGetTransfersFromHotBuffer(w http.ResponseWriter, processor *engine.Pr
 	hotTransfers := processor.GetHotBuffer().GetLatest(10)
 	apiTransfers := make([]Transfer, len(hotTransfers))
 	for i, t := range hotTransfers {
-		// #nosec G115 - LogIndex is within safe range for int
+		logIndex, err := engine.SafeCastUint64ToInt(uint64(t.LogIndex))
+		if err != nil {
+			slog.Error("cast_log_index_failed", "err", err, "tx", t.TxHash)
+			logIndex = 0 // 安全降级
+		}
 		apiTransfers[i] = Transfer{
 			BlockNumber:  t.BlockNumber.String(),
 			TxHash:       t.TxHash,
-			LogIndex:     int(t.LogIndex),
+			LogIndex:     logIndex,
 			FromAddress:  t.From,
 			ToAddress:    t.To,
 			Amount:       t.Amount.String(),
