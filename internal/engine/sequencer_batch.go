@@ -25,73 +25,89 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 		}
 	}()
 
-	// 背压控制：如果缓冲区过大，暂停 Fetcher
-	if s.fetcher != nil && len(s.buffer) > 2000 && !s.fetcher.IsPaused() {
-		Logger.Warn("⚠️ sequencer_buffer_high_pausing_fetcher", slog.Int("buffer_size", len(s.buffer)))
-		s.fetcher.Pause()
-	}
+	s.checkBackpressure()
 
 	i := 0
 	for i < len(batch) {
 		data := batch[i]
-		blockNum := data.Number
-		if blockNum == nil && data.Block != nil {
-			blockNum = data.Block.Number()
-		}
 
 		// 尝试批量顺序处理
-		// 只有当当前块没有错误时才尝试批量，否则走单条处理以触发重试逻辑
-		if blockNum != nil && blockNum.Cmp(s.expectedBlock) == 0 && data.Err == nil {
-			sequentialBatch := []BlockData{data}
-			nextExpected := new(big.Int).Add(s.expectedBlock, big.NewInt(1))
-
-			j := i + 1
-			for j < len(batch) {
-				nextData := batch[j]
-				// 如果发现错误，立即停止批次收集，确保错误块通过 handleBlockLocked 处理
-				if nextData.Err != nil {
-					break
-				}
-
-				nNum := nextData.Number
-				if nNum == nil && nextData.Block != nil {
-					nNum = nextData.Block.Number()
-				}
-
-				if nNum != nil && nNum.Cmp(nextExpected) == 0 {
-					sequentialBatch = append(sequentialBatch, nextData)
-					nextExpected.Add(nextExpected, big.NewInt(1))
-					j++
-				} else {
-					break
-				}
-			}
-
-			if len(sequentialBatch) > 1 {
-				Logger.Info("sequencer_processing_batch",
-					slog.Int("size", len(sequentialBatch)),
-					slog.String("from", sequentialBatch[0].Number.String()),
-					slog.String("to", sequentialBatch[len(sequentialBatch)-1].Number.String()),
-				)
-				if err := s.processor.ProcessBatch(ctx, sequentialBatch, s.chainID); err != nil {
-					return err
-				}
-				s.expectedBlock.Set(nextExpected)
-				i = j
-				s.processBufferContinuationsLocked(ctx)
-				continue
-			}
-		}
-
-		if err := s.handleBlockLocked(ctx, data); err != nil {
-			// 如果返回错误，说明是真正的不可恢复错误
+		processedCount, err := s.tryProcessSequentialBatch(ctx, batch[i:])
+		if err != nil {
 			return err
 		}
-		// 即使 handleBlockLocked 返回 nil (临时抓取失败)，我们也继续处理批次中的其它块
-		// 该块会留在 buffer 中等待下次调度或自愈。
+
+		if processedCount > 0 {
+			i += processedCount
+			continue
+		}
+
+		// 回退到单块处理
+		if err := s.handleBlockLocked(ctx, data); err != nil {
+			return err
+		}
 		i++
 	}
 	return nil
+}
+
+func (s *Sequencer) checkBackpressure() {
+	if s.fetcher != nil && len(s.buffer) > 2000 && !s.fetcher.IsPaused() {
+		Logger.Warn("⚠️ sequencer_buffer_high_pausing_fetcher", slog.Int("buffer_size", len(s.buffer)))
+		s.fetcher.Pause()
+	}
+}
+
+func (s *Sequencer) tryProcessSequentialBatch(ctx context.Context, subBatch []BlockData) (int, error) {
+	if len(subBatch) == 0 {
+		return 0, nil
+	}
+
+	data := subBatch[0]
+	blockNum := s.resolveBlockNum(data)
+
+	// 基础条件检查
+	if blockNum == nil || blockNum.Cmp(s.expectedBlock) != 0 || data.Err != nil {
+		return 0, nil
+	}
+
+	// 寻找连续段
+	sequentialBatch := []BlockData{data}
+	nextExpected := new(big.Int).Add(s.expectedBlock, big.NewInt(1))
+
+	j := 1
+	for j < len(subBatch) {
+		nextData := subBatch[j]
+		if nextData.Err != nil {
+			break
+		}
+
+		nNum := s.resolveBlockNum(nextData)
+		if nNum != nil && nNum.Cmp(nextExpected) == 0 {
+			sequentialBatch = append(sequentialBatch, nextData)
+			nextExpected.Add(nextExpected, big.NewInt(1))
+			j++
+		} else {
+			break
+		}
+	}
+
+	// 执行批量处理（至少 2 个块才值得批量，单块走单块逻辑更稳健）
+	if len(sequentialBatch) > 1 {
+		Logger.Info("sequencer_processing_batch",
+			slog.Int("size", len(sequentialBatch)),
+			slog.String("from", sequentialBatch[0].Number.String()),
+			slog.String("to", sequentialBatch[len(sequentialBatch)-1].Number.String()),
+		)
+		if err := s.processor.ProcessBatch(ctx, sequentialBatch, s.chainID); err != nil {
+			return 0, err
+		}
+		s.expectedBlock.Set(nextExpected)
+		s.processBufferContinuationsLocked(ctx)
+		return j, nil
+	}
+
+	return 0, nil
 }
 
 func (s *Sequencer) handleBlock(ctx context.Context, data BlockData) error {
