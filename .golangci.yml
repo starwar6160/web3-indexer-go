@@ -19,30 +19,15 @@ linters:
     - noctx          # Ensure context propagation (cancellation & timeout)
     - sqlclosecheck  # Ensure sql.Rows/Stmt closed (DB resource leak)
 
-    # --- Code Quality (relaxed for demo) ---
+    # --- Code Quality (工业级) ---
     - goconst        # Detect repeated strings that could be constants
-    - gocritic       # Find code patterns needing improvement
+    - gocritic       # Find code patterns needing improvement (老兵级)
     - gocyclo        # Cyclomatic complexity (limit: 25)
+    - cyclop         # 更严格的圈复杂度检查 (替代方案)
     - revive         # Fast, configurable linter (modern golint replacement)
 
     # --- Style & Best Practices ---
     - gosimple       # Simplify code (finds unnecessary complexity)
-    - ineffassign    # Detect ineffectual assignments
-    - misspell       # Catch commonly misspelled English words
-    - prealloc       # Pre-allocate slices for performance
-    - unconvert      # Detect unnecessary type conversions
-
-    # --- Security ---
-    - gosec          # Security audit (hardcoded keys, SQL injection, etc.)
-
-    # --- Code Quality ---
-    - goconst        # Detect repeated strings that could be constants
-    - gocritic       # Find code patterns needing improvement
-    - gocyclo        # Cyclomatic complexity (limit: 15)
-    - revive         # Fast, configurable linter (modern golint replacement)
-
-    # --- Style & Best Practices ---
-    - gosimple       # Simplify code (find unnecessary complexity)
     - ineffassign    # Detect ineffectual assignments
     - misspell       # Catch commonly misspelled English words
     - prealloc       # Pre-allocate slices for performance
@@ -60,6 +45,12 @@ linters-settings:
   # Cyclomatic complexity limit (highly complex functions are bugs)
   gocyclo:
     min-complexity: 25  # Increased for demo project
+
+  # Cyclop - stricter complexity check (veteran level)
+  cyclop:
+    max-complexity: 25  # Aligned with gocyclo for demo project
+    package-average: 15.0  # Package level average
+    skip-tests: true
 
   # Skip main files for errcheck (common in CLI apps)
   errcheck:
