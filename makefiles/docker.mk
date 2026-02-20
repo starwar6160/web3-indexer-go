@@ -44,7 +44,9 @@ test-a2: infra-up
 	@echo "🛑 [LOCAL] 正在停止旧的 8092 实例..."
 	@lsof -ti:8092 | xargs kill -9 2>/dev/null || true
 	@sleep 1
-	@echo "🔍 [LOCAL] 检测 Anvil 当前高度..."
+	@echo "� [LOCAL] 执行冷启动对齐 (force_beast)..."
+	@ROOT_DIR=$(PWD) ENV_FILE=$(PWD)/configs/env/.env.demo2 CLEAR_CHECKPOINTS=true $(PWD)/scripts/force_beast.sh || echo "⚠️ force_beast 失败，继续启动..."
+	@echo "�🔍 [LOCAL] 检测 Anvil 当前高度..."
 	@ANVIL_HEIGHT=$$(scripts/get-anvil-height.sh); \
 	echo "📊 Anvil 当前高度：$$ANVIL_HEIGHT"; \
 	echo "🚀 [LOCAL] 正在确保数据库无状态 (Nuclear Reset)..."; \
@@ -55,6 +57,7 @@ test-a2: infra-up
 	echo "🚀 [LOCAL] 正在以 Anvil 配置直接启动..."; \
 	docker stop web3-anvil-staging 2>/dev/null || true; \
 	set -a; . configs/env/.env.demo2; set +a; \
+	APP_MODE=EPHEMERAL_ANVIL \
 	PORT=8092 \
 	RPC_URLS="http://127.0.0.1:8545" \
 	CHAIN_ID=31337 \
