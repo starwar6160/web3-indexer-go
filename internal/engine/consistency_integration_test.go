@@ -8,6 +8,44 @@ import (
 	"time"
 )
 
+// TestIntegration_Monotonicity 验证索引器游标单调递增（核心一致性检查）
+func TestIntegration_Monotonicity(t *testing.T) {
+	orchestrator := GetOrchestrator()
+	orchestrator.Reset()
+
+	// 模拟链增长和索引器追随
+	var lastSynced uint64
+	for i := uint64(1); i <= 50; i++ {
+		// 1. 链高度增加
+		orchestrator.UpdateChainHead(i * 2)
+
+		// 2. 模拟 fetch 进度
+		orchestrator.Dispatch(CmdNotifyFetchProgress, i*2-1)
+
+		// 3. 模拟 DB 提交（单调递增）
+		orchestrator.AdvanceDBCursor(i)
+
+		// 4. 给予处理时间
+		time.Sleep(50 * time.Millisecond)
+
+		// 5. 验证单调性
+		snap := orchestrator.GetSnapshot()
+		if snap.SyncedCursor < lastSynced {
+			t.Fatalf("AI_FIX_REQUIRED: Monotonicity violation! SyncedCursor decreased from %d to %d",
+				lastSynced, snap.SyncedCursor)
+		}
+		lastSynced = snap.SyncedCursor
+
+		// 6. 验证顺序约束
+		if snap.SyncedCursor > snap.LatestHeight {
+			t.Fatalf("AI_FIX_REQUIRED: Indexer ahead of chain! Synced(%d) > Latest(%d)",
+				snap.SyncedCursor, snap.LatestHeight)
+		}
+	}
+
+	t.Logf("✅ Monotonicity check passed: %d blocks processed with strict ordering", lastSynced)
+}
+
 // TestIntegration_Math_Consistency_AI_Friendly 验证 DTO 数据在数学上必须自洽
 func TestIntegration_Math_Consistency_AI_Friendly(t *testing.T) {
 	orchestrator := GetOrchestrator()

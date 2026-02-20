@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"time"
@@ -138,139 +139,154 @@ func (dw *DeadlockWatchdog) Stop() {
 	}
 }
 
-// checkAndHeal 执行死锁检测和自愈
+// HealRule 规则链模式接口
+type HealRule interface {
+	Check(state *HealingState) bool
+	Apply(ctx context.Context, dw *DeadlockWatchdog, state *HealingState) error
+}
+
+// HealingState 自愈状态快照
+type HealingState struct {
+	IdleTime          time.Duration
+	RPCHeight         int64
+	DBHeight          int64
+	SequencerExpected int64
+	GapSize           int64
+	IsSpaceTimeTear   bool
+	NewCursorHeight   int64
+}
+
+// 1. 闲置检测规则
+type IdleCheckRule struct{}
+
+func (r IdleCheckRule) Check(s *HealingState) bool {
+	return s.IdleTime >= 120*time.Second
+}
+
+func (r IdleCheckRule) Apply(_ context.Context, _ *DeadlockWatchdog, s *HealingState) error {
+	Logger.Warn("🛡️ DeadlockWatchdog: Stall detected",
+		slog.Duration("idle_time", s.IdleTime))
+	return nil
+}
+
+// 2. 时空撕裂检测规则
+type SpaceTimeTearRule struct{}
+
+func (r SpaceTimeTearRule) Check(s *HealingState) bool {
+	return s.IsSpaceTimeTear
+}
+
+func (r SpaceTimeTearRule) Apply(_ context.Context, dw *DeadlockWatchdog, s *HealingState) error {
+	Logger.Error("🚨 DeadlockWatchdog: SPACE-TIME TEAR DETECTED",
+		slog.Int64("db_watermark", s.DBHeight),
+		slog.Int64("rpc_height", s.RPCHeight),
+		slog.Int64("gap_size", s.GapSize))
+
+	if dw.metrics != nil && dw.metrics.SelfHealingTriggered != nil {
+		dw.metrics.SelfHealingTriggered.Inc()
+	}
+	return nil
+}
+
+// 3. 物理游标强插规则
+type PhysicalCursorRule struct{}
+
+func (r PhysicalCursorRule) Check(_ *HealingState) bool { return true }
+
+func (r PhysicalCursorRule) Apply(ctx context.Context, dw *DeadlockWatchdog, s *HealingState) error {
+	Logger.Info("🔧 DeadlockWatchdog: Step 1/3: Physical cursor force-insert",
+		slog.Int64("new_cursor", s.NewCursorHeight))
+
+	if err := dw.repo.UpdateSyncCursor(ctx, s.NewCursorHeight); err != nil {
+		Logger.Error("❌ DeadlockWatchdog: Step 1 FAILED", slog.String("error", err.Error()))
+		return fmt.Errorf("step 1 failed: %w", err)
+	}
+	return nil
+}
+
+// 4. 状态机热重启规则
+type StateMachineRestartRule struct{}
+
+func (r StateMachineRestartRule) Check(_ *HealingState) bool { return true }
+
+func (r StateMachineRestartRule) Apply(_ context.Context, dw *DeadlockWatchdog, s *HealingState) error {
+	Logger.Info("🔧 DeadlockWatchdog: Step 2/3: State machine hot restart",
+		slog.Int64("reset_to", s.RPCHeight))
+
+	dw.sequencer.ResetExpectedBlock(big.NewInt(s.RPCHeight))
+	return nil
+}
+
+// 5. Buffer清理规则
+type BufferCleanupRule struct{}
+
+func (r BufferCleanupRule) Check(_ *HealingState) bool { return true }
+
+func (r BufferCleanupRule) Apply(_ context.Context, dw *DeadlockWatchdog, _ *HealingState) error {
+	Logger.Info("🔧 DeadlockWatchdog: Step 3/3: Buffer cleanup")
+	dw.sequencer.ClearBuffer()
+	return nil
+}
 func (dw *DeadlockWatchdog) checkAndHeal(ctx context.Context) error {
 	if !dw.enabled {
 		return nil
 	}
 
-	// Step 1: 检测闲置时间
-	idleTime := dw.sequencer.GetIdleTime()
-	if idleTime < dw.stallThreshold {
-		// 未达到闲置阈值，继续监控
-		return nil
+	// 构建自愈规则链
+	rules := []HealRule{
+		IdleCheckRule{},
+		SpaceTimeTearRule{},
+		PhysicalCursorRule{},
+		StateMachineRestartRule{},
+		BufferCleanupRule{},
 	}
 
-	Logger.Warn("🛡️ DeadlockWatchdog: Stall detected",
-		slog.Duration("idle_time", idleTime),
-		slog.Duration("threshold", dw.stallThreshold))
-
-	// Step 2: 获取真实状态（不受 Sequencer 影响）
-	rpcHeight, err := dw.rpcPool.GetLatestBlockNumber(ctx)
-	if err != nil {
-		Logger.Warn("DeadlockWatchdog: Failed to get RPC height",
-			slog.String("error", err.Error()))
-		return err
+	// Step 1: 采集状态快照
+	state := dw.gatherState(ctx)
+	if state == nil {
+		return nil // 未达闲置阈值或获取状态失败
 	}
 
-	dbHeight, err := dw.repo.GetSyncCursor(ctx)
-	if err != nil {
-		Logger.Warn("DeadlockWatchdog: Failed to get DB cursor",
-			slog.String("error", err.Error()))
-		return err
+	// Step 2: 执行规则链检测
+	for _, rule := range rules[:2] { // 先执行检测规则
+		if !rule.Check(state) {
+			return nil // 不触发自愈
+		}
+		if err := rule.Apply(ctx, dw, state); err != nil {
+			return err
+		}
 	}
 
-	sequencerExpected := dw.sequencer.GetExpectedBlock()
-
-	Logger.Info("🛡️ DeadlockWatchdog: State snapshot",
-		slog.Int64("rpc_height", rpcHeight.Int64()),
-		slog.Int64("db_watermark", dbHeight),
-		slog.String("sequencer_expected", sequencerExpected.String()),
-		slog.Duration("idle_time", idleTime))
-
-	// Step 3: 判断是否为"时空撕裂"
-	gapSize := rpcHeight.Int64() - dbHeight
-	isSpaceTimeTear := gapSize > dw.gapThreshold && sequencerExpected.Int64() < rpcHeight.Int64()-dw.gapThreshold
-
-	if !isSpaceTimeTear {
-		// 不是时空撕裂，可能只是正常延迟
-		Logger.Debug("DeadlockWatchdog: Not a space-time tear, skipping",
-			slog.Int64("gap_size", gapSize),
-			slog.Bool("is_space_time_tear", isSpaceTimeTear))
-		return nil
-	}
-
-	// 🚨 检测到时空撕裂！执行三步自愈
-	Logger.Error("🚨 DeadlockWatchdog: SPACE-TIME TEAR DETECTED",
-		slog.Int64("db_watermark", dbHeight),
-		slog.Int64("rpc_height", rpcHeight.Int64()),
-		slog.Int64("gap_size", gapSize),
-		slog.String("sequencer_expected", sequencerExpected.String()))
-
-	// 记录指标
-	if dw.metrics != nil && dw.metrics.SelfHealingTriggered != nil {
-		dw.metrics.SelfHealingTriggered.Inc()
-	}
-
+	// Step 3: 执行自愈操作
 	event := HealingEvent{
 		TriggerReason: "space_time_tear",
-		DBWatermark:   dbHeight,
-		RPCHeight:     rpcHeight.Int64(),
-		GapSize:       gapSize,
+		DBWatermark:   state.DBHeight,
+		RPCHeight:     state.RPCHeight,
+		GapSize:       state.GapSize,
 		Success:       false,
 	}
 
-	// 🔧 Step 1/3: 物理级游标强插（数据库）
-	newCursorHeight := rpcHeight.Int64() - 1
-	Logger.Info("🔧 DeadlockWatchdog: Step 1/3: Physical cursor force-insert",
-		slog.Int64("new_cursor", newCursorHeight))
-
-	if err := dw.repo.UpdateSyncCursor(ctx, newCursorHeight); err != nil {
-		Logger.Error("❌ DeadlockWatchdog: Step 1 FAILED",
-			slog.String("error", err.Error()))
-		event.Error = "Step 1 failed: " + err.Error()
-		dw.notifyHealingEvent(event)
-		if dw.metrics != nil && dw.metrics.SelfHealingFailure != nil {
-			dw.metrics.SelfHealingFailure.Inc()
-		}
-		return err
-	}
-
-	// 🔧 Step 2/3: 状态机热重启（Sequencer）
-	Logger.Info("🔧 DeadlockWatchdog: Step 2/3: State machine hot restart",
-		slog.Int64("reset_to", rpcHeight.Int64()))
-
-	dw.sequencer.ResetExpectedBlock(rpcHeight)
-
-	// 🔧 Step 3/3: Buffer 清理
-	Logger.Info("🔧 DeadlockWatchdog: Step 3/3: Buffer cleanup")
-	dw.sequencer.ClearBuffer()
-
-	// 🔥 SSOT: 通过 Orchestrator 更新系统状态（单一控制面）
-	orchestrator := GetOrchestrator()
-	if orchestrator != nil {
-		orchestrator.SetSystemState(SystemStateHealing)
-	}
-
-	// 🔧 Step 4/3 (补充): 重新调度 [dbHeight+1, rpcHeight] 范围的抓取任务。
-	// UpdateSyncCursor 只移动了 sync_checkpoints 游标，但 blocks 表里没有
-	// 对应行，GetMaxStoredBlock 仍会返回旧水位线（如 33490）。
-	// 必须让 Fetcher 实际抓取这段范围，才能让 DB 水位线追上来。
-	if dw.fetcher != nil && dbHeight < rpcHeight.Int64()-1 {
-		fetchFrom := new(big.Int).SetInt64(dbHeight + 1)
-		fetchTo := new(big.Int).Set(rpcHeight)
-		Logger.Info("🔧 DeadlockWatchdog: Step 4/4: Rescheduling gap fetch",
-			slog.Int64("from", fetchFrom.Int64()),
-			slog.Int64("to", fetchTo.Int64()),
-			slog.Int64("blocks", fetchTo.Int64()-fetchFrom.Int64()+1))
-		go func() {
-			if err := dw.fetcher.Schedule(ctx, fetchFrom, fetchTo); err != nil {
-				Logger.Error("❌ DeadlockWatchdog: Gap reschedule failed",
-					slog.String("error", err.Error()))
+	for _, rule := range rules[2:] { // 执行自愈规则
+		if err := rule.Apply(ctx, dw, state); err != nil {
+			event.Error = err.Error()
+			dw.notifyHealingEvent(event)
+			if dw.metrics != nil && dw.metrics.SelfHealingFailure != nil {
+				dw.metrics.SelfHealingFailure.Inc()
 			}
-		}()
-	} else if dw.fetcher == nil {
-		Logger.Warn("⚠️ DeadlockWatchdog: No fetcher wired — gap range not rescheduled. Call SetFetcher() after construction.")
+			return err
+		}
 	}
+
+	// Step 4: 后续处理（SSOT更新、Gap重调度）
+	dw.postHeal(ctx, state)
 
 	// ✅ 自愈成功
 	event.Success = true
 	dw.notifyHealingEvent(event)
-
 	Logger.Info("✅ DeadlockWatchdog: Self-healing SUCCESS",
-		slog.Int64("old_db_watermark", dbHeight),
-		slog.Int64("new_cursor", newCursorHeight),
-		slog.Int64("sequencer_reset_to", rpcHeight.Int64()))
+		slog.Int64("old_db_watermark", state.DBHeight),
+		slog.Int64("new_cursor", state.NewCursorHeight),
+		slog.Int64("sequencer_reset_to", state.RPCHeight))
 
 	if dw.metrics != nil && dw.metrics.SelfHealingSuccess != nil {
 		dw.metrics.SelfHealingSuccess.Inc()
@@ -286,5 +302,80 @@ func (dw *DeadlockWatchdog) notifyHealingEvent(event HealingEvent) {
 		go func() {
 			dw.OnHealingTriggered(event)
 		}()
+	}
+}
+
+// gatherState 采集自愈所需状态快照
+func (dw *DeadlockWatchdog) gatherState(ctx context.Context) *HealingState {
+	idleTime := dw.sequencer.GetIdleTime()
+	if idleTime < dw.stallThreshold {
+		return nil // 未达闲置阈值
+	}
+
+	rpcHeight, err := dw.rpcPool.GetLatestBlockNumber(ctx)
+	if err != nil {
+		Logger.Warn("DeadlockWatchdog: Failed to get RPC height", slog.String("error", err.Error()))
+		return nil
+	}
+
+	dbHeight, err := dw.repo.GetSyncCursor(ctx)
+	if err != nil {
+		Logger.Warn("DeadlockWatchdog: Failed to get DB cursor", slog.String("error", err.Error()))
+		return nil
+	}
+
+	sequencerExpected := dw.sequencer.GetExpectedBlock()
+	rpcHeightInt := rpcHeight.Int64()
+	gapSize := rpcHeightInt - dbHeight
+	isSpaceTimeTear := gapSize > dw.gapThreshold && sequencerExpected.Int64() < rpcHeightInt-dw.gapThreshold
+
+	Logger.Info("🛡️ DeadlockWatchdog: State snapshot",
+		slog.Int64("rpc_height", rpcHeightInt),
+		slog.Int64("db_watermark", dbHeight),
+		slog.String("sequencer_expected", sequencerExpected.String()),
+		slog.Duration("idle_time", idleTime))
+
+	if !isSpaceTimeTear {
+		Logger.Debug("DeadlockWatchdog: Not a space-time tear, skipping",
+			slog.Int64("gap_size", gapSize),
+			slog.Bool("is_space_time_tear", isSpaceTimeTear))
+		return nil
+	}
+
+	return &HealingState{
+		IdleTime:          idleTime,
+		RPCHeight:         rpcHeightInt,
+		DBHeight:          dbHeight,
+		SequencerExpected: sequencerExpected.Int64(),
+		GapSize:           gapSize,
+		IsSpaceTimeTear:   isSpaceTimeTear,
+		NewCursorHeight:   rpcHeightInt - 1,
+	}
+}
+
+// postHeal 自愈后处理（SSOT更新、Gap重调度）
+func (dw *DeadlockWatchdog) postHeal(ctx context.Context, state *HealingState) {
+	// 🔥 SSOT: 通过 Orchestrator 更新系统状态（单一控制面）
+	orchestrator := GetOrchestrator()
+	if orchestrator != nil {
+		orchestrator.SetSystemState(SystemStateHealing)
+	}
+
+	// 🔧 Step 4/4: 重新调度 [dbHeight+1, rpcHeight] 范围的抓取任务。
+	if dw.fetcher != nil && state.DBHeight < state.RPCHeight-1 {
+		fetchFrom := new(big.Int).SetInt64(state.DBHeight + 1)
+		fetchTo := new(big.Int).SetInt64(state.RPCHeight)
+		Logger.Info("🔧 DeadlockWatchdog: Step 4/4: Rescheduling gap fetch",
+			slog.Int64("from", fetchFrom.Int64()),
+			slog.Int64("to", fetchTo.Int64()),
+			slog.Int64("blocks", fetchTo.Int64()-fetchFrom.Int64()+1))
+		go func() {
+			if err := dw.fetcher.Schedule(ctx, fetchFrom, fetchTo); err != nil {
+				Logger.Error("❌ DeadlockWatchdog: Gap reschedule failed",
+					slog.String("error", err.Error()))
+			}
+		}()
+	} else if dw.fetcher == nil {
+		Logger.Warn("⚠️ DeadlockWatchdog: No fetcher wired — gap range not rescheduled. Call SetFetcher() after construction.")
 	}
 }
