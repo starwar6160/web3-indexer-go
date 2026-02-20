@@ -105,6 +105,10 @@ func (s *Server) Start() error {
 		s.wsHub.HandleWS(w, r)
 	})
 
+	// 🔥 Debug 诊断路由（必须在 / 通配符之前注册）
+	debugServer := engine.NewDebugServer(engine.GetOrchestrator(), nil)
+	debugServer.RegisterDebugRoutes(mux)
+
 	// 首页
 	mux.HandleFunc("/", web.RenderDashboard)
 	mux.HandleFunc("/security", web.RenderSecurity)
