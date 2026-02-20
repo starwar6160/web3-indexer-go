@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.13
 
 require (
-	github.com/ethereum/go-ethereum v1.16.8
+	github.com/ethereum/go-ethereum v1.16.9
 	github.com/gorilla/websocket v1.5.3
 	github.com/holiman/uint256 v1.3.2
 	github.com/jackc/pgx/v5 v5.8.0
