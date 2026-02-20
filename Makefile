@@ -13,6 +13,7 @@ include makefiles/dev.mk
 include makefiles/test.mk
 include makefiles/docs.mk
 include makefiles/db.mk
+include makefiles/quality.mk
 
 .PHONY: help build init clean status
 
@@ -34,6 +35,17 @@ help:
 	@echo "  make check        - 运行所有质量检查 (Lint/Security/Test)"
 	@echo "  make docs-sync    - 自动刷新文档索引 (SUMMARY.md)"
 	@echo "  make repair       - [Sepolia] 异步修复数据库中的哈希链断裂 (0x000...)"
+	@echo ""
+	@echo "🔍 静态分析与安全扫描 (makefiles/quality.mk - 0944 工业级):"
+	@echo "  make qa           - 运行本地多轮质量检查 (lint + sec + vuln)"
+	@echo "  make lint         - 运行 golangci-lint 静态分析"
+	@echo "  make lint-fix     - 运行 golangci-lint 并自动修复"
+	@echo "  make sec-scan     - 运行 GoSec 安全扫描"
+	@echo "  make vuln-check   - 运行 govulncheck 漏洞检查 (强制清理缓存)"
+	@echo "  make qa-race      - [动态QA] 运行竞态检测 (-race flag)"
+	@echo "  make qa-consistency - [动态QA] 运行一致性/单调性检查"
+	@echo "  make qa-full      - [完整QA] 静态+动态+行为级全量检查"
+	@echo "  make qa-fix       - 自动修复后运行完整检查"
 	@echo ""
 	@echo "💾 数据库管理 (makefiles/db.mk):"
 	@echo "  make db-list      - 查看所有 Web3 数据库统计"
@@ -222,3 +234,8 @@ doctor:
 	clean-all:
 		chmod +x scripts/shred_data.sh
 		./scripts/shred_data.sh
+
+.PHONY: race-test
+race-test:
+	@echo "🏁 Running Go race detector for $(MODE) mode..."
+	@go test -race ./... 
