@@ -418,7 +418,10 @@ func (o *Orchestrator) UpdateChainHead(height uint64) {
 	}
 	o.mu.Unlock()
 
-	// 仍然发送一个轻量级消息以触发 loop 里的 evaluate 逻辑（可选）
+	// 同步更新 HeightOracle，保持两者数字一致（修复 mem_latest vs rpc_actual 偏差）
+	if height > 0 {
+		GetHeightOracle().SetChainHead(int64(height)) // #nosec G115 - block height fits in int64
+	}
 }
 
 // AdvanceCursor 前进数据库游标（兼容方法）
@@ -783,14 +786,28 @@ func (o *Orchestrator) evaluateEcoMode() {
 
 // 🔥 消息合并：刷新待处理的高度更新（防止 Channel 溢出）
 func (o *Orchestrator) flushPendingHeightUpdate() {
-	if o.pendingHeightUpdate != nil {
-		h := *o.pendingHeightUpdate
-		if h > o.state.LatestHeight {
-			o.state.LatestHeight = h
-			slog.Debug("🎼 Height update applied", "val", h)
-		}
-		o.pendingHeightUpdate = nil
+	if o.pendingHeightUpdate == nil {
+		return
 	}
+	h := *o.pendingHeightUpdate
+	o.pendingHeightUpdate = nil
+	if h <= o.state.LatestHeight {
+		return
+	}
+	o.state.LatestHeight = h
+	if h > o.state.SafetyBuffer {
+		o.state.TargetHeight = h - o.state.SafetyBuffer
+	} else {
+		o.state.TargetHeight = 0
+	}
+	o.state.UpdatedAt = time.Now()
+	// 同步快照，确保 GetSnapshot() 立即可见
+	o.mu.Lock()
+	o.snapshot = o.state
+	o.mu.Unlock()
+	// 同步 HeightOracle，保持 mem_latest == rpc_actual
+	GetHeightOracle().SetChainHead(int64(h)) // #nosec G115 - block height fits in int64
+	slog.Debug("🎼 Height update flushed", "val", h, "target", o.state.TargetHeight)
 }
 
 // 🔥 记录用户活动（由 LazyManager.Trigger() 调用）
