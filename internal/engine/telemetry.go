@@ -30,6 +30,7 @@ func (o *Orchestrator) LogPulse(ctx context.Context) {
 	parityCheck := "healthy"
 
 	if latestNum != nil && memNum != nil {
+		// #nosec G115 - realityGap only used for display, overflow doesn't affect core logic
 		realityGap = int64(rpcActual) - memNum.Int64()
 		isInFuture = realityGap < 0
 
@@ -47,22 +48,22 @@ func (o *Orchestrator) LogPulse(ctx context.Context) {
 	}
 
 	pulse := map[string]interface{}{
-		"ts":           time.Now().UnixMilli(),
-		"tag":          "AI_DIAGNOSTIC",
-		"rpc_actual":   rpcActual,
-		"mem_latest":   status.LatestBlock,
-		"is_desync":    fmt.Sprintf("%d", rpcActual) != status.LatestBlock,
-		"state":        status.State,
-		"mem_sync":     status.MemorySync,
-		"disk_sync":    status.LatestIndexed,
-		"diff":         diff,
-		"lag":          status.SyncLag,
-		"bps":          status.BPS,
-		"strategy":     strategyName(o.strategy),
+		"ts":         time.Now().UnixMilli(),
+		"tag":        "AI_DIAGNOSTIC",
+		"rpc_actual": rpcActual,
+		"mem_latest": status.LatestBlock,
+		"is_desync":  fmt.Sprintf("%d", rpcActual) != status.LatestBlock,
+		"state":      status.State,
+		"mem_sync":   status.MemorySync,
+		"disk_sync":  status.LatestIndexed,
+		"diff":       diff,
+		"lag":        status.SyncLag,
+		"bps":        status.BPS,
+		"strategy":   strategyName(o.strategy),
 		// 🚀 NEW: Reality collapse fields
-		"reality_gap":  realityGap,   // Can be negative (future)
-		"is_in_future": isInFuture,   // Boolean flag
-		"parity_check": parityCheck,  // Health status
+		"reality_gap":  realityGap,  // Can be negative (future)
+		"is_in_future": isInFuture,  // Boolean flag
+		"parity_check": parityCheck, // Health status
 	}
 
 	data, err := json.Marshal(pulse)

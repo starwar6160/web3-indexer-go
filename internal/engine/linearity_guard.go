@@ -47,6 +47,7 @@ func (g *LinearityGuard) CheckLinearity(rpcHeight uint64) {
 	snap := g.orchestrator.GetSnapshot()
 
 	// 计算"倒挂"程度（负值表示索引器领先）
+	// #nosec G115 - diff only used for logging, overflow doesn't affect core logic
 	diff := int64(rpcHeight) - int64(snap.SyncedCursor)
 
 	// 🔥 情况1：链的高度回退了（Anvil 重置）

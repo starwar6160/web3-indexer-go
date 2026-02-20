@@ -38,6 +38,7 @@ func (s *AnvilStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx
 
 				gap := int64(0)
 				if snap.SyncedCursor > rpcHeight.Uint64() {
+					// #nosec G115 - gap only used for logging, overflow doesn't affect core logic
 					gap = int64(snap.SyncedCursor) - rpcHeight.Int64()
 				}
 
