@@ -16,8 +16,15 @@ clean-state:
 	@./scripts/clean-state.sh
 
 infra-up:
-	@echo "📦 Starting infrastructure (DB, Grafana, Prometheus)..."
-	@docker compose -p $(PROJECT_NAME) -f $(INFRA_COMPOSE) up -d
+	@echo "📦 Ensuring infrastructure is running (DB, Grafana, Prometheus)..."
+	@echo "🔍 Checking infrastructure containers..."
+	@$(eval RUNNING_CONTAINERS := $(shell docker ps --format '{{.Names}}' | grep -E '^web3-indexer-(db|grafana|prometheus)$$' | wc -l))
+	@if [ "$(RUNNING_CONTAINERS)" -eq 3 ]; then \
+		echo "✅ All 3 infrastructure containers running (db, grafana, prometheus)"; \
+	else \
+		echo "🚀 Starting missing infrastructure containers ($(RUNNING_CONTAINERS)/3 running)..."; \
+		docker compose -p $(PROJECT_NAME) -f $(INFRA_COMPOSE) up -d --no-recreate; \
+	fi
 
 # --- 1. 极速开发阶段 (Local Hot-Run) ---
 # 不需要构建镜像，直接利用 3800X 的性能秒开
@@ -82,10 +89,10 @@ a1: a1-pre-flight infra-up
 a2: infra-up
 	@echo "📦 [DOCKER] 构建并部署 Anvil 正式版 (8082)..."
 	docker build -t $(IMAGE_NAME):$(STABLE_TAG) .
-	docker stop web3-demo2-app || true
-	docker rm web3-demo2-app || true
-	@set -a; . configs/env/.env.demo2; set +a; \
-	COMPOSE_PROJECT_NAME=web3-demo2 docker compose -p $(PROJECT_NAME) -f configs/docker/docker-compose.yml up -d --no-build
+	docker stop indexer-demo-app || true
+	docker rm indexer-demo-app || true
+	@echo "🚀 Starting Demo2 services with profile demo..."
+	docker compose --project-name indexer-demo -f configs/docker/docker-compose.yml --env-file configs/env/.env.demo2 --profile demo up -d --no-build
 	@echo "✅ Anvil Stable deployed via Docker."
 
 stop-all:

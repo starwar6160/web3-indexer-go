@@ -14,8 +14,13 @@ services:
       # 覆盖特定配置（优先级高于 env_file）
       - APP_TITLE=${APP_TITLE:-🚀 Web3 Indexer (Demo)}
       - PORT=${PORT:-8082}  # 8082 端口（演示环境）
+      - APP_MODE=${APP_MODE:-EPHEMERAL_ANVIL}  # 🔥 显式设置策略模式
+      - CHAIN_ID=${CHAIN_ID:-31337}  # 🔥 显式设置链 ID（Anvil = 31337）
       - FORCE_BEAST_ALIGNMENT=${FORCE_BEAST_ALIGNMENT:-true}  # 🔥 冷启动自动对齐链尖
       - CLEAR_CHECKPOINTS_ON_START=${CLEAR_CHECKPOINTS_ON_START:-true}  # 启动时清理 checkpoints
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/status"]
       interval: 10s
@@ -50,4 +55,64 @@ services:
       retries: 3
       start_period: 5s
 
-# 移除独立的 db 网络定义，因为我们现在复用宿主机的基础设施
+  # PostgreSQL Database Service (for Demo mode)
+  db:
+    image: postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME}-db
+    profiles: ["demo"]
+    network_mode: host
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=W3b3_Idx_Secur3_2026_Sec
+      - POSTGRES_DB=${POSTGRES_DB:-web3_demo}
+    command: [
+      "postgres",
+      "-p", "${DB_PORT:-15434}"
+    ]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    volumes:
+      - postgres_demo_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -p ${DB_PORT:-15434}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # PostgreSQL Database Service (for Testnet mode)
+  testnet-db:
+    image: postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME}-db
+    profiles: ["testnet"]
+    network_mode: host
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=W3b3_Idx_Secur3_2026_Sec
+      - POSTGRES_DB=${POSTGRES_DB:-web3_sepolia}
+    command: [
+      "postgres",
+      "-p", "${DB_PORT:-15433}"
+    ]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    volumes:
+      - postgres_testnet_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  postgres_demo_data:
+    driver: local
+  postgres_testnet_data:
+    driver: local
