@@ -112,11 +112,32 @@ func handleGetTransfersFromHotBuffer(w http.ResponseWriter, processor *engine.Pr
 }
 
 func handleInitialStatus(w http.ResponseWriter, title string) {
+	// 🎯 即使没有数据库（Anvil EPHEMERAL 模式），也返回策略信息
+	orchestrator := engine.GetOrchestrator()
+	strategyName := "unknown"
+	if orchestrator != nil {
+		// 通过 GetUIStatus 获取策略信息（即使 db 为 nil）
+		status := orchestrator.GetUIStatus(context.Background(), nil, "")
+		slog.Info("🔍 [handleInitialStatus] GetUIStatus returned",
+			"strategy", status.Strategy,
+			"state", status.State)
+		if status.Strategy != "" {
+			strategyName = status.Strategy
+		}
+	} else {
+		slog.Warn("🔍 [handleInitialStatus] Orchestrator is nil")
+	}
+
+	slog.Info("🔍 [handleInitialStatus] Returning status",
+		"strategy", strategyName,
+		"title", title)
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"state": "initializing",
-		"title": title,
-		"msg":   "Database or RPC not ready yet",
+		"state":    "initializing",
+		"title":    title,
+		"msg":      "Database or RPC not ready yet",
+		"strategy": strategyName, // 🔥 添加策略字段
 	}); err != nil {
 		slog.Error("failed_to_encode_init_status", "err", err)
 	}

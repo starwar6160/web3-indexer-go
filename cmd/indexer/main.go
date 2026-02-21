@@ -406,8 +406,20 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 	// 🎼 SSOT: 初始化策略与协调器 (单一控制面)
 	// 🔥 使用 ChainID 直接判断（最可靠，避免 URL 误判）
 	// ChainID 31337 = Anvil, 其他 = Testnet
+
+	// 🔍 诊断日志：输出策略工厂初始化前的环境状态
+	slog.Info("🔍 [STRATEGY] Factory Initialization",
+		"cfg_chain_id", cfg.ChainID,
+		"env_chain_id", os.Getenv("CHAIN_ID"),
+		"env_app_mode", os.Getenv("APP_MODE"),
+		"env_rpc_urls", os.Getenv("RPC_URLS"))
+
 	factory := engine.NewStrategyFactoryFromChainID(cfg.ChainID)
 	strategy := factory.CreateStrategy()
+
+	slog.Info("🔍 [STRATEGY] Selected Strategy",
+		"strategy_name", strategy.Name(),
+		"factory_mode", factory.GetMode())
 
 	// 应用策略参数到全局限流器和配置
 	factory.ApplyToOrchestrator(orchestrator, strategy)
@@ -594,6 +606,27 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 			proSim := engine.NewProSimulator(cfg.RPCURLs[0], true, 10)
 			proSim.Start()
 		}()
+
+		// 🔥 横滨实验室：如果启用了 BEAST 模式，同时启动 StressCollider
+		if cfg.ChainID == 31337 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				colliderConfig := engine.DefaultColliderConfig()
+				colliderConfig.TargetTPS = 1000 // 1K TPS 起步
+				colliderConfig.Duration = 5 * time.Minute
+
+				collider, err := engine.NewStressCollider(cfg.RPCURLs[0], colliderConfig)
+				if err != nil {
+					slog.Error("❌ [STRESS_COLLIDER] 初始化失败", "err", err)
+					return
+				}
+
+				// 注册到全局以便 API 控制
+				engine.SetGlobalStressCollider(collider)
+				collider.Start()
+			}()
+		}
 	}
 }
 

@@ -66,6 +66,15 @@ func NewStrategyFactory() *StrategyFactory {
 // NewStrategyFactoryFromChainID 根据已知 ChainID 创建工厂（最可靠的检测方式）
 // 在 main.go 中 ChainID 已从配置中读取，直接用此方法避免 URL 误判
 func NewStrategyFactoryFromChainID(chainID int64) *StrategyFactory {
+	// 🔥 优先检查 APP_MODE 环境变量（用户显式意图优先于 ChainID 自动判断）
+	if appMode := os.Getenv("APP_MODE"); appMode != "" {
+		slog.Info("🔍 StrategyFactory: APP_MODE override",
+			"app_mode", appMode,
+			"chain_id", chainID)
+		return &StrategyFactory{mode: appMode}
+	}
+
+	// 否则使用 ChainID 自动判断
 	var mode string
 	switch chainID {
 	case 31337:

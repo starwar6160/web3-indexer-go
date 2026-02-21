@@ -101,6 +101,31 @@ func (s *Server) Start() error {
 		handleGetStatus(w, r, db, rpcPool, lazyManager, chainID, s.signer)
 	})
 
+	// 🔥 横滨实验室：StressCollider 压测控制 API（仅 Anvil 模式）
+	mux.HandleFunc("/api/stress/start", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleStressColliderStart(w, r)
+	})
+
+	mux.HandleFunc("/api/stress/stop", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleStressColliderStop(w, r)
+	})
+
+	mux.HandleFunc("/api/stress/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleStressColliderMetrics(w, r)
+	})
+
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		s.wsHub.HandleWS(w, r)
 	})

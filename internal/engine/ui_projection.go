@@ -41,6 +41,9 @@ type UIStatusDTO struct {
 	RPCActual    int64  `json:"rpc_actual,omitempty"`    // RPC 实际高度
 	RealityGap   int64  `json:"reality_gap,omitempty"`   // 现实差距（可为负）
 	ParityStatus string `json:"parity_status,omitempty"` // 奇偶校验状态
+
+	// 🎯 NEW: Strategy information
+	Strategy string `json:"strategy,omitempty"` // 当前运行策略（EPHEMERAL_ANVIL, PERSISTENT_TESTNET）
 }
 
 // GetUIStatus 将复杂的内部状态投影为简洁的 UI 对象
@@ -76,6 +79,12 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 	// Safe cast for display fields
 	rpcActualInt, _ := SafeCastUint64ToInt64(rpcActual) // nolint:errcheck // display only, ignore overflow
 
+	// 🎯 获取策略名称
+	strategyName := ""
+	if o.strategy != nil {
+		strategyName = o.strategy.Name()
+	}
+
 	return UIStatusDTO{
 		Version:             version,
 		State:               stateStr,
@@ -105,6 +114,7 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		RPCActual:           rpcActualInt,
 		RealityGap:          realityGap,
 		ParityStatus:        parityStatus,
+		Strategy:            strategyName,
 	}
 }
 
