@@ -129,18 +129,20 @@ func (lm *LazyManager) Trigger() {
 		}
 
 		// Standalone mode (no StateManager): manage fetcher directly.
-		if lm.guard != nil {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
+		// 🔧 使用统一的 goroutine 模式，确保所有操作都有超时保护
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			if lm.guard != nil {
 				if err := lm.guard.PerformLinearityCheck(ctx); err != nil {
 					lm.logger.Error("wake_up_linearity_check_failed", "err", err)
 				}
-				lm.fetcher.Resume()
-			}()
-		} else {
+			}
+
+			// fetcher.Resume() 也受 30 秒超时保护（通过同一个 context）
 			lm.fetcher.Resume()
-		}
+		}()
 
 		if lm.OnStatus != nil {
 			go lm.OnStatus(lm.getStatusLocked())
