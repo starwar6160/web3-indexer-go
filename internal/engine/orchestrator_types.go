@@ -59,6 +59,7 @@ const (
 	CmdLogEvent                           // 🚀 🔥 实时日志事件 (用于 UI 日志流)
 	ReqGetStatus                          // UI 查询状态 (REQ/REP)
 	ReqGetSnapshot                        // 获取状态快照 (REQ/REP)
+	CmdRecordUserActivity                 // 用户活动记录
 )
 
 // Message ZeroMQ 风格的消息结构
@@ -104,8 +105,9 @@ type Orchestrator struct {
 	isYokohamaLab bool // Anvil 环境 (128G RAM)
 
 	// 🔥 订阅者管理（用于 WS 广播）
-	broadcastCh chan CoordinatorState
-	subscribers []chan CoordinatorState
+	broadcastCh   chan CoordinatorState
+	subscribersMu sync.RWMutex
+	subscribers   []chan CoordinatorState
 
 	// 🔥 结构化日志配置
 	enableProfiling bool

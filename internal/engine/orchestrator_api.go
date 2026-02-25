@@ -16,10 +16,13 @@ func (o *Orchestrator) Dispatch(t MsgType, data interface{}) uint64 {
 	msg := Message{Type: t, Data: data, Sequence: seq}
 
 	select {
+	case <-o.ctx.Done():
+		slog.Warn("dispatch_dropped_after_shutdown", "seq", seq, "type", t.String())
+		return seq
 	case o.cmdChan <- msg:
 		return seq
 	default:
-		slog.Error("🎼 Backpressure: Command channel full!", "seq", seq, "type", t)
+		slog.Error("orchestrator_command_channel_full", "seq", seq, "type", t.String())
 		return seq
 	}
 }
@@ -54,8 +57,12 @@ func (o *Orchestrator) GetSnapshot() CoordinatorState {
 // Subscribe 订阅状态快照
 func (o *Orchestrator) Subscribe() <-chan CoordinatorState {
 	ch := make(chan CoordinatorState, 100)
+	o.subscribersMu.Lock()
 	o.subscribers = append(o.subscribers, ch)
-	slog.Info("🎼 New subscriber registered", "total", len(o.subscribers))
+	total := len(o.subscribers)
+	o.subscribersMu.Unlock()
+
+	slog.Info("orchestrator_subscriber_registered", "total", total)
 	return ch
 }
 
@@ -175,7 +182,11 @@ func (o *Orchestrator) broadcaster() {
 }
 
 func (o *Orchestrator) broadcastSnapshot(snapshot CoordinatorState) {
-	for _, ch := range o.subscribers {
+	o.subscribersMu.RLock()
+	subscribers := append([]chan CoordinatorState(nil), o.subscribers...)
+	o.subscribersMu.RUnlock()
+
+	for _, ch := range subscribers {
 		select {
 		case ch <- snapshot:
 		default:
@@ -184,7 +195,7 @@ func (o *Orchestrator) broadcastSnapshot(snapshot CoordinatorState) {
 }
 
 func (o *Orchestrator) RecordUserActivity() {
-	o.state.LastUserActivity = time.Now()
+	o.Dispatch(CmdRecordUserActivity, nil)
 }
 
 func (o *Orchestrator) DispatchLog(level string, message string, args ...interface{}) {

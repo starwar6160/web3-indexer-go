@@ -134,8 +134,12 @@ func (s *Server) Start() error {
 
 	slog.Info("🌐 Server listening", "port", s.port)
 	srv := &http.Server{
-		Addr:              ":" + s.port,
-		Handler:           VisitorStatsMiddleware(s.db, mux),
+		Addr: ":" + s.port,
+		Handler: VisitorStatsMiddleware(func() *sqlx.DB {
+			s.mu.RLock()
+			defer s.mu.RUnlock()
+			return s.db
+		}, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

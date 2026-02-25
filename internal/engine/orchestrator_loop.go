@@ -85,6 +85,9 @@ func (o *Orchestrator) process(msg Message) {
 
 	case ReqGetStatus, ReqGetSnapshot:
 		o.handleGetStatus(msg.Reply)
+
+	case CmdRecordUserActivity:
+		o.state.LastUserActivity = time.Now()
 	}
 
 	o.updateProgressAndSnapshot()

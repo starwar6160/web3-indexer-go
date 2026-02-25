@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"sync"
@@ -63,24 +64,25 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
 	if resetDB {
 		if _, err := db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;"); err != nil {
-			slog.Error("❌ Failed to truncate tables", "err", err)
+			return nil, fmt.Errorf("reset database failed: %w", err)
 		}
 		return getDefaultStartBlockForChain(chainID), nil
 	}
 	if forceFrom != "" {
 		if forceFrom == "latest" {
 			if rpcErr != nil {
-				return big.NewInt(0), nil
+				return nil, fmt.Errorf("get latest block for forceFrom=latest: %w", rpcErr)
 			}
 			return new(big.Int).Add(latestChainBlock, big.NewInt(1)), nil
 		}
 		if blockNum, ok := new(big.Int).SetString(forceFrom, 10); ok {
 			return blockNum, nil
 		}
+		return nil, fmt.Errorf("invalid forceFrom block number: %q", forceFrom)
 	}
 	if cfg.StartBlockStr == "latest" {
 		if rpcErr != nil {
-			return big.NewInt(0), nil
+			return nil, fmt.Errorf("get latest block for StartBlockStr=latest: %w", rpcErr)
 		}
 		startBlock := new(big.Int).Sub(latestChainBlock, big.NewInt(6))
 		if startBlock.Cmp(big.NewInt(0)) < 0 {
@@ -98,7 +100,10 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 	if lastSyncedBlock == "" {
 		return getDefaultStartBlockForChain(chainID), nil
 	}
-	blockNum, _ := new(big.Int).SetString(lastSyncedBlock, 10)
+	blockNum, ok := new(big.Int).SetString(lastSyncedBlock, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid checkpoint block number: %q", lastSyncedBlock)
+	}
 	return new(big.Int).Add(blockNum, big.NewInt(1)), nil
 }
 

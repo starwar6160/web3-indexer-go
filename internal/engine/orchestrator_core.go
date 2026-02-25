@@ -160,15 +160,13 @@ func (o *Orchestrator) Reset() {
 
 // Shutdown 优雅关闭协调器
 func (o *Orchestrator) Shutdown() {
-	slog.Info("🎼 Orchestrator shutting down...")
+	slog.Info("orchestrator_shutting_down")
 	o.cancel()
-	close(o.cmdChan)
-	close(o.broadcastCh)
 
 	// 关闭异步写入器
 	if o.asyncWriter != nil {
 		if err := o.asyncWriter.Shutdown(30 * time.Second); err != nil {
-			slog.Error("🎼 AsyncWriter shutdown failed", "err", err)
+			slog.Error("async_writer_shutdown_failed", "err", err)
 		}
 	}
 }

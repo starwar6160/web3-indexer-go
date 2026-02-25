@@ -56,7 +56,7 @@ func (ta *TrafficAnalyzer) GetAdminIP() string {
 
 var globalAnalyzer = NewTrafficAnalyzer(0.9)
 
-func VisitorStatsMiddleware(db *sqlx.DB, next http.Handler) http.Handler {
+func VisitorStatsMiddleware(dbGetter func() *sqlx.DB, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := r.Header.Get("X-Forwarded-For")
 		if ip == "" {
@@ -81,6 +81,7 @@ func VisitorStatsMiddleware(db *sqlx.DB, next http.Handler) http.Handler {
 
 		isBot := regexp.MustCompile(`(?i)(bot|crawler|spider|curl|wget|python|postman)`).MatchString(ua)
 		if strings.Contains(ua, "Mozilla") && !isBot && r.Method == http.MethodGet {
+			db := dbGetter()
 			if db != nil {
 				go logVisitor(db, ip, ua, r.URL.Path)
 			}
