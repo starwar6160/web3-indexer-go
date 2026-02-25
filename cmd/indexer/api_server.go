@@ -101,6 +101,19 @@ func (s *Server) Start() error {
 		handleGetStatus(w, r, db, rpcPool, lazyManager, chainID, s.signer)
 	})
 
+	mux.HandleFunc("/api/debug/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		db := s.db
+		rpcPool := s.rpcPool
+		s.mu.RUnlock()
+
+		if db == nil || rpcPool == nil {
+			http.Error(w, "System Initializing...", 503)
+			return
+		}
+		handleGetDebugSnapshot(w, r, db, rpcPool)
+	})
+
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		s.wsHub.HandleWS(w, r)
 	})
