@@ -12,6 +12,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strings"
@@ -329,7 +330,7 @@ func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
 		p.metrics.UpdateCurrentSyncHeight(num.Int64())
 	} else {
 		// 防御性处理：截断为正数最大值，保持指标跳动
-		p.metrics.UpdateCurrentSyncHeight(int64(num.Uint64() & 0x7FFFFFFFFFFFFFFF))
+		p.metrics.UpdateCurrentSyncHeight(int64(num.Uint64() & uint64(math.MaxInt64)))
 	}
 
 	// 🚀 确保时间戳转换安全

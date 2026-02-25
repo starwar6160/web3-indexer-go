@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"web3-indexer-go/internal/config"
 	"web3-indexer-go/internal/limiter"
 )
 
@@ -182,10 +183,10 @@ func NewConfigManagerFromEnv() *ConfigManager {
 	if v := os.Getenv("SYNC_MODE"); v != "" {
 		cfg.SyncMode = SyncMode(v)
 	}
-	if os.Getenv("ALWAYS_ACTIVE") == EnvTrue {
+	if os.Getenv("ALWAYS_ACTIVE") == config.EnvTrue {
 		cfg.AlwaysActive = true
 	}
-	if os.Getenv("DEMO_MODE") == EnvTrue {
+	if os.Getenv("DEMO_MODE") == config.EnvTrue {
 		cfg.DemoMode = true
 	}
 

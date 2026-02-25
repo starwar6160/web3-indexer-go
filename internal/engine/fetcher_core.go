@@ -97,30 +97,9 @@ func (f *Fetcher) SetHeaderOnlyMode(enabled bool) {
 }
 
 func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
-	// 彻底关闭限速
-	limiter := rate.NewLimiter(rate.Inf, 0)
-
-	// 💾 初始化录制器
-	recorder, err := NewDataRecorder("")
-	if err != nil {
-		slog.Warn("failed_to_initialize_recorder", "err", err)
-	}
-
-	f := &Fetcher{
-		pool:        pool,
-		concurrency: concurrency,
-		// 🔥 横滨实验室：Jobs channel 也扩容 (concurrency * 10)
-		jobs: make(chan FetchJob, concurrency*10),
-		// 🔥 16G RAM 调优：提升至可配置容量，给予消费端更多缓冲空间
-		Results:  make(chan BlockData, getFetcherResultsChannelSize()),
-		limiter:  limiter,
-		recorder: recorder,
-		stopCh:   make(chan struct{}),
-		paused:   false,
-		metrics:  GetMetrics(),
-	}
-	f.pauseCond = sync.NewCond(&f.pauseMu)
-	return f
+	// 🚀 重构：调用 NewFetcherWithLimiter 避免代码重复
+	// 传入 rps=0, burst=0 表示无限制模式
+	return NewFetcherWithLimiter(pool, concurrency, 0, 0)
 }
 
 // getFetcherResultsChannelSize 从环境变量读取 Results channel 容量

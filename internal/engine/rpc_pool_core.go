@@ -16,8 +16,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const EnvTrue = "true"
-
 // EnhancedRPCClientPool extends the basic RPC pool with advanced rate limiting and monitoring
 type EnhancedRPCClientPool struct {
 	clients           []*rpcNode
@@ -58,7 +56,7 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 	}
 
 	var globalRPS float64
-	forceRPS := os.Getenv("FORCE_RPS") == EnvTrue
+	forceRPS := os.Getenv("FORCE_RPS") == config.EnvTrue
 
 	if isLocal {
 		globalRPS = 500.0

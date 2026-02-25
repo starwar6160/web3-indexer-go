@@ -2,10 +2,14 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
 )
+
+// ErrBlockNotYetAvailable 表示请求的区块高度超过了当前链高度
+var ErrBlockNotYetAvailable = errors.New("block not yet available")
 
 func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	// 🚀 🔥 边界卫兵：绝对禁止抓取还未产生的块 (Ghost Chase Defense)
@@ -16,7 +20,7 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	if start.Cmp(chainHeight) > 0 {
 		// 如果是 Anvil 模式，仅记录 Debug 而非 Error，减少日志噪音
 		slog.Debug("🌀 [Fetcher] Boundary skip: start block is ahead of chain", "start", start.String(), "chain", chainHeight.String())
-		return nil // 优雅跳过，不报错以免触发上游重试
+		return ErrBlockNotYetAvailable // 返回特定错误让调用方能区分"跳过"和"成功"
 	}
 
 	// 如果 end 超过了 chainHeight，自动截断到 chainHeight

@@ -147,11 +147,11 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 			// 参考 LMAX Disruptor 的非阻塞设计
 			if s.fetcher != nil && s.gapFillCount < 3 {
 				Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill", slog.String("from", expectedStr), slog.String("to", gapEnd.String()), slog.Int("attempt", s.gapFillCount+1))
-				go func() {
-					if serr := s.fetcher.Schedule(ctx, expectedCopy, gapEnd); serr != nil {
+				go func(gapCtx context.Context) {
+					if serr := s.fetcher.Schedule(gapCtx, expectedCopy, gapEnd); serr != nil {
 						Logger.Warn("gap_refetch_schedule_failed", "err", serr)
 					}
-				}()
+				}(ctx)
 				s.gapFillCount++
 			} else if bufferLen > 0 {
 				// 🚀 强制空洞跳过（Forced Gap Bypass）
