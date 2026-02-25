@@ -114,7 +114,8 @@
                     // 使用后端识别的 Host
                     grafanaBase = window.location.protocol + "//" + window.location.hostname + ":4000";
                 }
-                const dashboardPath = `/d/web3-indexer-multi/web3-indexer-multi?orgId=1&refresh=5s&kiosk&var-Environment=${currentEnv}&var-PostgresDS=${currentDS}`;
+                const timestamp = new Date().getTime();
+                const dashboardPath = `/d/web3-indexer-multi/web3-indexer-multi?orgId=1&refresh=5s&kiosk&var-Environment=${currentEnv}&var-PostgresDS=${currentDS}&_t=${timestamp}`;
                 grafanaIframe.src = grafanaBase + dashboardPath;
                 console.log("🧬 Environment-Aware Dashboard Loaded:", currentEnv, currentDS);
             }
