@@ -41,9 +41,15 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	}
 
 	inserter := NewBulkInserter(w.db)
-	_ = inserter.InsertBlocksBatchTx(w.ctx, tx, blocksToInsert)
+	if err := inserter.InsertBlocksBatchTx(w.ctx, tx, blocksToInsert); err != nil {
+		slog.Error("📝 AsyncWriter: Block insert failed", "err", err, "count", len(blocksToInsert))
+		// 注意: 不 return，继续尝试插入 transfers，让 tx.Commit() 处理整体失败
+	}
 	if len(transfersToInsert) > 0 {
-		_ = inserter.InsertTransfersBatchTx(w.ctx, tx, transfersToInsert)
+		if err := inserter.InsertTransfersBatchTx(w.ctx, tx, transfersToInsert); err != nil {
+			slog.Error("📝 AsyncWriter: Transfer insert failed", "err", err, "count", len(transfersToInsert))
+			// 注意: 不 return，让 tx.Commit() 处理整体失败
+		}
 	}
 
 	w.updateCheckpointsTx(tx, maxHeight)
@@ -72,19 +78,25 @@ func (w *AsyncWriter) handleEphemeralFlush(batch []PersistTask) {
 
 func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64) {
 	maxHeightStr := fmt.Sprintf("%d", maxHeight)
-	_, _ = tx.ExecContext(w.ctx, `
+	_, err := tx.ExecContext(w.ctx, `
 		INSERT INTO sync_checkpoints (chain_id, last_synced_block)
 		VALUES ($1, $2) ON CONFLICT (chain_id) DO UPDATE SET last_synced_block = EXCLUDED.last_synced_block, updated_at = NOW()`,
 		w.chainID, maxHeightStr)
+	if err != nil {
+		slog.Error("📝 AsyncWriter: Checkpoint update failed", "err", err, "maxHeight", maxHeight)
+	}
 
 	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF)
 	snap := w.orchestrator.GetSnapshot()
 	latestBlock := int64(snap.LatestHeight & 0x7FFFFFFFFFFFFFFF)
-	_, _ = tx.ExecContext(w.ctx, `
+	_, err = tx.ExecContext(w.ctx, `
 		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, last_processed_block, last_processed_timestamp)
 		VALUES ($1, $2, $3, $4, 'syncing', $5, NOW())
 		ON CONFLICT (chain_id) DO UPDATE SET last_synced_block = EXCLUDED.last_synced_block, latest_block = EXCLUDED.latest_block, sync_lag = EXCLUDED.sync_lag, last_processed_block = EXCLUDED.last_processed_block`,
 		w.chainID, syncedBlock, latestBlock, latestBlock-syncedBlock, syncedBlock)
+	if err != nil {
+		slog.Error("📝 AsyncWriter: Sync status update failed", "err", err, "syncedBlock", syncedBlock, "latestBlock", latestBlock)
+	}
 }
 
 func (w *AsyncWriter) emergencyDrain() {
