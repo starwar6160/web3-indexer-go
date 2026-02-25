@@ -63,7 +63,9 @@ func TestStage4_Persistence_Encoding_AI_Friendly(t *testing.T) {
 // MockBlockProcessor 模拟处理器
 type MockBlockProcessor struct{}
 
-func (m *MockBlockProcessor) ProcessBlockWithRetry(ctx context.Context, data BlockData, maxRetries int) error {
+func (m *MockBlockProcessor) ProcessBlockWithRetry(_ context.Context, data BlockData, maxRetries int) error {
+	_ = data // 避免未使用警告
+	_ = maxRetries
 	return nil
 }
 

@@ -191,6 +191,8 @@ func (s *CheckpointService) serializeCheckpoint(_ Checkpoint) ([]byte, error) {
 func (s *CheckpointService) writeFile(path string, checkpoint Checkpoint) error {
 	// TODO: 实现实际的文件写入逻辑
 	// 建议使用 gob.NewEncoder 写入二进制格式
+	_ = path // 避免未使用警告（实现 TODO 时需要）
+	_ = checkpoint
 	return nil
 }
 

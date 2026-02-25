@@ -157,6 +157,7 @@ func (s *Lz4ReplaySource) FetchLogs(ctx context.Context, start, end *big.Int) ([
 				if ok && len(blockMap) == 2 {
 					// 只有 ReceivedAt 和 ReceivedFrom，不是完整 Block
 					// 忽略，保持 bd.Block = nil
+					continue // 跳过不完整的 Block 元数据
 				} else {
 					// 尝试解析为完整 Block
 					blockJSON, _ := json.Marshal(tempStruct.Block)
