@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -95,7 +96,11 @@ func (r *repositoryAdapter) PruneFutureData(ctx context.Context, chainHead int64
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() // nolint:errcheck // Rollback is standard practice, error is usually non-critical during cleanup
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr != sql.ErrTxDone {
+			slog.Error("📝 PruneFutureData: Rollback failed", "err", rbErr)
+		}
+	}()
 
 	headStr := fmt.Sprintf("%d", chainHead)
 
