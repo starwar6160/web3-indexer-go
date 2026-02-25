@@ -67,7 +67,7 @@ func NewSequencerWithFetcher(processor BlockProcessor, fetcher *Fetcher, startBl
 }
 
 func (s *Sequencer) Run(ctx context.Context) {
-	Logger.Info("🚀 Sequencer started. Expected block: " + s.expectedBlock.String())
+	Logger.Info("🚀 Sequencer started", "expected_block", s.expectedBlock.String())
 
 	stallTicker := time.NewTicker(30 * time.Second)
 	defer stallTicker.Stop()
