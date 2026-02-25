@@ -29,8 +29,8 @@ func TestStage4_GapBypass_VisualConsistency(t *testing.T) {
 	)
 
 	// 构造空洞场景：有 100, 102，缺 101
-	resultCh <- BlockData{BlockNumber: big.NewInt(100)}
-	resultCh <- BlockData{BlockNumber: big.NewInt(102)} // 空洞：缺少 101
+	resultCh <- BlockData{Number: big.NewInt(100)}
+	resultCh <- BlockData{Number: big.NewInt(102)} // 空洞：缺少 101
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
