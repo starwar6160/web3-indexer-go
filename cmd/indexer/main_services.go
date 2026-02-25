@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"math/big"
 	"sync"
 	"time"
@@ -14,6 +15,10 @@ import (
 )
 
 func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, lazyManager *engine.LazyManager, rpcPool engine.RPCClient, wsHub *web.Hub) {
+	if cfg.ChainID == 31337 {
+		AlignAnvilData(ctx, sm.db, rpcPool)
+	}
+
 	var wg sync.WaitGroup
 	sm.fetcher.Start(ctx, &wg)
 	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 100), nil, engine.GetMetrics())
@@ -162,5 +167,49 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 				}
 			}
 		}
+	}
+}
+
+// AlignAnvilData 强制对齐 Anvil 数据：如果 DB 高度 > RPC 高度，则削峰
+func AlignAnvilData(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClient) {
+	tip, err := rpcPool.GetLatestBlockNumber(ctx)
+	if err != nil {
+		slog.Error("⚠️ [AlignAnvil] Failed to get RPC tip", "err", err)
+		return
+	}
+	rpcHeight := tip.Uint64()
+
+	var dbHeight uint64
+	err = db.GetContext(ctx, &dbHeight, "SELECT COALESCE(MAX(number), 0) FROM blocks")
+	if err != nil {
+		slog.Error("⚠️ [AlignAnvil] Failed to get DB height", "err", err)
+		return
+	}
+
+	if dbHeight > rpcHeight {
+		slog.Warn("🚨 [AlignAnvil] DATA INVERSION DETECTED",
+			"db_height", dbHeight,
+			"rpc_height", rpcHeight,
+			"gap", dbHeight-rpcHeight)
+
+		// 削峰填谷：删除所有高于 RPC 的数据
+		slog.Warn("🔪 [AlignAnvil] Executing CUTOFF...")
+		_, err = db.ExecContext(ctx, "DELETE FROM blocks WHERE number > $1", rpcHeight)
+		if err != nil {
+			slog.Error("❌ [AlignAnvil] Cutoff failed", "err", err)
+			return
+		}
+		// Transfers 会级联删除 (ON DELETE CASCADE)
+
+		// 重置 Checkpoint
+		_, err = db.ExecContext(ctx, "UPDATE sync_checkpoints SET last_synced_block = $1 WHERE chain_id = 31337", rpcHeight)
+		if err != nil {
+			slog.Error("❌ [AlignAnvil] Checkpoint reset failed", "err", err)
+			return
+		}
+
+		slog.Info("✅ [AlignAnvil] Data successfully aligned to RPC height", "new_height", rpcHeight)
+	} else {
+		slog.Info("✅ [AlignAnvil] Data integrity check passed", "db", dbHeight, "rpc", rpcHeight)
 	}
 }
