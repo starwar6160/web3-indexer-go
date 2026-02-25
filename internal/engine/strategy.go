@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/jmoiron/sqlx"
@@ -20,36 +19,14 @@ type EngineStrategy interface {
 // AnvilStrategy: 针对本地开发优化（极速、易失、0 确认）
 type AnvilStrategy struct{}
 
-func (s *AnvilStrategy) Name() string { return "EPHEMERAL_ANVIL" }
+func (s *AnvilStrategy) Name() string { return "PERSISTENT_ANVIL" }
 
-func (s *AnvilStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx.DB, _ int64) error {
-	slog.Warn("☢️ ANVIL_EPHEMERAL: Executing Nuclear Reset...")
-
-	// 1. 物理清空数据库 (TRUNCATE 是最彻底的)
-	if db != nil {
-		tables := []string{"blocks", "transfers", "sync_checkpoints", "sync_status", "visitor_stats"}
-		for _, table := range tables {
-			_, err := db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table))
-			if err != nil {
-				slog.Debug("🚨 Strategy: Truncate failed (ignoring)", "table", table, "err", err)
-			}
-		}
-		slog.Info("✨ Hard Reset: Database physically pulverized.")
-	}
-
-	// 2. 内存原子级归零
-	o.ResetToZero()
-	
-	// 3. 清空管道残留
-	if o.fetcher != nil {
-		o.fetcher.ClearJobs()
-	}
-
-	slog.Info("✅ Nuclear Reset Complete. System is logically pure.")
-	return nil
+func (s *AnvilStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx.DB, chainID int64) error {
+	slog.Info("💾 Strategy: ANVIL mode detected. Aligning with disk cursor (Persistence Enabled).")
+	return o.LoadInitialState(db, chainID)
 }
 
-func (s *AnvilStrategy) ShouldPersist() bool { return false } // 🔥 Anvil 不写盘，彻底释放 5600U I/O
+func (s *AnvilStrategy) ShouldPersist() bool { return true } 
 func (s *AnvilStrategy) GetConfirmations() uint64 { return 0 }
 func (s *AnvilStrategy) GetBatchSize() int { return 200 }
 
