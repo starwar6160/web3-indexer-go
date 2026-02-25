@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"web3-indexer-go/internal/models"
@@ -87,11 +88,11 @@ func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64) {
 	}
 
 	// 🛡️ 防御性位掩码：确保 uint64 → int64 转换时不会溢出
-	// 0x7FFFFFFFFFFFFFFF 是正 int64 的最大值，用于截断溢出的高位
+	// math.MaxInt64 是正 int64 的最大值，用于截断溢出的高位
 	// 这在处理超大区块号或异常数据时提供安全保护
-	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF)
+	syncedBlock := int64(maxHeight & uint64(math.MaxInt64))
 	snap := w.orchestrator.GetSnapshot()
-	latestBlock := int64(snap.LatestHeight & 0x7FFFFFFFFFFFFFFF)
+	latestBlock := int64(snap.LatestHeight & uint64(math.MaxInt64))
 	_, err = tx.ExecContext(w.ctx, `
 		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, last_processed_block, last_processed_timestamp)
 		VALUES ($1, $2, $3, $4, 'syncing', $5, NOW())

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"math"
 	"math/big"
 	"strings"
 	"time"
@@ -194,7 +195,7 @@ func (p *Processor) updateBatchMetrics(blocks []BlockData) {
 			p.metrics.UpdateCurrentSyncHeight(bNum.Int64())
 		} else {
 			// 防御性截断，确保指标系统不会因为大高度而崩溃
-			p.metrics.UpdateCurrentSyncHeight(int64(bNum.Uint64() & 0x7FFFFFFFFFFFFFFF))
+			p.metrics.UpdateCurrentSyncHeight(int64(bNum.Uint64() & uint64(math.MaxInt64)))
 		}
 	}
 }
