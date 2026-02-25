@@ -2,12 +2,41 @@ tunnel: web3-indexer-tunnel
 credentials-file: /home/ubuntu/.cloudflared/c1b94896-e188-4d52-a233-7986375c3790.json
 
 ingress:
-  - hostname: demo1.st6160.click
-    service: http://localhost:8081
+  # WebSocket 路由（demo2 - 需要协议升级支持）
   - hostname: demo2.st6160.click
-    service: http://localhost:8082
-  - hostname: debug.st6160.click
-    service: http://localhost:8083
+    path: /ws
+    service: http://127.0.0.1:8082
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
+      keepAliveConnections: 100
+      keepAliveTimeout: 90s
+
+  # HTTP API 路由（demo2）
+  - hostname: demo2.st6160.click
+    service: http://127.0.0.1:8082
+
+  # Grafana WebSocket 路由（/api/live/ws 端点）
   - hostname: grafana-demo2.st6160.click
-    service: http://localhost:4000
+    path: /api/live
+    service: http://127.0.0.1:4000
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
+
+  # Grafana 主路由
+  - hostname: grafana-demo2.st6160.click
+    service: http://127.0.0.1:4000
+
+  # demo1 配置（8081 端口无服务，暂时注释）
+  # - hostname: demo1.st6160.click
+  #   service: http://127.0.0.1:8081
+
+  # debug 配置（8083 端口未验证）
+  - hostname: debug.st6160.click
+    service: http://127.0.0.1:8083
+
+  # Fallback
   - service: http_status:404
