@@ -136,7 +136,7 @@ func handleInitialStatus(w http.ResponseWriter, title string) {
 	}
 }
 
-func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, rpcPool engine.RPCClient, lazyManager *engine.LazyManager, chainID int64, signer *engine.SignerMachine) {
+func handleGetStatus(w http.ResponseWriter, r *http.Request, db *sqlx.DB, _ engine.RPCClient, lazyManager *engine.LazyManager, chainID int64, signer *engine.SignerMachine) {
 	if lazyManager != nil {
 		lazyManager.Trigger()
 	}
@@ -181,9 +181,8 @@ func handleGetDebugSnapshot(w http.ResponseWriter, r *http.Request, db *sqlx.DB,
 	}
 
 	// 2. Data Integrity
-	latestRPC, _ := rpcPool.GetLatestBlockNumber(r.Context())
 	latestRPCNum := uint64(0)
-	if latestRPC != nil {
+	if latestRPC, err := rpcPool.GetLatestBlockNumber(r.Context()); err == nil && latestRPC != nil {
 		latestRPCNum = latestRPC.Uint64()
 	}
 
@@ -195,7 +194,6 @@ func handleGetDebugSnapshot(w http.ResponseWriter, r *http.Request, db *sqlx.DB,
 	}
 
 	// 3. Recent Data Samples
-	var recentBlocks []Block
 	var rawBlocks []struct {
 		Number      string    `db:"number"`
 		Hash        string    `db:"hash"`
@@ -203,7 +201,10 @@ func handleGetDebugSnapshot(w http.ResponseWriter, r *http.Request, db *sqlx.DB,
 		Timestamp   string    `db:"timestamp"`
 		ProcessedAt time.Time `db:"processed_at"`
 	}
-	_ = db.SelectContext(r.Context(), &rawBlocks, "SELECT number, hash, parent_hash, timestamp, processed_at FROM blocks ORDER BY number DESC LIMIT 5")
+	if err := db.SelectContext(r.Context(), &rawBlocks, "SELECT number, hash, parent_hash, timestamp, processed_at FROM blocks ORDER BY number DESC LIMIT 5"); err != nil {
+		slog.Warn("failed_to_select_recent_blocks", "err", err)
+	}
+	recentBlocks := make([]Block, 0, len(rawBlocks))
 	for _, b := range rawBlocks {
 		recentBlocks = append(recentBlocks, Block{
 			Number:      b.Number,
@@ -215,7 +216,9 @@ func handleGetDebugSnapshot(w http.ResponseWriter, r *http.Request, db *sqlx.DB,
 	}
 
 	var recentTransfers []Transfer
-	_ = db.SelectContext(r.Context(), &recentTransfers, "SELECT block_number, tx_hash, from_address, to_address, amount, token_address, symbol, activity_type FROM transfers ORDER BY block_number DESC, log_index DESC LIMIT 5")
+	if err := db.SelectContext(r.Context(), &recentTransfers, "SELECT block_number, tx_hash, from_address, to_address, amount, token_address, symbol, activity_type FROM transfers ORDER BY block_number DESC, log_index DESC LIMIT 5"); err != nil {
+		slog.Warn("failed_to_select_recent_transfers", "err", err)
+	}
 
 	recentDataSamples := map[string]interface{}{
 		"blocks_count":    len(recentBlocks),

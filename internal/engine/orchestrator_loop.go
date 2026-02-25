@@ -51,86 +51,40 @@ func (o *Orchestrator) process(msg Message) {
 
 	switch msg.Type {
 	case CmdUpdateChainHeight:
-		h, _ := msg.Data.(uint64)
-		if h > o.state.LatestHeight {
-			o.pendingHeightUpdate = &h
-			o.lastHeightMergeTime = time.Now()
-			if h > o.state.SafetyBuffer {
-				o.state.TargetHeight = h - o.state.SafetyBuffer
-			} else {
-				o.state.TargetHeight = 0
-			}
-		}
+		o.handleUpdateChainHeight(msg.Data)
 
 	case CmdFetchFailed:
-		errType, _ := msg.Data.(string)
-		if errType == "not_found" {
-			o.state.SuccessCount = 0
-			if o.state.SafetyBuffer < 20 {
-				o.state.SafetyBuffer++
-			}
-		}
+		o.handleFetchFailed(msg.Data)
 
 	case CmdFetchSuccess:
-		o.state.SuccessCount++
-		if o.state.SuccessCount >= 50 && o.state.SafetyBuffer > 1 {
-			o.state.SafetyBuffer--
-			o.state.SuccessCount = 0
-		}
+		o.handleFetchSuccess()
 
 	case CmdNotifyFetched, CmdNotifyFetchProgress:
-		h, ok := msg.Data.(uint64)
-		if ok && h > o.state.FetchedHeight {
-			o.state.FetchedHeight = h
-		}
+		o.handleNotifyFetch(msg.Data)
 
 	case CmdLogEvent:
-		logData, ok := msg.Data.(map[string]interface{})
-		if ok {
-			o.state.LogEntry = logData
-			o.state.UpdatedAt = time.Now()
-		}
+		o.handleLogEvent(msg.Data)
 
 	case CmdCommitBatch:
-		task, ok := msg.Data.(PersistTask)
-		if ok && o.asyncWriter != nil {
-			_ = o.asyncWriter.Enqueue(task)
-		}
+		o.handleCommitBatch(msg.Data)
 
 	case CmdCommitDisk:
-		diskHeight, ok := msg.Data.(uint64)
-		if ok && diskHeight > o.state.SyncedCursor {
-			o.state.SyncedCursor = diskHeight
-		}
+		o.handleCommitDisk(msg.Data)
 
 	case CmdResetCursor:
-		resetHeight, ok := msg.Data.(uint64)
-		if ok {
-			o.state.SyncedCursor = resetHeight
-		}
+		o.handleResetCursor(msg.Data)
 
 	case CmdIncrementTransfers:
-		count, ok := msg.Data.(uint64)
-		if ok {
-			o.state.Transfers += count
-		}
+		o.handleIncrementTransfers(msg.Data)
 
 	case CmdToggleEcoMode:
-		active, ok := msg.Data.(bool)
-		if ok {
-			o.state.IsEcoMode = active
-		}
+		o.handleToggleEcoMode(msg.Data)
 
 	case CmdSetSystemState:
-		state, ok := msg.Data.(SystemStateEnum)
-		if ok {
-			o.state.SystemState = state
-		}
+		o.handleSetSystemState(msg.Data)
 
 	case ReqGetStatus, ReqGetSnapshot:
-		if msg.Reply != nil {
-			msg.Reply <- o.state
-		}
+		o.handleGetStatus(msg.Reply)
 	}
 
 	o.updateProgressAndSnapshot()
@@ -143,6 +97,102 @@ func (o *Orchestrator) process(msg Message) {
 				slog.String("type", string(msg.Type)),
 			)
 		}
+	}
+}
+
+func (o *Orchestrator) handleUpdateChainHeight(data interface{}) {
+	h, ok := data.(uint64)
+	if ok && h > o.state.LatestHeight {
+		o.pendingHeightUpdate = &h
+		o.lastHeightMergeTime = time.Now()
+		if h > o.state.SafetyBuffer {
+			o.state.TargetHeight = h - o.state.SafetyBuffer
+		} else {
+			o.state.TargetHeight = 0
+		}
+	}
+}
+
+func (o *Orchestrator) handleFetchFailed(data interface{}) {
+	errType, ok := data.(string)
+	if ok && errType == "not_found" {
+		o.state.SuccessCount = 0
+		if o.state.SafetyBuffer < 20 {
+			o.state.SafetyBuffer++
+		}
+	}
+}
+
+func (o *Orchestrator) handleFetchSuccess() {
+	o.state.SuccessCount++
+	if o.state.SuccessCount >= 50 && o.state.SafetyBuffer > 1 {
+		o.state.SafetyBuffer--
+		o.state.SuccessCount = 0
+	}
+}
+
+func (o *Orchestrator) handleNotifyFetch(data interface{}) {
+	h, ok := data.(uint64)
+	if ok && h > o.state.FetchedHeight {
+		o.state.FetchedHeight = h
+	}
+}
+
+func (o *Orchestrator) handleLogEvent(data interface{}) {
+	logData, ok := data.(map[string]interface{})
+	if ok {
+		o.state.LogEntry = logData
+		o.state.UpdatedAt = time.Now()
+	}
+}
+
+func (o *Orchestrator) handleCommitBatch(data interface{}) {
+	task, ok := data.(PersistTask)
+	if ok && o.asyncWriter != nil {
+		if err := o.asyncWriter.Enqueue(task); err != nil {
+			slog.Error("🎼 Orchestrator: Failed to enqueue persist task", "err", err, "height", task.Height)
+		}
+	}
+}
+
+func (o *Orchestrator) handleCommitDisk(data interface{}) {
+	diskHeight, ok := data.(uint64)
+	if ok && diskHeight > o.state.SyncedCursor {
+		o.state.SyncedCursor = diskHeight
+	}
+}
+
+func (o *Orchestrator) handleResetCursor(data interface{}) {
+	resetHeight, ok := data.(uint64)
+	if ok {
+		o.state.SyncedCursor = resetHeight
+	}
+}
+
+func (o *Orchestrator) handleIncrementTransfers(data interface{}) {
+	count, ok := data.(uint64)
+	if ok {
+		o.state.Transfers += count
+	}
+}
+
+func (o *Orchestrator) handleToggleEcoMode(data interface{}) {
+	active, ok := data.(bool)
+	if ok {
+		o.state.IsEcoMode = active
+	}
+}
+
+func (o *Orchestrator) handleSetSystemState(data interface{}) {
+	state, ok := data.(SystemStateEnum)
+	if ok {
+		o.state.SystemState = state
+	}
+}
+
+func (o *Orchestrator) handleGetStatus(reply chan interface{}) {
+	if reply != nil {
+		reply <- o.state
 	}
 }
 
@@ -176,9 +226,9 @@ func (o *Orchestrator) evaluateSystemState() {
 		o.state.ResultsDepth = resultsDepth
 	}
 
-	GetGlobalState().UpdatePipelineDepth(int32(jobsDepth), int32(resultsDepth), 0)
+	GetGlobalState().UpdatePipelineDepth(int32(uint32(jobsDepth)&0x7FFFFFFF), int32(uint32(resultsDepth)&0x7FFFFFFF), 0)
 	snap := GetGlobalState().Snapshot()
-	
+
 	if snap.ResultsDepth > snap.PipelineDepth*80/100 {
 		o.state.SystemState = SystemStateThrottled
 		return

@@ -68,7 +68,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, blocks []BlockData, chainI
 			Height:    blockNum.Uint64(),
 			Block:     mBlock,
 			Transfers: activities,
-			Sequence:  uint64(time.Now().UnixNano()),
+			Sequence:  uint64(time.Now().UnixNano()) & uint64(math.MaxInt64),
 		}
 
 		// 3. 核心分发 (SSOT)

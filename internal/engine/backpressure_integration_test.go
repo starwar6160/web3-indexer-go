@@ -23,14 +23,14 @@ func TestIntegration_BackpressureFlow(t *testing.T) {
 
 	orchestrator := GetOrchestrator()
 	orchestrator.Reset()
-	
+
 	writer := NewAsyncWriter(db, orchestrator, false, 1)
 	orchestrator.SetAsyncWriter(writer)
-	
+
 	// 🚀 模拟生产者：填满 AsyncWriter 的队列
 	capacity := cap(writer.taskChan)
-	fillCount := capacity * 85 / 100 
-	
+	fillCount := capacity * 85 / 100
+
 	t.Logf("🚀 Filling task channel with %d tasks to trigger pressure limit", fillCount)
 	for i := uint64(1); i <= uint64(fillCount); i++ {
 		writer.taskChan <- PersistTask{
@@ -65,14 +65,16 @@ func TestIntegration_WatermarkLogic(t *testing.T) {
 	orchestrator.SetAsyncWriter(writer)
 	writer.Start() // 启动写入器
 	defer func() {
-		_ = writer.Shutdown(1 * time.Second)
+		if err := writer.Shutdown(1 * time.Second); err != nil {
+			t.Logf("Shutdown error: %v", err)
+		}
 	}()
 
 	// 模拟连续数据流
 	for i := uint64(1); i <= 50; i++ {
 		// 1. 模拟抓取完成 (MemorySync)
 		orchestrator.Dispatch(CmdNotifyFetched, i)
-		
+
 		// 2. 模拟逻辑处理完成并提交落盘任务
 		task := PersistTask{
 			Height: i,
@@ -82,7 +84,7 @@ func TestIntegration_WatermarkLogic(t *testing.T) {
 			},
 		}
 		orchestrator.Dispatch(CmdCommitBatch, task)
-		
+
 		// 验证快照：在任何时刻，FetchedHeight >= SyncedCursor
 		// 由于异步性，我们给一点点处理时间
 		time.Sleep(5 * time.Millisecond)
@@ -99,12 +101,12 @@ func TestIntegration_ReliefValve(t *testing.T) {
 	orchestrator := GetOrchestrator()
 	orchestrator.Reset()
 	writer := NewAsyncWriter(db, orchestrator, false, 1)
-	
+
 	capacity := cap(writer.taskChan)
 	fillCount := capacity * 95 / 100 // 填充 95%
-	
+
 	t.Logf("🚀 Filling channel with %d tasks to trigger relief valve (capacity: %d)", fillCount, capacity)
-	
+
 	for i := 1; i <= fillCount; i++ {
 		writer.taskChan <- PersistTask{
 			Height: uint64(i),
@@ -125,7 +127,7 @@ func TestIntegration_ReliefValve(t *testing.T) {
 	currentDepth := len(writer.taskChan)
 	targetDepth := capacity * 50 / 100
 	assert.LessOrEqual(t, currentDepth, targetDepth+1, "泄压阀应将深度降至 50% 附近")
-	
+
 	snap := orchestrator.GetSnapshot()
 	// lastHeight 是在循环中记录的最后一个被弹出的高度
 	// 由于我们填充了 1..fillCount，弹出了 (fillCount - targetDepth) 个元素

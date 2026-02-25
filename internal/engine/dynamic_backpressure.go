@@ -42,7 +42,7 @@ func NewBackpressureManager() *BackpressureManager {
 
 	// 每 GB 内存分配 1000 个缓冲区槽位
 	memGB := memStats.Sys / (1024 * 1024 * 1024)
-	maxResultsCapacity := int(memGB * 1000) // 128G → 128,000
+	maxResultsCapacity := int(memGB) * 1000 // 128G → 128,000
 
 	// 保守一点，设置上限为 100,000
 	if maxResultsCapacity > 100000 {

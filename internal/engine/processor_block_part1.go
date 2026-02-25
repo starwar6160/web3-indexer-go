@@ -64,7 +64,7 @@ func (p *Processor) ProcessBlock(ctx context.Context, data BlockData) error {
 		Height:    blockNum.Uint64(),
 		Block:     mBlock,
 		Transfers: activities,
-		Sequence:  uint64(time.Now().UnixNano()),
+		Sequence:  uint64(time.Now().UnixNano()) & uint64(math.MaxInt64),
 	}
 
 	// 4. 🔥 核心调度：通过 Orchestrator 分发落盘任务 (SSOT)
@@ -169,7 +169,7 @@ func (p *Processor) extractActivities(ctx context.Context, blockNum *big.Int, lo
 }
 
 // detectFaucetNoDB 不写库的 faucet 检测
-func (p *Processor) detectFaucetNoDB(ctx context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
+func (p *Processor) detectFaucetNoDB(_ context.Context, blockNum *big.Int, tx *types.Transaction, fromAddr string, idx uint) *models.Transfer {
 	faucetLabel := GetAddressLabel(fromAddr)
 	if faucetLabel == "" {
 		return nil
@@ -244,7 +244,7 @@ func (p *Processor) processAnvilSyntheticNoDB(ctx context.Context, blockNum *big
 		anvilTransfer := models.Transfer{
 			BlockNumber:  models.BigInt{Int: blockNum},
 			TxHash:       common.BytesToHash(append(block.Hash().Bytes(), []byte(fmt.Sprintf("ANVIL_MOCK_%d", i))...)).Hex(),
-			LogIndex:     uint(99990 + i),
+			LogIndex:     uint(99990) + uint(i),
 			From:         strings.ToLower(mockFrom),
 			To:           strings.ToLower(mockTo),
 			Amount:       models.NewUint256FromBigInt(mockAmount),

@@ -39,14 +39,14 @@ type DBUpdater interface {
 // MetadataEnricher 异步元数据丰富器
 // 用于在 Sepolia 等真实网络上动态抓取 ERC20 代币的 Symbol 和 Decimals
 type MetadataEnricher struct {
-	client       LowLevelRPCClient
-	cache        sync.Map // addr.Hex() -> models.TokenMetadata
-	queue        chan common.Address
-	inflight     sync.Map // addr.Hex() -> bool (正在处理中的地址)
-	db           DBUpdater
-	ctx          context.Context
-	cancel       context.CancelFunc
-	logger       *slog.Logger
+	client        LowLevelRPCClient
+	cache         sync.Map // addr.Hex() -> models.TokenMetadata
+	queue         chan common.Address
+	inflight      sync.Map // addr.Hex() -> bool (正在处理中的地址)
+	db            DBUpdater
+	ctx           context.Context
+	cancel        context.CancelFunc
+	logger        *slog.Logger
 	batchSize     int
 	timeout       time.Duration
 	batchInterval time.Duration
@@ -147,8 +147,8 @@ func (me *MetadataEnricher) GetSymbol(addr common.Address) string {
 			default:
 				// 不应该发生（因为我们刚检测到队列满）
 				me.logger.Error("❌ [MetadataEnricher] queue state inconsistent", "address", addrHex)
-				// 🔥 Important: do NOT delete from inflight here. 
-				// If the queue is stuck, we'd rather skip new enrichment requests 
+				// 🔥 Important: do NOT delete from inflight here.
+				// If the queue is stuck, we'd rather skip new enrichment requests
 				// than trigger infinite loops of LoadOrStore -> Select -> Delete.
 			}
 		}

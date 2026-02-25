@@ -66,7 +66,7 @@ func TestSequencerBlockProcessing(t *testing.T) {
 
 	rpcPool, _ := NewRPCClientPool([]string{"http://localhost:8545"})
 	processor := NewProcessor(db, rpcPool, 500, 1, false, "local")
-	
+
 	sequencer := NewSequencer(processor, big.NewInt(100), 1, make(chan BlockData), make(chan error, 1), GetMetrics())
 
 	testBlock := createTestBlockForSequencer(big.NewInt(100))

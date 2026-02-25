@@ -14,10 +14,10 @@ type RPCRotator struct {
 
 // RPCNode RPC 节点定义
 type RPCNode struct {
-	URL       string
-	Weight    int     // 权重（用于加权轮询）
-	IsHealthy bool    // 健康状态
-	ErrorCount int64  // 错误计数
+	URL        string
+	Weight     int   // 权重（用于加权轮询）
+	IsHealthy  bool  // 健康状态
+	ErrorCount int64 // 错误计数
 }
 
 // NewRPCRotator 创建 RPC 轮询器
@@ -26,7 +26,7 @@ func NewRPCRotator(urls []string) *RPCRotator {
 	for i, url := range urls {
 		nodes[i] = &RPCNode{
 			URL:       url,
-			Weight:    1,  // 默认权重
+			Weight:    1, // 默认权重
 			IsHealthy: true,
 		}
 	}
@@ -37,8 +37,12 @@ func NewRPCRotator(urls []string) *RPCRotator {
 
 // GetNext 获取下一个可用的 RPC 节点（Round Robin）
 func (r *RPCRotator) GetNext() string {
+	numNodes := uint32(len(r.nodes))
+	if numNodes == 0 {
+		return ""
+	}
 	for i := 0; i < len(r.nodes); i++ {
-		idx := atomic.AddUint32(&r.currentIdx, 1) % uint32(len(r.nodes))
+		idx := atomic.AddUint32(&r.currentIdx, 1) % numNodes
 		node := r.nodes[idx]
 		if node.IsHealthy {
 			return node.URL

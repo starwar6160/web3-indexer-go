@@ -34,7 +34,7 @@ type Metrics struct {
 	// Sequencer metrics
 	SequencerBufferSize prometheus.Gauge
 	SequencerBufferFull prometheus.Counter
-	BroadcastDropped     prometheus.Counter // 📊 新增：广播消息丢弃计数
+	BroadcastDropped    prometheus.Counter // 📊 新增：广播消息丢弃计数
 
 	// RPC Pool metrics
 	RPCRequestsTotal  *prometheus.CounterVec

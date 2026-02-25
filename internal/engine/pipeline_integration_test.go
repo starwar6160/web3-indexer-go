@@ -34,11 +34,14 @@ func TestStage1_Ingestion_Pulse(t *testing.T) {
 func TestStage2_Scheduler_Saturation(t *testing.T) {
 	o := GetOrchestrator()
 	o.Reset()
-	
+
 	// 获取一个真实的 Fetcher 实例 (由 ServiceManager 模拟)
-	rpcPool, _ := NewRPCClientPool([]string{"http://localhost:8545"})
+	rpcPool, err := NewRPCClientPool([]string{"http://localhost:8545"})
+	if err != nil {
+		t.Fatalf("Failed to create RPC pool: %v", err)
+	}
 	f := NewFetcher(rpcPool, 4)
-	
+
 	// 0. 准备：设置足够高的链高以通过边界检查
 	o.UpdateChainHead(100000)
 	time.Sleep(100 * time.Millisecond)
@@ -83,7 +86,7 @@ func TestStage4_Persistence_Finalization(t *testing.T) {
 
 	o := GetOrchestrator()
 	o.Reset()
-	
+
 	// 模拟物理确认
 	o.AdvanceDBCursor(66)
 
@@ -111,7 +114,7 @@ func TestStage5_UI_Logic_Invariants(t *testing.T) {
 	o.UpdateChainHead(10000)
 	o.Dispatch(CmdNotifyFetchProgress, uint64(9500))
 	o.AdvanceDBCursor(9000)
-	
+
 	// 强制刷新一次快照
 	o.Dispatch(CmdNotifyFetched, uint64(9500))
 

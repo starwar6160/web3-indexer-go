@@ -21,7 +21,7 @@ func TestIntegration_Math_Consistency_AI_Friendly(t *testing.T) {
 
 		// 🚀 核心：给予充足时间让 process 循环更新 snapshot
 		time.Sleep(100 * time.Millisecond)
-		
+
 		// 获取一个临时 DB 引用 (此处可以传 nil 因为测试不需要真正的数据库计算，或者使用 mock)
 		status := orchestrator.GetUIStatus(context.Background(), nil, "test-v1")
 		snap := orchestrator.GetSnapshot()
@@ -60,7 +60,7 @@ func TestIntegration_SelfHealing_AI_Friendly(t *testing.T) {
 	// 3. 验证结果
 	orchestrator.Dispatch(CmdNotifyFetchProgress, uint64(5000))
 	time.Sleep(100 * time.Millisecond)
-	
+
 	snap := orchestrator.GetSnapshot()
 	if snap.FetchedHeight != 5000 {
 		t.Errorf("AI_FIX_REQUIRED: Self-Healer failed to align memory watermark. "+

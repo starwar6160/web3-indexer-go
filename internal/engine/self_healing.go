@@ -45,7 +45,7 @@ func (s *SelfHealer) auditAndHeal() {
 		slog.Warn("🚨 SELF_HEAL: Detecting watermark inversion. Aligning Memory with Disk.",
 			"old_mem", o.state.FetchedHeight,
 			"new_mem", o.state.SyncedCursor)
-		
+
 		o.state.FetchedHeight = o.state.SyncedCursor
 	}
 

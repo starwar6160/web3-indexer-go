@@ -7,8 +7,8 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// EngineStrategy 定义了不同运行环境下的行为差异
-type EngineStrategy interface {
+// Strategy 定义了不同运行环境下的行为差异
+type Strategy interface {
 	Name() string
 	OnStartup(ctx context.Context, o *Orchestrator, db *sqlx.DB, chainID int64) error
 	ShouldPersist() bool
@@ -27,9 +27,9 @@ func (s *AnvilStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sqlx
 	return o.LoadInitialState(db, chainID)
 }
 
-func (s *AnvilStrategy) ShouldPersist() bool { return true }
-func (s *AnvilStrategy) GetConfirmations() uint64 { return 0 }
-func (s *AnvilStrategy) GetBatchSize() int { return 200 }
+func (s *AnvilStrategy) ShouldPersist() bool            { return true }
+func (s *AnvilStrategy) GetConfirmations() uint64       { return 0 }
+func (s *AnvilStrategy) GetBatchSize() int              { return 200 }
 func (s *AnvilStrategy) GetInitialSafetyBuffer() uint64 { return 1 }
 
 // TestnetStrategy: 针对测试网优化（稳健、持久、断点续传）
@@ -42,13 +42,13 @@ func (s *TestnetStrategy) OnStartup(ctx context.Context, o *Orchestrator, db *sq
 	return o.LoadInitialState(db, chainID)
 }
 
-func (s *TestnetStrategy) ShouldPersist() bool { return true }
-func (s *TestnetStrategy) GetConfirmations() uint64 { return 6 } // 等待 6 个块确认
-func (s *TestnetStrategy) GetBatchSize() int { return 50 }
+func (s *TestnetStrategy) ShouldPersist() bool            { return true }
+func (s *TestnetStrategy) GetConfirmations() uint64       { return 6 } // 等待 6 个块确认
+func (s *TestnetStrategy) GetBatchSize() int              { return 50 }
 func (s *TestnetStrategy) GetInitialSafetyBuffer() uint64 { return 1 }
 
 // GetStrategy 根据 ChainID 自动选择策略
-func GetStrategy(chainID int64) EngineStrategy {
+func GetStrategy(chainID int64) Strategy {
 	if chainID == 31337 {
 		return &AnvilStrategy{}
 	}

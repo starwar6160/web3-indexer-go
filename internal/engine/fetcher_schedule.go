@@ -15,7 +15,7 @@ func (f *Fetcher) Schedule(ctx context.Context, start, end *big.Int) error {
 	// 🚀 🔥 边界卫兵：绝对禁止抓取还未产生的块 (Ghost Chase Defense)
 	orch := GetOrchestrator()
 	snap := orch.GetSnapshot()
-	chainHeight := big.NewInt(int64(snap.LatestHeight))
+	chainHeight := big.NewInt(SafeUint64ToInt64(snap.LatestHeight))
 
 	if start.Cmp(chainHeight) > 0 {
 		// 如果是 Anvil 模式，仅记录 Debug 而非 Error，减少日志噪音

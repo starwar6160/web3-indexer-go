@@ -41,5 +41,5 @@ type AsyncWriter struct {
 	// 性能指标 (原子操作)
 	diskWatermark          atomic.Uint64
 	writeDuration          atomic.Int64 // 纳秒
-	emergencyDrainCooldown atomic.Bool // 🚀 紧急排水冷却标志，防止频繁触发
+	emergencyDrainCooldown atomic.Bool  // 🚀 紧急排水冷却标志，防止频繁触发
 }

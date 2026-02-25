@@ -27,7 +27,9 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	strategy := engine.GetStrategy(cfg.ChainID)
 	orchestrator := engine.GetOrchestrator()
 	orchestrator.Init(ctx, sm.fetcher, strategy)
-	_ = strategy.OnStartup(ctx, orchestrator, sm.db, cfg.ChainID)
+	if err := strategy.OnStartup(ctx, orchestrator, sm.db, cfg.ChainID); err != nil {
+		slog.Error("❌ Strategy startup failed", "err", err)
+	}
 
 	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator, !strategy.ShouldPersist(), cfg.ChainID)
 	orchestrator.SetAsyncWriter(asyncWriter)
@@ -60,7 +62,9 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClient, chainID int64, forceFrom string, resetDB bool) (*big.Int, error) {
 	latestChainBlock, rpcErr := rpcPool.GetLatestBlockNumber(ctx)
 	if resetDB {
-		_, _ = db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;")
+		if _, err := db.ExecContext(ctx, "TRUNCATE TABLE blocks, transfers CASCADE; DELETE FROM sync_checkpoints;"); err != nil {
+			slog.Error("❌ Failed to truncate tables", "err", err)
+		}
 		return getDefaultStartBlockForChain(chainID), nil
 	}
 	if forceFrom != "" {
@@ -88,7 +92,9 @@ func getStartBlockFromCheckpoint(ctx context.Context, db *sqlx.DB, rpcPool engin
 		return new(big.Int).SetInt64(cfg.StartBlock), nil
 	}
 	var lastSyncedBlock string
-	_ = db.GetContext(ctx, &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
+	if err := db.GetContext(ctx, &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID); err != nil {
+		slog.Debug("📊 No checkpoint found, starting from scratch", "chain_id", chainID, "err", err)
+	}
 	if lastSyncedBlock == "" {
 		return getDefaultStartBlockForChain(chainID), nil
 	}
@@ -128,8 +134,10 @@ func setupParentAnchor(ctx context.Context, db *sqlx.DB, rpcPool engine.RPCClien
 	}
 	parentNum := new(big.Int).Sub(startBlock, big.NewInt(1))
 	if parent, err := rpcPool.BlockByNumber(ctx, parentNum); err == nil && parent != nil {
-		_, _ = db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-			parentNum.String(), parent.Hash().Hex(), parent.ParentHash().Hex(), parent.Time())
+		if _, err := db.Exec("INSERT INTO blocks (number, hash, parent_hash, timestamp) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+			parentNum.String(), parent.Hash().Hex(), parent.ParentHash().Hex(), parent.Time()); err != nil {
+			slog.Warn("❌ Failed to insert parent anchor", "err", err, "block", parentNum.String())
+		}
 	}
 }
 

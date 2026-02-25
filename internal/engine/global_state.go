@@ -22,28 +22,41 @@ const (
 	SystemStateThrottled  // 🚀 背压限流中
 )
 
+const (
+	stringIdle       = "idle"
+	stringActive     = "active"
+	stringCatchingUp = "catching_up"
+	stringStalled    = "stalled"
+	stringHealing    = "healing"
+	stringDegraded   = "degraded"
+	stringRunning    = "running"
+	stringOptimizing = "optimizing"
+	stringThrottled  = "throttled"
+	stringUnknown    = "unknown"
+)
+
 func (s SystemStateEnum) String() string {
 	switch s {
 	case SystemStateIdle:
-		return "idle"
+		return stringIdle
 	case SystemStateActive:
-		return "active"
+		return stringActive
 	case SystemStateCatchingUp:
-		return "catching_up"
+		return stringCatchingUp
 	case SystemStateStalled:
-		return "stalled"
+		return stringStalled
 	case SystemStateHealing:
-		return "healing"
+		return stringHealing
 	case SystemStateDegraded:
-		return "degraded"
+		return stringDegraded
 	case SystemStateRunning:
-		return "running"
+		return stringRunning
 	case SystemStateOptimizing:
-		return "optimizing"
+		return stringOptimizing
 	case SystemStateThrottled:
-		return "throttled"
+		return stringThrottled
 	default:
-		return "unknown"
+		return stringUnknown
 	}
 }
 
@@ -101,9 +114,9 @@ func GetGlobalState() *GlobalState {
 			systemState:        SystemStateUnknown,
 			lastUpdate:         time.Now(),
 			subscribers:        make([]chan Snapshot, 0, 8), // 最多 8 个订阅者
-			maxJobsCapacity:    200,                         // cap(f.jobs)
-			maxResultsCapacity: 5000,                        // cap(f.Results)
-			maxSequencerBuffer: 1000,                        // 默认 buffer 上限
+			maxJobsCapacity:    200,
+			maxResultsCapacity: 5000,
+			maxSequencerBuffer: 1000, // 默认 buffer 上限
 			jobsQueueDepth:     0,
 			resultsDepth:       0,
 			sequencerBuffer:    0,

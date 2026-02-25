@@ -15,12 +15,21 @@ func SafeInt64Diff(a, b uint64) int64 {
 		}
 		return int64(diff)
 	}
-	
+
 	diff := b - a
 	if diff > 9223372036854775808 { // abs(int64 min)
 		return -9223372036854775808
 	}
 	return -int64(diff)
+}
+
+// SafeUint64ToInt64 安全地将 uint64 转换为 int64
+func SafeUint64ToInt64(v uint64) int64 {
+	const maxInt64 = uint64(9223372036854775807)
+	if v > maxInt64 {
+		return 9223372036854775807
+	}
+	return int64(v)
 }
 
 // secureIntn 生成一个安全的随机整数 [0, n)

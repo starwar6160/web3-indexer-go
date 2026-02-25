@@ -11,12 +11,12 @@ import (
 func TestStage4_GapBypass_VisualConsistency(t *testing.T) {
 	// 创建模拟处理器
 	mockProcessor := &MockBlockProcessor{}
-	
+
 	// 创建 Sequencer，从块 100 开始
 	startBlock := big.NewInt(100)
 	resultCh := make(chan BlockData, 100)
 	fatalErrCh := make(chan error, 1)
-	
+
 	seq := NewSequencerWithFetcher(
 		mockProcessor,
 		nil, // 不使用 fetcher

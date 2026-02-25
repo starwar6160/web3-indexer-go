@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -16,9 +17,9 @@ type UIStatusDTO struct {
 	LatestIndexed       string                 `json:"latest_indexed"`
 	TotalBlocks         int64                  `json:"total_blocks"`
 	TotalTransfers      int64                  `json:"total_transfers"`
-	MemorySync          string                 `json:"memory_sync"`   // 🚀 影子游标 (Fetcher 进度)
-	SyncLag             int64                  `json:"sync_lag"`      // 物理滞后
-	FetchLag            int64                  `json:"fetch_lag"`     // 扫描滞后
+	MemorySync          string                 `json:"memory_sync"` // 🚀 影子游标 (Fetcher 进度)
+	SyncLag             int64                  `json:"sync_lag"`    // 物理滞后
+	FetchLag            int64                  `json:"fetch_lag"`   // 扫描滞后
 	SyncProgressPercent float64                `json:"sync_progress_percent"`
 	FetchProgress       float64                `json:"fetch_progress"`
 	TPS                 float64                `json:"tps"`
@@ -55,8 +56,12 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 	// 此处为简化逻辑直接查询，实际生产建议使用原子变量缓存
 	var totalBlocks, totalTransfers int64
 	if db != nil {
-		_ = db.GetContext(ctx, &totalBlocks, "SELECT COUNT(*) FROM blocks")
-		_ = db.GetContext(ctx, &totalTransfers, "SELECT COUNT(*) FROM transfers")
+		if err := db.GetContext(ctx, &totalBlocks, "SELECT COUNT(*) FROM blocks"); err != nil {
+			slog.Debug("📊 [UI] Failed to count blocks", "err", err)
+		}
+		if err := db.GetContext(ctx, &totalTransfers, "SELECT COUNT(*) FROM transfers"); err != nil {
+			slog.Debug("📊 [UI] Failed to count transfers", "err", err)
+		}
 	}
 
 	// 2. 逻辑自洽

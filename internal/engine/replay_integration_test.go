@@ -68,8 +68,8 @@ func TestReplaySourceConstruction(t *testing.T) {
 
 		// 模拟索引构建：读取前几个可用区块
 		// 注意：回放文件从区块 10304722 开始，只读取一小部分
-		startBlock := big.NewInt(10304722)  // 从实际区块号开始
-		endBlock := big.NewInt(10304725)    // 只读几个区块
+		startBlock := big.NewInt(10304722) // 从实际区块号开始
+		endBlock := big.NewInt(10304725)   // 只读几个区块
 
 		t.Logf("🔍 调试: 请求区块范围 %d -> %d", startBlock, endBlock)
 
@@ -148,7 +148,8 @@ func TestReplayGapLeaping(t *testing.T) {
 		require.NoError(t, err)
 
 		// 先读取前5个区块
-		blocks1, _ := source.FetchLogs(ctx, big.NewInt(0), big.NewInt(10304730))
+		blocks1, err := source.FetchLogs(ctx, big.NewInt(0), big.NewInt(10304730))
+		require.NoError(t, err)
 		require.NotEmpty(t, blocks1, "❌ 步骤3失败: 第一批读取为空")
 
 		// 限制前5个
@@ -159,7 +160,8 @@ func TestReplayGapLeaping(t *testing.T) {
 		lastNum1 := blocks1[len(blocks1)-1].Number.Uint64()
 
 		// 跳到更远的区块（如果文件支持）
-		blocks2, _ := source.FetchLogs(ctx, big.NewInt(10304730), big.NewInt(10304730))
+		blocks2, err := source.FetchLogs(ctx, big.NewInt(10304730), big.NewInt(10304730))
+		require.NoError(t, err)
 		if len(blocks2) > 0 {
 			lastNum2 := blocks2[0].Number.Uint64() // 使用第一个而不是最后一个
 			assert.GreaterOrEqual(t, lastNum2, lastNum1,
@@ -382,8 +384,10 @@ func TestReplayFullLifecycle(t *testing.T) {
 	t.Logf("✅ 步骤5完成: 进度计算正确 [%.2f%%]", progress)
 
 	// 步骤6：验证确定性（重复读取）
-	source2, _ := NewLz4ReplaySource(dataFile, 0)
-	blocks2, _ := source2.FetchLogs(ctx, big.NewInt(0), big.NewInt(10304730))
+	source2, err := NewLz4ReplaySource(dataFile, 0)
+	require.NoError(t, err)
+	blocks2, err := source2.FetchLogs(ctx, big.NewInt(0), big.NewInt(10304730))
+	require.NoError(t, err)
 
 	// 限制前100个
 	if len(blocks2) > 100 {

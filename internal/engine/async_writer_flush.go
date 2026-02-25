@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"math"
@@ -24,7 +25,11 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		slog.Error("📝 AsyncWriter: BeginTx failed", "err", err)
 		return
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr != sql.ErrTxDone {
+			slog.Error("📝 AsyncWriter: Rollback failed", "err", rbErr)
+		}
+	}()
 
 	var (
 		maxHeight         uint64
@@ -90,9 +95,9 @@ func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64) {
 	// 🛡️ 防御性位掩码：确保 uint64 → int64 转换时不会溢出
 	// math.MaxInt64 是正 int64 的最大值，用于截断溢出的高位
 	// 这在处理超大区块号或异常数据时提供安全保护
-	syncedBlock := int64(maxHeight & uint64(math.MaxInt64))
+	syncedBlock := SafeUint64ToInt64(maxHeight & uint64(math.MaxInt64))
 	snap := w.orchestrator.GetSnapshot()
-	latestBlock := int64(snap.LatestHeight & uint64(math.MaxInt64))
+	latestBlock := SafeUint64ToInt64(snap.LatestHeight & uint64(math.MaxInt64))
 	_, err = tx.ExecContext(w.ctx, `
 		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, last_processed_block, last_processed_timestamp)
 		VALUES ($1, $2, $3, $4, 'syncing', $5, NOW())

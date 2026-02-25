@@ -158,9 +158,10 @@ func (s *Lz4ReplaySource) FetchLogs(ctx context.Context, start, end *big.Int) ([
 					// 只有 ReceivedAt 和 ReceivedFrom，不是完整 Block
 					// 忽略，保持 bd.Block = nil
 					continue // 跳过不完整的 Block 元数据
-				} else {
-					// 尝试解析为完整 Block
-					blockJSON, _ := json.Marshal(tempStruct.Block)
+				}
+				// 尝试解析为完整 Block
+				blockJSON, err := json.Marshal(tempStruct.Block)
+				if err == nil {
 					bd.Block = new(types.Block)
 					if err := json.Unmarshal(blockJSON, bd.Block); err != nil {
 						// Block 解析失败，设为 nil
@@ -176,9 +177,11 @@ func (s *Lz4ReplaySource) FetchLogs(ctx context.Context, start, end *big.Int) ([
 
 			// 处理 Logs 字段
 			if tempStruct.Logs != nil {
-				logsJSON, _ := json.Marshal(tempStruct.Logs)
-				if err := json.Unmarshal(logsJSON, &bd.Logs); err != nil {
-					bd.Logs = nil
+				logsJSON, err := json.Marshal(tempStruct.Logs)
+				if err == nil {
+					if err := json.Unmarshal(logsJSON, &bd.Logs); err != nil {
+						bd.Logs = nil
+					}
 				}
 			}
 

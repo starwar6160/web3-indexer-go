@@ -45,7 +45,7 @@ func GetOrchestrator() *Orchestrator {
 }
 
 // Init 初始化协调器（设置环境感知配置）
-func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, strategy EngineStrategy) {
+func (o *Orchestrator) Init(_ context.Context, fetcher *Fetcher, strategy Strategy) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -60,7 +60,7 @@ func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, strategy Engi
 func (o *Orchestrator) LoadInitialState(db *sqlx.DB, chainID int64) error {
 	var lastSyncedBlock string
 	err := db.GetContext(context.Background(), &lastSyncedBlock, "SELECT last_synced_block FROM sync_checkpoints WHERE chain_id = $1", chainID)
-	
+
 	// 🚀 增强逻辑：如果 checkpoint 没找到，尝试从 blocks 表直接获取最大值
 	if err != nil || lastSyncedBlock == "" || lastSyncedBlock == "0" {
 		var maxInDB int64
@@ -109,8 +109,8 @@ func (o *Orchestrator) RestoreState(state CoordinatorState) {
 func (o *Orchestrator) SnapToReality(rpcHeight uint64) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	
-	if o.state.LatestHeight > rpcHeight + 1000 {
+
+	if o.state.LatestHeight > rpcHeight+1000 {
 		slog.Warn("🎼 Orchestrator: Ghost state detected! Snapping to reality", "ghost", o.state.LatestHeight, "real", rpcHeight)
 		o.state.LatestHeight = rpcHeight
 		o.state.FetchedHeight = rpcHeight

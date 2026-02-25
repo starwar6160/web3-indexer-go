@@ -10,20 +10,20 @@ import (
 type MsgType int
 
 const (
-	CmdUpdateChainHeight  MsgType = iota // 发现新块高度
-	CmdCommitBatch                       // 成功同步了一批交易 (逻辑完成)
-	CmdCommitDisk                        // 成功落盘 (物理完成) - 🔥 横滨实验室 SSOT 关键
-	CmdResetCursor                       // 强制重置游标 (用于 Reorg)
-	CmdIncrementTransfers                // 增加转账计数
-	CmdToggleEcoMode                     // 环境/配额触发休眠切换
-	CmdSetSystemState                    // 设置系统状态
-	CmdFetchFailed                       // 抓取失败 (用于调整安全缓冲)
-	CmdFetchSuccess                      // 抓取成功 (用于重置失败计数)
-	CmdNotifyFetched                     // 🚀 🔥 内存同步高度 (Fetcher 进度)
-	CmdNotifyFetchProgress               // 🚀 🔥 新增：影子进度 (用于 UI 先行跳动)
-	CmdLogEvent                          // 🚀 🔥 实时日志事件 (用于 UI 日志流)
-	ReqGetStatus                         // UI 查询状态 (REQ/REP)
-	ReqGetSnapshot                       // 获取状态快照 (REQ/REP)
+	CmdUpdateChainHeight   MsgType = iota // 发现新块高度
+	CmdCommitBatch                        // 成功同步了一批交易 (逻辑完成)
+	CmdCommitDisk                         // 成功落盘 (物理完成) - 🔥 横滨实验室 SSOT 关键
+	CmdResetCursor                        // 强制重置游标 (用于 Reorg)
+	CmdIncrementTransfers                 // 增加转账计数
+	CmdToggleEcoMode                      // 环境/配额触发休眠切换
+	CmdSetSystemState                     // 设置系统状态
+	CmdFetchFailed                        // 抓取失败 (用于调整安全缓冲)
+	CmdFetchSuccess                       // 抓取成功 (用于重置失败计数)
+	CmdNotifyFetched                      // 🚀 🔥 内存同步高度 (Fetcher 进度)
+	CmdNotifyFetchProgress                // 🚀 🔥 新增：影子进度 (用于 UI 先行跳动)
+	CmdLogEvent                           // 🚀 🔥 实时日志事件 (用于 UI 日志流)
+	ReqGetStatus                          // UI 查询状态 (REQ/REP)
+	ReqGetSnapshot                        // 获取状态快照 (REQ/REP)
 )
 
 // Message ZeroMQ 风格的消息结构
@@ -45,12 +45,12 @@ type CoordinatorState struct {
 	IsEcoMode        bool    // 是否处于休眠模式
 	Progress         float64 // 同步进度百分比（统一计算，避免前端悖论）
 	SystemState      SystemStateEnum
-	UpdatedAt        time.Time // 状态更新时间
-	LastUserActivity time.Time // 🔥 最后一次用户活动时间（用于休眠决策）
-	SafetyBuffer     uint64    // 🚀 动态安全缓冲 (解决追尾 404)
-	SuccessCount     uint64    // 🚀 🔥 新增：连续成功计数
-	JobsDepth        int       // 🔥 任务队列深度
-	ResultsDepth     int       // 🔥 结果队列深度
+	UpdatedAt        time.Time              // 状态更新时间
+	LastUserActivity time.Time              // 🔥 最后一次用户活动时间（用于休眠决策）
+	SafetyBuffer     uint64                 // 🚀 动态安全缓冲 (解决追尾 404)
+	SuccessCount     uint64                 // 🚀 🔥 新增：连续成功计数
+	JobsDepth        int                    // 🔥 任务队列深度
+	ResultsDepth     int                    // 🔥 结果队列深度
 	LogEntry         map[string]interface{} // 🚀 🔥 新增：最新的日志条目
 }
 
@@ -84,5 +84,5 @@ type Orchestrator struct {
 
 	// 🔥 组件引用 (用于监控)
 	fetcher  *Fetcher
-	strategy EngineStrategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
+	strategy Strategy // 🚀 🔥 新增：运行策略 (Anvil vs Testnet)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"time"
 
 	"web3-indexer-go/internal/database"
@@ -91,7 +92,11 @@ func initEngine(ctx context.Context, apiServer *Server, wsHub *web.Hub, resetDB 
 		wsHub.Broadcast(web.WSEvent{Type: eventType, Data: data})
 	}
 
-	startBlock, _ := sm.GetStartBlock(ctx, forceFrom, resetDB)
+	startBlock, err := sm.GetStartBlock(ctx, forceFrom, resetDB)
+	if err != nil {
+		slog.Error("❌ Failed to determine start block", "err", err)
+		startBlock = big.NewInt(cfg.StartBlock)
+	}
 	setupParentAnchor(ctx, db, rpcPool, startBlock)
 	initServices(ctx, sm, startBlock, lazyManager, rpcPool, wsHub)
 }
