@@ -161,8 +161,16 @@ func continuousTailFollow(ctx context.Context, fetcher *engine.Fetcher, rpcPool 
 						aggressiveTarget = new(big.Int).Set(tip)
 					}
 					if nextBlock.Cmp(aggressiveTarget) <= 0 {
-						_ = fetcher.Schedule(ctx, nextBlock, aggressiveTarget)
-						lastScheduled.Set(aggressiveTarget)
+						// 🔴 Critical Fix: 仅在调度成功时推进 lastScheduled
+						// 防止 Schedule 失败时跳过范围，造成数据缺口
+						if err := fetcher.Schedule(ctx, nextBlock, aggressiveTarget); err == nil {
+							lastScheduled.Set(aggressiveTarget)
+						} else {
+							slog.Warn("⚠️ [TailFollow] Schedule failed, keeping cursor",
+								"nextBlock", nextBlock,
+								"target", aggressiveTarget,
+								"err", err)
+						}
 					}
 				}
 			}
