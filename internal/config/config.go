@@ -59,12 +59,17 @@ type Config struct {
 
 func Load() *Config {
 	// 🚀 工业级增强：递归寻找 .env 文件，解决从不同子目录启动时的路径问题
-	if err := godotenv.Load(); err != nil {
-		if err := godotenv.Load("../.env"); err != nil {
-			if err := godotenv.Load("../../.env"); err != nil {
-				log.Printf("Note: .env file not found in current or parent directories")
-			}
+	envPaths := []string{".env", "../.env", "../../.env"}
+	loaded := false
+	for _, path := range envPaths {
+		if err := godotenv.Load(path); err == nil {
+			loaded = true
+			log.Printf("Note: .env file loaded from: %s", path)
+			break
 		}
+	}
+	if !loaded {
+		log.Printf("Note: .env file not found in current or parent directories")
 	}
 
 	const envTrue = "true"
