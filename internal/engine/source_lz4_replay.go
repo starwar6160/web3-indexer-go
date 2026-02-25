@@ -9,8 +9,41 @@ import (
 	"os"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/pierrec/lz4/v4"
 )
+
+// parseBigInt 从 JSON 值解析 *big.Int（支持数字和字符串）
+func parseBigInt(val interface{}) *big.Int {
+	if val == nil {
+		return nil
+	}
+
+	var numStr string
+
+	switch v := val.(type) {
+	case float64: // JSON 数字默认解析为 float64
+		numStr = fmt.Sprintf("%.0f", v)
+	case string:
+		numStr = v
+	case int:
+		numStr = fmt.Sprintf("%d", v)
+	case int64:
+		numStr = fmt.Sprintf("%d", v)
+	case uint64:
+		numStr = fmt.Sprintf("%d", v)
+	default:
+		return nil
+	}
+
+	result := new(big.Int)
+	result, ok := result.SetString(numStr, 10)
+	if !ok {
+		return nil
+	}
+
+	return result
+}
 
 // Lz4ReplaySource LZ4 轨迹回放源
 // 实现了 BlockSource 接口，将压缩文件伪装成实时区块链
@@ -81,19 +114,77 @@ func (s *Lz4ReplaySource) FetchLogs(ctx context.Context, start, end *big.Int) ([
 		}
 
 		if entry.Type == "block_data" {
-			// ⚡ 工业级黑科技：利用 RecordEntry 的 Timestamp 或 Data 里的 Block 时间进行节拍控制
+			// 🔧 修复：手动解析 BlockData，因为 *big.Int 需要特殊处理
+			dataMap, ok := entry.Data.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
 			var bd BlockData
+
+			// 解析 Number（可能是数字或字符串）
+			if numVal, ok := dataMap["Number"]; ok {
+				bd.Number = parseBigInt(numVal)
+			}
+
+			// 解析 RangeEnd（可能是数字或字符串）
+			if rangeVal, ok := dataMap["RangeEnd"]; ok {
+				bd.RangeEnd = parseBigInt(rangeVal)
+			}
+
+			// 其他字段使用标准 JSON 解析
 			tempJSON, err := json.Marshal(entry.Data)
 			if err != nil {
 				continue
 			}
-			if err := json.Unmarshal(tempJSON, &bd); err != nil {
+
+			// 创建一个临时结构来接收其他字段
+			var tempStruct struct {
+				Block interface{}            `json:"Block"`
+				Err   map[string]interface{} `json:"Err"`
+				Logs  []interface{}          `json:"Logs"`
+			}
+
+			if err := json.Unmarshal(tempJSON, &tempStruct); err != nil {
 				continue
+			}
+
+			// 处理 Block 字段
+			// 注意：录制时可能只保存了元数据，而不是完整的 Block
+			if tempStruct.Block != nil {
+				// 检查是否是完整的 Block 对象
+				blockMap, ok := tempStruct.Block.(map[string]interface{})
+				if ok && len(blockMap) == 2 {
+					// 只有 ReceivedAt 和 ReceivedFrom，不是完整 Block
+					// 忽略，保持 bd.Block = nil
+				} else {
+					// 尝试解析为完整 Block
+					blockJSON, _ := json.Marshal(tempStruct.Block)
+					bd.Block = new(types.Block)
+					if err := json.Unmarshal(blockJSON, bd.Block); err != nil {
+						// Block 解析失败，设为 nil
+						bd.Block = nil
+					}
+				}
+			}
+
+			// 处理 Err 字段（通常为 null）
+			if tempStruct.Err == nil {
+				bd.Err = nil
+			}
+
+			// 处理 Logs 字段
+			if tempStruct.Logs != nil {
+				logsJSON, _ := json.Marshal(tempStruct.Logs)
+				if err := json.Unmarshal(logsJSON, &bd.Logs); err != nil {
+					bd.Logs = nil
+				}
 			}
 
 			bn := bd.Number.Uint64()
 			if bn >= targetStart && bn <= targetEnd {
 				// --- 🎬 倍速控制逻辑 ---
+				// 注意：录制的 Block 可能为 nil（只包含元数据），需要检查
 				if s.speedFactor > 0 && s.lastTime > 0 && bd.Block != nil {
 					currentTime := bd.Block.Time()
 					if currentTime > s.lastTime {
@@ -112,6 +203,7 @@ func (s *Lz4ReplaySource) FetchLogs(ctx context.Context, start, end *big.Int) ([
 						}
 					}
 				}
+				// 只有当 Block 不为 nil 时才更新 lastTime
 				if bd.Block != nil {
 					s.lastTime = bd.Block.Time()
 				}
