@@ -51,17 +51,9 @@ func (w *AsyncWriter) run() {
 		case task := <-w.taskChan:
 			// 🚀 将阈值从 90% 降低到 75%，减少高负载下的频繁触发
 			drainThreshold := cap(w.taskChan) * 75 / 100
-			if len(w.taskChan) > drainThreshold && !w.emergencyDrainCooldown.Load() {
+			if len(w.taskChan) > drainThreshold {
 				w.emergencyDrain()
 				batch = batch[:0]
-
-				// 设置 30 秒冷却时间，防止频繁触发
-				w.emergencyDrainCooldown.Store(true)
-				go func() {
-					time.Sleep(30 * time.Second)
-					w.emergencyDrainCooldown.Store(false)
-				}()
-
 				continue
 			}
 			batch = append(batch, task)

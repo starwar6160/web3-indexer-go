@@ -147,10 +147,15 @@ func (o *Orchestrator) GetStatus(ctx context.Context, db *sqlx.DB, rpcPool RPCCl
 		},
 		"jobs_depth":       snap.JobsDepth,
 		"results_depth":    snap.ResultsDepth,
-		"jobs_capacity":    160,
-		"results_capacity": 15000,
+		"jobs_capacity":    0,
+		"results_capacity": 0,
 		"tps":              GetMetrics().GetWindowTPS(),
 		"bps":              GetMetrics().GetWindowBPS(),
+	}
+
+	if o.fetcher != nil {
+		status["jobs_capacity"] = o.fetcher.JobsCapacity()
+		status["results_capacity"] = o.fetcher.ResultsCapacity()
 	}
 
 	if o.asyncWriter != nil {

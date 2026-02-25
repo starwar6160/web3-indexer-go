@@ -65,6 +65,16 @@ func (f *Fetcher) ResultsDepth() int {
 	return len(f.Results)
 }
 
+// JobsCapacity 返回任务队列容量
+func (f *Fetcher) JobsCapacity() int {
+	return cap(f.jobs)
+}
+
+// ResultsCapacity 返回结果通道容量
+func (f *Fetcher) ResultsCapacity() int {
+	return cap(f.Results)
+}
+
 // 🔥 ClearJobs 清空任务队列 (用于 Ephemeral Mode 重置)
 func (f *Fetcher) ClearJobs() {
 	count := 0

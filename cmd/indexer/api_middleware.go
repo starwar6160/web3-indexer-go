@@ -56,6 +56,27 @@ func (ta *TrafficAnalyzer) GetAdminIP() string {
 
 var globalAnalyzer = NewTrafficAnalyzer(0.9)
 
+var botUARegex = regexp.MustCompile(`(?i)(bot|crawler|spider|curl|wget|python|postman)`)
+
+type visitorLogTask struct {
+	db   *sqlx.DB
+	ip   string
+	ua   string
+	path string
+}
+
+var visitorLogQueue = make(chan visitorLogTask, 2048)
+
+func init() {
+	for i := 0; i < 4; i++ {
+		go func() {
+			for task := range visitorLogQueue {
+				logVisitor(task.db, task.ip, task.ua, task.path)
+			}
+		}()
+	}
+}
+
 func VisitorStatsMiddleware(dbGetter func() *sqlx.DB, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := r.Header.Get("X-Forwarded-For")
@@ -79,11 +100,16 @@ func VisitorStatsMiddleware(dbGetter func() *sqlx.DB, next http.Handler) http.Ha
 			return
 		}
 
-		isBot := regexp.MustCompile(`(?i)(bot|crawler|spider|curl|wget|python|postman)`).MatchString(ua)
+		isBot := botUARegex.MatchString(ua)
 		if strings.Contains(ua, "Mozilla") && !isBot && r.Method == http.MethodGet {
 			db := dbGetter()
 			if db != nil {
-				go logVisitor(db, ip, ua, r.URL.Path)
+				task := visitorLogTask{db: db, ip: ip, ua: ua, path: r.URL.Path}
+				select {
+				case visitorLogQueue <- task:
+				default:
+					slog.Warn("visitor_log_queue_full_drop", "path", r.URL.Path)
+				}
 			}
 		}
 		next.ServeHTTP(w, r)

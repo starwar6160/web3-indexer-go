@@ -112,9 +112,9 @@ func (w *AsyncWriter) emergencyDrain() {
 	if w.emergencyDrainCooldown.Swap(true) {
 		return // 正在冷却中，防止频繁触发
 	}
-	// 1 分钟后清除冷却标志
+	const emergencyDrainCooldown = 60 * time.Second
 	go func() {
-		time.Sleep(1 * time.Minute)
+		time.Sleep(emergencyDrainCooldown)
 		w.emergencyDrainCooldown.Store(false)
 	}()
 
