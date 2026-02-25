@@ -198,7 +198,9 @@ func Load() *Config {
 
 	// 🚨 优先级锁定：优先信任显式传入的 RPC_URLS 环境变量
 	if os.Getenv("RPC_URLS") == "" && cfg.DemoMode {
-		cfg.RPCURLs = []string{"http://127.0.0.1:8545"}
+		// 📝 使用可配置的回退 URL，默认为本地 Anvil
+		fallbackURL := getEnv("FALLBACK_RPC_URL", "http://127.0.0.1:8545")
+		cfg.RPCURLs = []string{fallbackURL}
 		cfg.ChainID = 31337
 		cfg.RPCRateLimit = 200 // 本地环境，火力全开
 		log.Printf("🔒 SECURITY_LOCK: NO RPC_URLS FOUND, FALLING BACK TO LOCAL ANVIL (targets=%v)", cfg.RPCURLs)

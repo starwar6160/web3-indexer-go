@@ -168,7 +168,14 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 					slog.String("strategy", "backfill_async"),
 					slog.String("action_required", "replay skipped range to restore data completeness"))
 
-				s.lastProgressAt = time.Now() // reset BEFORE lock to avoid immediate re-trigger
+				// 🛡️ 关键：lastProgressAt 必须在获取锁之前重置
+				// 原因：
+				// 1. 如果在持有锁时重置，会导致 idleTime 计算错误（因为时间戳在锁内更新）
+				// 2. 重置必须在 expectedBlock 更新之前，确保 watchdog 检测到"有进展"
+				// 3. 这样可以防止 gap bypass 后立即再次触发 stall 检测
+				//
+				// ⚠️ 警告：不要将这行移到 s.mu.Lock() 之后，否则会破坏空闲检测逻辑
+				s.lastProgressAt = time.Now()
 
 				s.mu.Lock()
 				s.expectedBlock.Set(minBuffered)

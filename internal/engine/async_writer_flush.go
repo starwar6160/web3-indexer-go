@@ -86,6 +86,9 @@ func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64) {
 		slog.Error("📝 AsyncWriter: Checkpoint update failed", "err", err, "maxHeight", maxHeight)
 	}
 
+	// 🛡️ 防御性位掩码：确保 uint64 → int64 转换时不会溢出
+	// 0x7FFFFFFFFFFFFFFF 是正 int64 的最大值，用于截断溢出的高位
+	// 这在处理超大区块号或异常数据时提供安全保护
 	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF)
 	snap := w.orchestrator.GetSnapshot()
 	latestBlock := int64(snap.LatestHeight & 0x7FFFFFFFFFFFFFFF)

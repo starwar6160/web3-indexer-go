@@ -101,7 +101,9 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 		pool.clients = append(pool.clients, node)
 	}
 
-	// #nosec G115 - Number of RPC nodes is very small
+	// #nosec G115 - pool.clients is built from user-provided URLs, max ~10 nodes in practice
+	// Converting to int32 is safe as the number of RPC nodes in production deployments
+	// rarely exceeds 10, well within int32 range.
 	pool.size = int32(len(pool.clients))
 
 	// 🔧 检查是否至少有一个可用的 RPC 节点
@@ -136,7 +138,9 @@ func NewRPCClientPoolWithTimeout(urls []string, _ time.Duration) (*RPCClientPool
 		pool.clients = append(pool.clients, node)
 	}
 
-	// #nosec G115 - Number of RPC nodes is very small
+	// #nosec G115 - pool.clients is built from user-provided URLs, max ~10 nodes in practice
+	// Converting to int32 is safe as the number of RPC nodes in production deployments
+	// rarely exceeds 10, well within int32 range.
 	pool.size = int32(len(pool.clients))
 	return pool, nil
 }
