@@ -7,6 +7,13 @@ let wsDisconnectedSince = null; // Track when WebSocket disconnected
 // 🛡️ 演示模式：禁用休眠遮罩（用于 8091 等演示环境）
 const DEMO_MODE_DISABLE_SLEEP = true;
 
+// 🔄 HTTP 轮询降级配置
+let pollingMode = false;
+let pollingInterval = null;
+let wsFailCount = 0;
+const MAX_WS_FAILURES = 3; // 连续失败 3 次后切换到轮询模式
+const POLLING_INTERVAL_MS = 2000; // 每 2 秒轮询一次
+
 function resetIdleTimer() {
     // 🛡️ WebSocket 断线宽限期：如果在 30 秒内重连成功，不触发休眠倒计时
     const now = Date.now();
@@ -201,14 +208,17 @@ function connectWS() {
         isWSConnected = true;
         reconnectInterval = 1000; // 成功后重置重连间隔
         wsDisconnectedSince = null; // 🛡️ 重置断线时间戳
+        wsFailCount = 0; // 🔄 重置失败计数
+        pollingMode = false; // 🔄 退出轮询模式
+        stopPolling(); // 🔄 停止轮询
         updateSystemState('● LIVE', 'status-live', true);
         healthEl.textContent = '✅ Connected';
         healthEl.className = 'status-badge status-healthy';
         addLog('🔗 WebSocket reconnected successfully', 'success');
         console.log('✅ WebSocket Connected');
-        
+
         resetIdleTimer(); // Initial activity
-        
+
         // 💡 架构升级：重连后自动补齐数据
         fetchData();
         addLog('System connected. Streaming live data...', 'info');
@@ -306,6 +316,12 @@ function connectWS() {
         addLog(`WebSocket connection lost. ${gracePeriodSeconds}s grace period before Eco-Mode...`, 'warn');
         console.warn(`❌ WebSocket Closed. Reconnecting in ${reconnectInterval/1000}s...`, e.reason);
 
+        // 🔄 如果在轮询模式下，不尝试重连 WebSocket，继续使用 HTTP 轮询
+        if (pollingMode) {
+            console.log('🔄 Running in polling mode, skipping WebSocket reconnection');
+            return;
+        }
+
         setTimeout(() => {
             reconnectInterval = Math.min(reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
             connectWS();
@@ -314,7 +330,74 @@ function connectWS() {
 
     ws.onerror = (err) => {
         console.error('WebSocket Error:', err);
+        wsFailCount++;
+
+        // 🔄 连续失败 3 次，切换到 HTTP 轮询模式
+        if (wsFailCount >= MAX_WS_FAILURES && !pollingMode) {
+            pollingMode = true;
+            addLog(`⚠️ WebSocket 连接失败 ${wsFailCount} 次，切换到 HTTP 轮询模式`, 'warning');
+            updateSystemState('HTTP POLLING MODE', 'status-connecting');
+            startPolling();
+        }
+
         ws.close();
+    };
+}
+
+// 🔄 HTTP 轮询降级模式
+function startPolling() {
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+    }
+
+    addLog('🔄 启动 HTTP 轮询模式 (每 2 秒更新)', 'info');
+    updateSystemState('HTTP POLLING', 'status-connecting');
+
+    // 立即执行一次
+    fetchData();
+
+    // 每 2 秒轮询一次
+    pollingInterval = setInterval(() => {
+        fetchData();
+    }, POLLING_INTERVAL_MS);
+}
+
+function stopPolling() {
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+        addLog('✅ 停止 HTTP 轮询模式', 'success');
+    }
+}
+
+// 🔄 尝试从轮询模式恢复到 WebSocket
+function attemptWSRecovery() {
+    if (!pollingMode) return;
+
+    addLog('🔄 尝试恢复 WebSocket 连接...', 'info');
+    wsFailCount = 0; // 重置失败计数
+
+    const testWS = new WebSocket((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws');
+
+    const testTimeout = setTimeout(() => {
+        testWS.close();
+        console.log('⚠️ WebSocket 恢复失败，继续使用 HTTP 轮询');
+    }, 5000);
+
+    testWS.onopen = () => {
+        clearTimeout(testTimeout);
+        testWS.close();
+
+        // WebSocket 可用，切换回去
+        pollingMode = false;
+        stopPolling();
+        addLog('✅ WebSocket 连接恢复，切换回实时模式', 'success');
+        connectWS();
+    };
+
+    testWS.onerror = () => {
+        clearTimeout(testTimeout);
+        console.log('⚠️ WebSocket 仍然不可用');
     };
 }
 
@@ -372,11 +455,23 @@ async function fetchStatus() {
             return;
         }
 
-        document.getElementById('latestBlock').textContent = data?.latest_block || '0';
-        document.getElementById('totalBlocks').textContent = data?.total_blocks || '0';
-        document.getElementById('totalTransfers').textContent = data?.total_transfers || '0';
-        document.getElementById('tps').textContent = data?.tps || '0';
-        document.getElementById('bps').textContent = data?.bps || '0';
+        // 🚀 Diff Update to prevent flickering
+        const updateTextIfChanged = (id, newVal) => {
+            const el = document.getElementById(id);
+            if (el && el.textContent !== String(newVal)) {
+                el.textContent = newVal;
+            }
+        };
+
+        updateTextIfChanged('latestBlock', data?.latest_block || '0');
+        updateTextIfChanged('totalTransfers', data?.total_transfers || '0');
+        updateTextIfChanged('tps', data?.tps || '0');
+        updateTextIfChanged('bps', data?.bps || '0');
+        updateTextIfChanged('latency', data?.e2e_latency_display || '0s');
+        updateTextIfChanged('totalVisitors', data?.total_visitors || '0');
+        updateTextIfChanged('adminIP', data?.admin_ip || 'None');
+        updateTextIfChanged('selfHealing', data?.self_healing_count || '0');
+        updateTextIfChanged('lastUpdate', new Date().toLocaleTimeString());
 
         // 🎯 同步进度百分比显示（替换原有的 Total Blocks 显示）
         if (data?.sync_progress_percent !== undefined) {
@@ -722,6 +817,13 @@ async function fetchData() {
 fetchData();
 connectWS();
 setInterval(fetchStatus, 5000);
+
+// 🔄 定期尝试从轮询模式恢复到 WebSocket（每 60 秒尝试一次）
+setInterval(() => {
+    if (pollingMode) {
+        attemptWSRecovery();
+    }
+}, 60000);
 
 function updateSignatureStatus(isSigned, signerId, signature) {
     const sigStatusEl = document.getElementById('signatureStatus');
