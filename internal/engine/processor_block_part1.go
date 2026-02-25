@@ -272,10 +272,7 @@ func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer,
 	if p.EventHook == nil {
 		return
 	}
-	latencyMs := time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds()
-	if latencyMs < 0 {
-		latencyMs = 0
-	}
+	latencyMs := max(0, time.Since(time.Unix(int64(block.Time()), 0)).Milliseconds())
 
 	latencyDisplay := fmt.Sprintf("%dms", latencyMs)
 	if p.chainID == 31337 && latencyMs > 3600000 {
@@ -286,10 +283,7 @@ func (p *Processor) pushEvents(block *types.Block, activities []models.Transfer,
 	syncLag := int64(0)
 	if p.metrics != nil {
 		latestChain = p.metrics.lastChainHeight.Load()
-		syncLag = latestChain - int64(block.NumberU64())
-		if syncLag < 0 {
-			syncLag = 0
-		}
+		syncLag = max(0, latestChain-int64(block.NumberU64()))
 	}
 
 	p.EventHook("block", map[string]interface{}{
@@ -339,10 +333,7 @@ func (p *Processor) updateMetrics(start time.Time, block *types.Block) {
 		blockTime = 9223372036854775807
 	}
 
-	latency := time.Since(time.Unix(int64(blockTime), 0)).Seconds()
-	if latency < 0 {
-		latency = 0
-	}
+	latency := max(0, time.Since(time.Unix(int64(blockTime), 0)).Seconds())
 	p.metrics.UpdateE2ELatency(latency)
 }
 

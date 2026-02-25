@@ -51,8 +51,9 @@ func (o *Orchestrator) Init(ctx context.Context, fetcher *Fetcher, strategy Engi
 
 	o.fetcher = fetcher
 	o.strategy = strategy
+	o.state.SafetyBuffer = strategy.GetInitialSafetyBuffer()
 
-	slog.Info("🎼 Orchestrator initialized", "strategy", strategy.Name())
+	slog.Info("🎼 Orchestrator initialized", "strategy", strategy.Name(), "safety_buffer", o.state.SafetyBuffer)
 }
 
 // LoadInitialState 从数据库加载初始状态
@@ -141,11 +142,17 @@ func (o *Orchestrator) ResetToZero() {
 func (o *Orchestrator) Reset() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+
+	safetyBuffer := uint64(1)
+	if o.strategy != nil {
+		safetyBuffer = o.strategy.GetInitialSafetyBuffer()
+	}
+
 	o.state = CoordinatorState{
 		UpdatedAt:        time.Now(),
 		SystemState:      SystemStateUnknown,
 		LastUserActivity: time.Now(),
-		SafetyBuffer:     1,
+		SafetyBuffer:     safetyBuffer,
 	}
 	o.snapshot = o.state
 	slog.Info("🎼 Orchestrator: State reset for testing")

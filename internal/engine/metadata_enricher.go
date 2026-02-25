@@ -48,6 +48,7 @@ type MetadataEnricher struct {
 	cancel       context.CancelFunc
 	logger       *slog.Logger
 	batchSize    int
+	timeout      time.Duration
 	erc20ABI     abi.ABI
 	multicallABI abi.ABI
 }
@@ -73,6 +74,7 @@ func NewMetadataEnricher(client LowLevelRPCClient, db DBUpdater, logger *slog.Lo
 		db:           db,
 		logger:       logger,
 		batchSize:    50, // 提升至 50，进一步利用 Multicall3 带宽
+		timeout:      10 * time.Second,
 		erc20ABI:     mustParseABI(erc20ABIJSON),
 		multicallABI: mustParseABI(multiABIJSON),
 	}
@@ -227,7 +229,7 @@ func (me *MetadataEnricher) processBatch(addresses []common.Address) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(me.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(me.ctx, me.timeout)
 	defer cancel()
 
 	msg := ethereum.CallMsg{To: &Multicall3Address, Data: input}

@@ -203,7 +203,7 @@ func (f *Fetcher) SetWatchedAddresses(addresses []string) {
 // burst is set equal to tps (minimum 1) so WaitN(ctx, n) never blocks
 // permanently when n <= burst. Pass tps <= 0 to disable throttling.
 func (f *Fetcher) SetThroughputLimit(tps float64) {
-	if tps <= 0 {
+	if tps <= 0 || tps != tps { // tps <= 0 or NaN
 		f.throughput = rate.NewLimiter(rate.Inf, 0)
 		f.bpsLimiter = rate.NewLimiter(rate.Inf, 0)
 		return
@@ -212,6 +212,10 @@ func (f *Fetcher) SetThroughputLimit(tps float64) {
 	burst := int(tps)
 	if burst < 1 {
 		burst = 1
+	}
+	// 限制最大 burst 防止资源耗尽
+	if burst > 10000 {
+		burst = 10000
 	}
 	f.throughput = rate.NewLimiter(rate.Limit(tps), burst)
 	f.bpsLimiter = rate.NewLimiter(rate.Limit(tps*10), burst*10)
