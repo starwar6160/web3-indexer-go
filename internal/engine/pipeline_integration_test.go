@@ -54,7 +54,7 @@ func TestStage2_Scheduler_Saturation(t *testing.T) {
 	}
 
 	// 2. 尝试调度
-	err := f.Schedule(context.Background(), models.NewBigInt(60000).Int, models.NewBigInt(60100).Int)
+	err = f.Schedule(context.Background(), models.NewBigInt(60000).Int, models.NewBigInt(60100).Int)
 
 	if err == nil || !strings.Contains(err.Error(), "backpressure") {
 		t.Fatalf("AI_FIX_REQUIRED [Stage 2]: Scheduler failed to trigger backpressure. Got err: %v", err)
