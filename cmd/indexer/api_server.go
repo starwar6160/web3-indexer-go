@@ -50,6 +50,7 @@ func (s *Server) SetDependencies(db *sqlx.DB, rpcPool engine.RPCClient, lazyMana
 }
 
 func (s *Server) Start() error {
+	slog.Info("🚀 STARTING SERVER V2 - CONFIGURING ROUTES")
 	mux := http.NewServeMux()
 
 	// 静态资源
@@ -119,7 +120,13 @@ func (s *Server) Start() error {
 	})
 
 	// 首页
-	mux.HandleFunc("/", web.RenderDashboard)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		web.RenderDashboard(w, r)
+	})
 	mux.HandleFunc("/security", web.RenderSecurity)
 
 	// Prometheus 指标
