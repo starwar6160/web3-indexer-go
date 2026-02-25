@@ -33,18 +33,24 @@ type LazyManager struct {
 	// directly resuming the fetcher, and the sleep transition delegates
 	// to stateManager.transitionTo(StateIdle).
 	stateManager *StateManager
+
+	// 🚀 配置监控周期
+	monitorInterval time.Duration
+	regressInterval time.Duration
 }
 
 // NewLazyManager creates a new LazyManager instance with a heartbeat timeout
 func NewLazyManager(fetcher *Fetcher, rpcPool RPCClient, timeout time.Duration, guard *ConsistencyGuard) *LazyManager {
 	lm := &LazyManager{
-		isActive:      false,
-		lastHeartbeat: time.Now().Add(-timeout), // Initialize as inactive
-		timeout:       timeout,
-		fetcher:       fetcher,
-		rpcPool:       rpcPool,
-		guard:         guard,
-		logger:        slog.Default(),
+		isActive:        false,
+		lastHeartbeat:   time.Now().Add(-timeout), // Initialize as inactive
+		timeout:         timeout,
+		fetcher:         fetcher,
+		rpcPool:         rpcPool,
+		guard:           guard,
+		logger:          slog.Default(),
+		monitorInterval: 30 * time.Second,
+		regressInterval: 60 * time.Second,
 	}
 
 	// Initial state: ensure fetcher is paused
@@ -159,9 +165,9 @@ func (lm *LazyManager) Trigger() {
 // StartMonitor starts a background loop to check for inactivity and regression
 func (lm *LazyManager) StartMonitor(ctx context.Context) {
 	go func() {
-		// 🚀 工业级监控周期：30秒检查一次活跃度，60秒执行一次回归预警
-		ticker := time.NewTicker(30 * time.Second)
-		regressTicker := time.NewTicker(60 * time.Second)
+		// 🚀 工业级监控周期：动态可配
+		ticker := time.NewTicker(lm.monitorInterval)
+		regressTicker := time.NewTicker(lm.regressInterval)
 		defer ticker.Stop()
 		defer regressTicker.Stop()
 

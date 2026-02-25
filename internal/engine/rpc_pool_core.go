@@ -143,6 +143,9 @@ func NewRPCClientPoolWithTimeout(urls []string, _ time.Duration) (*RPCClientPool
 	// Converting to int32 is safe as the number of RPC nodes in production deployments
 	// rarely exceeds 10, well within int32 range.
 	pool.size = int32(len(pool.clients))
+	if pool.size == 0 {
+		return nil, fmt.Errorf("no healthy RPC nodes available (all %d URLs failed)", len(urls))
+	}
 	return pool, nil
 }
 

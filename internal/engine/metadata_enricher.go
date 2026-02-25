@@ -147,6 +147,9 @@ func (me *MetadataEnricher) GetSymbol(addr common.Address) string {
 			default:
 				// 不应该发生（因为我们刚检测到队列满）
 				me.logger.Error("❌ [MetadataEnricher] queue state inconsistent", "address", addrHex)
+				// 🔥 Important: do NOT delete from inflight here. 
+				// If the queue is stuck, we'd rather skip new enrichment requests 
+				// than trigger infinite loops of LoadOrStore -> Select -> Delete.
 			}
 		}
 	}
