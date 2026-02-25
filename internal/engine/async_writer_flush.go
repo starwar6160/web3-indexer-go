@@ -103,6 +103,15 @@ func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64) {
 }
 
 func (w *AsyncWriter) emergencyDrain() {
+	if w.emergencyDrainCooldown.Swap(true) {
+		return // 正在冷却中，防止频繁触发
+	}
+	// 1 分钟后清除冷却标志
+	go func() {
+		time.Sleep(1 * time.Minute)
+		w.emergencyDrainCooldown.Store(false)
+	}()
+
 	capacity := cap(w.taskChan)
 	w.orchestrator.SetSystemState(SystemStateDegraded)
 	var lastHeight uint64

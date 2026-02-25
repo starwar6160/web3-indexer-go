@@ -137,7 +137,11 @@ func (o *Orchestrator) process(msg Message) {
 
 	if o.enableProfiling {
 		if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
-			slog.Warn("🎼 Slow Process", "seq", msg.Sequence, "dur", elapsed, "type", msg.Type)
+			slog.Warn("🎼 Slow Process",
+				slog.Int64("seq", int64(msg.Sequence)),
+				slog.Duration("dur", elapsed),
+				slog.String("type", string(msg.Type)),
+			)
 		}
 	}
 }

@@ -56,11 +56,12 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 	}
 
 	var globalRPS float64
-	forceRPS := os.Getenv("FORCE_RPS") == config.EnvTrue
-
-	if isLocal {
+	// 🚀 统一从 Config 或环境变量读取默认 RPS
+	if os.Getenv("FORCE_RPS") == "true" {
+		globalRPS = 20.0 // 默认强制 RPS
+	} else if isLocal {
 		globalRPS = 500.0
-	} else if isTestnet && !forceRPS {
+	} else if isTestnet {
 		globalRPS = 15.0
 	} else {
 		globalRPS = 20.0

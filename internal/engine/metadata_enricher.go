@@ -47,10 +47,11 @@ type MetadataEnricher struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	logger       *slog.Logger
-	batchSize    int
-	timeout      time.Duration
-	erc20ABI     abi.ABI
-	multicallABI abi.ABI
+	batchSize     int
+	timeout       time.Duration
+	batchInterval time.Duration
+	erc20ABI      abi.ABI
+	multicallABI  abi.ABI
 }
 
 // mustParseABI 辅助函数
@@ -63,20 +64,28 @@ func mustParseABI(json string) abi.ABI {
 }
 
 // NewMetadataEnricher 创建元数据丰富器
-func NewMetadataEnricher(client LowLevelRPCClient, db DBUpdater, logger *slog.Logger) *MetadataEnricher {
+func NewMetadataEnricher(client LowLevelRPCClient, db DBUpdater, logger *slog.Logger, queueCap int, batchInterval time.Duration) *MetadataEnricher {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	if queueCap <= 0 {
+		queueCap = 1000
+	}
+	if batchInterval <= 0 {
+		batchInterval = 200 * time.Millisecond
+	}
+
 	me := &MetadataEnricher{
-		client:       client,
-		queue:        make(chan common.Address, 1000), // 增加缓冲区
-		db:           db,
-		logger:       logger,
-		batchSize:    50, // 提升至 50，进一步利用 Multicall3 带宽
-		timeout:      10 * time.Second,
-		erc20ABI:     mustParseABI(erc20ABIJSON),
-		multicallABI: mustParseABI(multiABIJSON),
+		client:        client,
+		queue:         make(chan common.Address, queueCap),
+		db:            db,
+		logger:        logger,
+		batchSize:     50, // 提升至 50，进一步利用 Multicall3 带宽
+		timeout:       10 * time.Second,
+		batchInterval: batchInterval,
+		erc20ABI:      mustParseABI(erc20ABIJSON),
+		multicallABI:  mustParseABI(multiABIJSON),
 	}
 
 	me.ctx, me.cancel = context.WithCancel(context.Background())
@@ -164,7 +173,7 @@ func (me *MetadataEnricher) GetDecimals(addr common.Address) uint8 {
 // batchWorker 批量处理协程（优化 RPC 调用）
 func (me *MetadataEnricher) batchWorker() {
 	batch := make([]common.Address, 0, me.batchSize)
-	ticker := time.NewTicker(200 * time.Millisecond) // 缩短至 200ms，快速清空队列
+	ticker := time.NewTicker(me.batchInterval) // 缩短至 200ms，快速清空队列
 	defer ticker.Stop()
 
 	for {

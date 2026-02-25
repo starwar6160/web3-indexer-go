@@ -252,7 +252,6 @@ func (f *Fetcher) worker(ctx context.Context, wg *sync.WaitGroup) {
 
 			// 🚀 🔥 新增：工作脉搏，帮助定位为何 Jobs 堵塞
 			slog.Debug("🌀 [Fetcher] Worker picking up job", "start", job.Start.String(), "end", job.End.String())
-			GetOrchestrator().DispatchLog("DEBUG", "🌀 Fetcher: Worker processing job", "start", job.Start.String())
 
 			// 检查是否暂停（Reorg 处理期间）
 			f.pauseMu.Lock()

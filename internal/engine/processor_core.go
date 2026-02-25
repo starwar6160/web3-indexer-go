@@ -202,7 +202,7 @@ func NewProcessor(db *sqlx.DB, client RPCClient, retryQueueSize int, chainID int
 		if metadataClient != nil {
 			// 使用 Repository 包装 db 以满足 DBUpdater 接口
 			repo := &repositoryAdapter{db: db}
-			p.enricher = NewMetadataEnricher(metadataClient, repo, Logger)
+			p.enricher = NewMetadataEnricher(metadataClient, repo, Logger, 1000, 200*time.Millisecond)
 			Logger.Info("🎨 [Processor] Metadata Enricher initialized", "chain_id", chainID)
 		}
 	}
