@@ -118,8 +118,25 @@ func (me *MetadataEnricher) GetSymbol(addr common.Address) string {
 		case me.queue <- addr:
 			me.logger.Debug("📋 [MetadataEnricher] queued", "address", addrHex)
 		default:
-			me.inflight.Delete(addrHex)
-			me.logger.Debug("⚠️ [MetadataEnricher] queue full, skipping", "address", addrHex)
+			// 🔴 Critical Fix: 队列满时的正确处理
+			// 问题: 如果删除 inflight，下次请求会重新入队，导致无限循环
+			// 解决: 保持 inflight，但立即删除队列中的一个元素（最老的）并重试
+			// 这样保证:
+			// 1. 不会无限循环（inflight 阻止重复入队）
+			// 2. 队列不会永久满（强制淘汰最老请求）
+			// 3. 新请求有公平机会入队
+			me.logger.Warn("⚠️ [MetadataEnricher] queue full, evicting oldest request", "address", addrHex)
+
+			// 强制出队一个元素（FIFO 淘汰）
+			select {
+			case <-me.queue:
+				// 成功出队，现在可以入队新请求
+				me.queue <- addr
+				me.logger.Debug("📋 [MetadataEnricher] queued after eviction", "address", addrHex)
+			default:
+				// 不应该发生（因为我们刚检测到队列满）
+				me.logger.Error("❌ [MetadataEnricher] queue state inconsistent", "address", addrHex)
+			}
 		}
 	}
 
