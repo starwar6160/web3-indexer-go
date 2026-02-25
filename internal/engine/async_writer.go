@@ -33,7 +33,8 @@ type AsyncWriter struct {
 
 	db            *sqlx.DB
 	orchestrator  *Orchestrator
-	ephemeralMode bool // 🔥 新增：是否为全内存模式
+	chainID       int64 // 🔥 新增：链 ID
+	ephemeralMode bool  // 🔥 新增：是否为全内存模式
 
 	// 2. 批处理配置
 	batchSize     int
@@ -50,13 +51,14 @@ type AsyncWriter struct {
 }
 
 // NewAsyncWriter 初始化
-func NewAsyncWriter(db *sqlx.DB, o *Orchestrator, ephemeral bool) *AsyncWriter {
+func NewAsyncWriter(db *sqlx.DB, o *Orchestrator, ephemeral bool, chainID int64) *AsyncWriter {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &AsyncWriter{
 		// 🚀 16G RAM 调优：提升至 15,000，给予消费端更多缓冲空间
 		taskChan:      make(chan PersistTask, 15000),
 		db:            db,
 		orchestrator:  o,
+		chainID:       chainID,
 		ephemeralMode: ephemeral,
 		batchSize:     200, // 🚀 16G RAM 调优：缩小批次，减少大事务对 I/O 的独占
 		flushInterval: 500 * time.Millisecond,
@@ -206,29 +208,38 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 	maxHeightStr := fmt.Sprintf("%d", maxHeight)
 	if _, err := tx.ExecContext(w.ctx,
 		`INSERT INTO sync_checkpoints (chain_id, last_synced_block)
-		 VALUES (1, $1)
+		 VALUES ($1, $2)
 		 ON CONFLICT (chain_id) DO UPDATE SET
 			last_synced_block = EXCLUDED.last_synced_block,
 			updated_at = NOW()`,
-		maxHeightStr); err != nil {
+		w.chainID, maxHeightStr); err != nil {
 		slog.Error("📝 AsyncWriter: Update checkpoint failed", "err", err)
 		return
 	}
 
-	// 🚀 Grafana 对齐：更新 sync_status 表 (非致命操作)
+	// 🚀 Grafana 对齐：更新 sync_status 表 (需匹配实际 DB Schema)
 	syncedBlock := int64(maxHeight & 0x7FFFFFFFFFFFFFFF) 
+	snap := w.orchestrator.GetSnapshot()
+	latestBlock := int64(snap.LatestHeight & 0x7FFFFFFFFFFFFFFF)
+	syncLag := latestBlock - syncedBlock
+	if syncLag < 0 {
+		syncLag = 0
+	}
 
-	// 🛡️ 资深调优：使用独立的 Exec 而非合并在主逻辑中，确保即便此表报错也不影响主位点更新
-	_, err = tx.ExecContext(w.ctx, `
-		INSERT INTO sync_status (chain_id, last_processed_block, last_processed_timestamp, status)
-		VALUES ($1, $2, NOW(), 'syncing')
+	// 🛡️ 兼容性更新：同时写入 last_synced_block 和 last_processed_block 以适配不同版本的 Schema
+	if _, err := tx.ExecContext(w.ctx, `
+		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, last_processed_block, last_processed_timestamp)
+		VALUES ($1, $2, $3, $4, 'syncing', $5, NOW())
 		ON CONFLICT (chain_id) DO UPDATE SET
+			last_synced_block = EXCLUDED.last_synced_block,
+			latest_block = EXCLUDED.latest_block,
+			sync_lag = EXCLUDED.sync_lag,
+			status = EXCLUDED.status,
 			last_processed_block = EXCLUDED.last_processed_block,
-			last_processed_timestamp = NOW(),
-			status = EXCLUDED.status
-	`, 1, syncedBlock)
-	if err != nil {
-		slog.Debug("📝 AsyncWriter: sync_status update skipped (non-fatal)", "err", err)
+			last_processed_timestamp = NOW()
+	`, w.chainID, syncedBlock, latestBlock, syncLag, syncedBlock); err != nil {
+		slog.Error("📝 AsyncWriter: sync_status update failed, aborting transaction to avoid zombie state", "err", err)
+		return
 	}
 
 	if err := tx.Commit(); err != nil {

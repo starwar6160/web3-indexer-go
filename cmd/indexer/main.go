@@ -197,7 +197,7 @@ func run() error {
 
 		// 🔥 横滨实验室：回放模式也启用异步落盘
 		orchestrator := engine.GetOrchestrator()
-		asyncWriter := engine.NewAsyncWriter(db, orchestrator, cfg.EphemeralMode)
+		asyncWriter := engine.NewAsyncWriter(db, orchestrator, cfg.EphemeralMode, cfg.ChainID)
 		orchestrator.SetAsyncWriter(asyncWriter)
 		asyncWriter.Start()
 
@@ -518,7 +518,7 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 
 	// 🔥 横滨实验室：初始化异步写入器 (Muscle)
 	// 策略控制：如果 ShouldPersist=false，则进入全内存模式
-	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator, !strategy.ShouldPersist())
+	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator, !strategy.ShouldPersist(), cfg.ChainID)
 	orchestrator.SetAsyncWriter(asyncWriter)
 	asyncWriter.Start()
 	slog.Info("🔥 AsyncWriter initialized", "persisting", strategy.ShouldPersist())

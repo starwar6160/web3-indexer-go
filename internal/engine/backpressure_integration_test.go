@@ -24,7 +24,7 @@ func TestIntegration_BackpressureFlow(t *testing.T) {
 	orchestrator := GetOrchestrator()
 	orchestrator.Reset()
 	
-	writer := NewAsyncWriter(db, orchestrator, false)
+	writer := NewAsyncWriter(db, orchestrator, false, 1)
 	orchestrator.SetAsyncWriter(writer)
 	
 	// 🚀 模拟生产者：填满 AsyncWriter 的队列
@@ -61,7 +61,7 @@ func TestIntegration_WatermarkLogic(t *testing.T) {
 
 	orchestrator := GetOrchestrator()
 	orchestrator.Reset()
-	writer := NewAsyncWriter(db, orchestrator, false)
+	writer := NewAsyncWriter(db, orchestrator, false, 1)
 	orchestrator.SetAsyncWriter(writer)
 	writer.Start() // 启动写入器
 	defer func() {
@@ -98,7 +98,7 @@ func TestIntegration_ReliefValve(t *testing.T) {
 
 	orchestrator := GetOrchestrator()
 	orchestrator.Reset()
-	writer := NewAsyncWriter(db, orchestrator, false)
+	writer := NewAsyncWriter(db, orchestrator, false, 1)
 	
 	capacity := cap(writer.taskChan)
 	fillCount := capacity * 95 / 100 // 填充 95%
