@@ -63,6 +63,11 @@ coverage.html
 *.dump
 *.sql.backup
 
+# --- Data Files ---
+data/
+*.jsonl
+*.json.gz
+
 # --- Log Files ---
 *.log
 logs/
