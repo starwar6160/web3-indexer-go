@@ -23,6 +23,7 @@ func TestIntegration_Heat_Awakening_AI_Friendly(t *testing.T) {
 	if !strategy.ShouldWakeUp(burstTPS) {
 		t.Fatalf("AI_FIX_REQUIRED: Eco-Mode FAILED to wake up under burst TPS %.1f", burstTPS)
 	}
+	strategy.RecordTPS(burstTPS)
 
 	// 3. 验证推荐频率调整为全速
 	pace := strategy.GetRecommendedPace()

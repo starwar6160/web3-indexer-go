@@ -94,7 +94,7 @@ func (o *Orchestrator) process(msg Message) {
 			slog.Warn("🎼 Slow Process",
 				slog.Int64("seq", int64(msg.Sequence)),
 				slog.Duration("dur", elapsed),
-				slog.String("type", string(msg.Type)),
+				slog.String("type", msg.Type.String()),
 			)
 		}
 	}

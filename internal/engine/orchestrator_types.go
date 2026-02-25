@@ -9,6 +9,41 @@ import (
 // MsgType 消息类型枚举
 type MsgType int
 
+func (t MsgType) String() string {
+	switch t {
+	case CmdUpdateChainHeight:
+		return "UpdateChainHeight"
+	case CmdCommitBatch:
+		return "CommitBatch"
+	case CmdCommitDisk:
+		return "CommitDisk"
+	case CmdResetCursor:
+		return "ResetCursor"
+	case CmdIncrementTransfers:
+		return "IncrementTransfers"
+	case CmdToggleEcoMode:
+		return "ToggleEcoMode"
+	case CmdSetSystemState:
+		return "SetSystemState"
+	case CmdFetchFailed:
+		return "FetchFailed"
+	case CmdFetchSuccess:
+		return "FetchSuccess"
+	case CmdNotifyFetched:
+		return "NotifyFetched"
+	case CmdNotifyFetchProgress:
+		return "NotifyFetchProgress"
+	case CmdLogEvent:
+		return "LogEvent"
+	case ReqGetStatus:
+		return "GetStatus"
+	case ReqGetSnapshot:
+		return "GetSnapshot"
+	default:
+		return "Unknown"
+	}
+}
+
 const (
 	CmdUpdateChainHeight   MsgType = iota // 发现新块高度
 	CmdCommitBatch                        // 成功同步了一批交易 (逻辑完成)

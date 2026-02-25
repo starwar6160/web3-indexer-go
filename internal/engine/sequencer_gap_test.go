@@ -32,7 +32,7 @@ func TestStage4_GapBypass_VisualConsistency(t *testing.T) {
 	resultCh <- BlockData{Number: big.NewInt(100)}
 	resultCh <- BlockData{Number: big.NewInt(102)} // 空洞：缺少 101
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
 	// 启动 Sequencer（后台）

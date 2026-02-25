@@ -151,7 +151,7 @@ func (a *AdminServer) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-const unknownValue = "UNKNOWN"
+const UnknownValue = "UNKNOWN"
 
 // getRPCQuotaUsage 获取RPC配额使用估算
 func (a *AdminServer) getRPCQuotaUsage(state IndexerState) string {
@@ -163,7 +163,7 @@ func (a *AdminServer) getRPCQuotaUsage(state IndexerState) string {
 	case StateWatching:
 		return "MINIMAL (WSS subscription only)"
 	default:
-		return unknownValue
+		return UnknownValue
 	}
 }
 
@@ -177,7 +177,7 @@ func (a *AdminServer) getEstimatedDailyCost(state IndexerState) string {
 	case StateWatching:
 		return "~0.1M credits/day (3% of free tier)"
 	default:
-		return unknownValue
+		return UnknownValue
 	}
 }
 

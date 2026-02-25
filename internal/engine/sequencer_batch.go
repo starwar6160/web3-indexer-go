@@ -120,17 +120,26 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 		return s.handleFetchError(ctx, data, blockNum, blockLabel)
 	}
 
-	// Ensure Block object is hydrated
-	if data.Block == nil {
-		var err error
-		data.Block, err = s.hydrateBlock(ctx, blockNum, blockLabel)
-		if err != nil {
-			return nil
+	// Ensure Block object is hydrated if possible
+	if data.Block == nil && blockNum != nil {
+		rpcClient := s.processor.GetRPCClient()
+		if rpcClient != nil {
+			block, err := rpcClient.BlockByNumber(ctx, blockNum)
+			if err == nil {
+				data.Block = block
+			} else {
+				Logger.Warn("sequencer_block_refetch_failed",
+					slog.String("block", blockLabel),
+					slog.String("err", err.Error()))
+			}
 		}
 	}
 
-	blockNum = data.Block.Number()
-	if blockNum.Cmp(s.expectedBlock) == 0 {
+	if data.Block != nil {
+		blockNum = data.Block.Number()
+	}
+
+	if blockNum != nil && blockNum.Cmp(s.expectedBlock) == 0 {
 		if err := s.processSequentialLocked(ctx, data); err != nil {
 			return err
 		}
@@ -138,12 +147,14 @@ func (s *Sequencer) handleBlockLocked(ctx context.Context, data BlockData) error
 		return nil
 	}
 
-	if blockNum.Cmp(s.expectedBlock) < 0 {
+	if blockNum != nil && blockNum.Cmp(s.expectedBlock) < 0 {
 		return nil
 	}
 
-	s.buffer[blockNum.String()] = data
-	s.enforceBufferLimit(ctx)
+	if blockNum != nil {
+		s.buffer[blockNum.String()] = data
+		s.enforceBufferLimit(ctx)
+	}
 	return nil
 }
 
@@ -167,17 +178,19 @@ func (s *Sequencer) handleFetchError(ctx context.Context, data BlockData, blockN
 	Logger.Warn("sequencer_fetch_error_retrying", slog.String("block", blockLabel))
 	if blockNum != nil {
 		rpcClient := s.processor.GetRPCClient()
-		block, err := rpcClient.BlockByNumber(ctx, blockNum)
-		if err == nil {
-			q := ethereum.FilterQuery{FromBlock: blockNum, ToBlock: blockNum, Topics: [][]common.Hash{{TransferEventHash}}}
-			logs, err := rpcClient.FilterLogs(ctx, q)
+		if rpcClient != nil {
+			block, err := rpcClient.BlockByNumber(ctx, blockNum)
 			if err == nil {
-				data.Block = block
-				data.Logs = logs
-				data.Err = nil
-				Logger.Info("sequencer_retry_success", slog.String("block", blockNum.String()))
-				// Retry processing with hydrated data
-				return s.handleBlockLocked(ctx, data)
+				q := ethereum.FilterQuery{FromBlock: blockNum, ToBlock: blockNum, Topics: [][]common.Hash{{TransferEventHash}}}
+				logs, err := rpcClient.FilterLogs(ctx, q)
+				if err == nil {
+					data.Block = block
+					data.Logs = logs
+					data.Err = nil
+					Logger.Info("sequencer_retry_success", slog.String("block", blockNum.String()))
+					// Retry processing with hydrated data
+					return s.handleBlockLocked(ctx, data)
+				}
 			}
 		}
 	}
@@ -185,21 +198,6 @@ func (s *Sequencer) handleFetchError(ctx context.Context, data BlockData, blockN
 		slog.String("block", blockLabel),
 		slog.String("err", data.Err.Error()))
 	return nil
-}
-
-func (s *Sequencer) hydrateBlock(ctx context.Context, blockNum *big.Int, blockLabel string) (*types.Block, error) {
-	if blockNum == nil {
-		return nil, fmt.Errorf("nil block number")
-	}
-	rpcClient := s.processor.GetRPCClient()
-	block, err := rpcClient.BlockByNumber(ctx, blockNum)
-	if err != nil {
-		Logger.Warn("sequencer_block_refetch_failed",
-			slog.String("block", blockLabel),
-			slog.String("err", err.Error()))
-		return nil, err
-	}
-	return block, nil
 }
 
 func (s *Sequencer) enforceBufferLimit(ctx context.Context) {
@@ -225,17 +223,4 @@ func (s *Sequencer) enforceBufferLimit(ctx context.Context) {
 			s.processBufferContinuationsLocked(ctx)
 		}
 	}
-}
-		}
-		if minBuffered != nil {
-			Logger.Warn("🚧 BUFFER_OVERFLOW_SKIP: Jumping expectedBlock to min buffered",
-				slog.String("old_expected", s.expectedBlock.String()),
-				slog.String("new_expected", minBuffered.String()),
-				slog.Int("buffer_size", len(s.buffer)))
-			s.expectedBlock.Set(minBuffered)
-			s.buffer = make(map[string]BlockData) // 清空 buffer，重新收集
-			s.lastProgressAt = time.Now()
-		}
-	}
-	return nil
 }

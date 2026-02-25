@@ -40,7 +40,7 @@ func NewQuotaGuard(dailyLimit int64) *QuotaGuard {
 	return &QuotaGuard{
 		DailyLimit:      dailyLimit,
 		CurrentUsed:     0,
-		StrictThreshold: 0.85, // 85% 触发严格模式
+		StrictThreshold: 0.90, // 90% 触发严格模式
 		LastResetTime:   time.Now(),
 		mode:            QuotaModeNormal,
 	}
@@ -119,6 +119,11 @@ func (g *QuotaGuard) SetCurrentUsed(used int64) {
 	} else if usageRatio > g.StrictThreshold {
 		g.mode = QuotaModeStrict
 		slog.Warn("⚠️ QUOTA_STRICT: Throttling activated", "used", used, "ratio", usageRatio)
+	} else if usageRatio > 0.85 {
+		g.mode = QuotaModeThrottling
+		slog.Info("⚠️ QUOTA_THROTTLING: Approaching limit", "used", used, "ratio", usageRatio)
+	} else {
+		g.mode = QuotaModeNormal
 	}
 }
 

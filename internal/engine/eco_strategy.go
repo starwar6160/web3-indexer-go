@@ -86,15 +86,20 @@ func (s *HeatStrategy) GetRecommendedPace() time.Duration {
 	defer s.mu.RUnlock()
 
 	avg := s.calculateAverage()
+	// 🔥 增强：如果当前热度远超平均值，优先使用当前热度判定 Pace
+	effectiveTPS := avg
+	if s.lastHeat > avg*2.0 {
+		effectiveTPS = s.lastHeat
+	}
 
 	switch {
-	case avg >= s.racingThreshold:
+	case effectiveTPS >= s.racingThreshold:
 		// 全速冲刺：检测到交易高峰（NFT Drop 等）
 		return 200 * time.Millisecond
-	case avg >= s.wakeThreshold:
+	case effectiveTPS >= s.wakeThreshold:
 		// 正常同步
 		return 1 * time.Second
-	case avg >= s.coolingThreshold:
+	case effectiveTPS >= s.coolingThreshold:
 		// 低频采样
 		return 5 * time.Second
 	default:

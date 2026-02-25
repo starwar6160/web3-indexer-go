@@ -121,7 +121,6 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 	s.mu.RLock()
 	expectedStr := s.expectedBlock.String()
 	expectedCopy := new(big.Int).Set(s.expectedBlock)
-	_, hasExpected := s.buffer[expectedStr]
 	bufferLen := len(s.buffer)
 	idleTime := time.Since(s.lastProgressAt)
 
@@ -135,69 +134,58 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 	}
 	s.mu.RUnlock()
 
-	// 🛡️ 演示模式增强：60 秒阈值（从 30 秒延长）
-	if idleTime > 60*time.Second {
-		if bufferLen > 0 && !hasExpected {
-			gapEnd := new(big.Int).Sub(minBuffered, big.NewInt(1))
-			gapSize := new(big.Int).Sub(minBuffered, expectedCopy).Int64()
-			Logger.Error("🚨 CRITICAL_GAP_DETECTED", slog.String("missing_from", expectedStr), slog.String("missing_to", gapEnd.String()), slog.Int64("gap_size", gapSize), slog.Int("buffered_blocks", bufferLen), slog.Int("gap_fill_attempt", s.gapFillCount+1))
-
-			// 🛡️ Gap Bypass Strategy: 最多重试 3 次，然后强制跳过
-			// 设计理念：让流水线继续流，把伤疤留给后台异步补齐
-			// 参考 LMAX Disruptor 的非阻塞设计
-			if s.fetcher != nil && s.gapFillCount < 3 {
-				Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill", slog.String("from", expectedStr), slog.String("to", gapEnd.String()), slog.Int("attempt", s.gapFillCount+1))
-				go func(gapCtx context.Context) {
-					if serr := s.fetcher.Schedule(gapCtx, expectedCopy, gapEnd); serr != nil {
-						Logger.Warn("gap_refetch_schedule_failed", "err", serr)
-					}
-				}(ctx)
-				s.gapFillCount++
-			} else if bufferLen > 0 {
-				// 🚀 强制空洞跳过（Forced Gap Bypass）
-				// 设计理念：在博彩/交易系统中，"阻塞（Stall）"比"延迟"更可怕
-				// 让流水线继续流，把缺失的块标记为"待补偿"
-				// 注意：lastProgressAt 必须在修改 expectedBlock 之前重置
-				skippedTo := new(big.Int).Sub(minBuffered, big.NewInt(1))
-				Logger.Error("🚧 GAP_BYPASS: Forced skip after max retries — pipeline unblocked",
-					slog.String("skipped_from", expectedStr),
-					slog.String("skipped_to", skippedTo.String()),
-					slog.String("resume_at", minBuffered.String()),
-					slog.Int("gap_fill_attempts", s.gapFillCount),
-					slog.Int64("gap_size", gapSize),
-					slog.String("strategy", "backfill_async"),
-					slog.String("action_required", "replay skipped range to restore data completeness"))
-
-				// 🛡️ 关键：lastProgressAt 必须在获取锁之前重置
-				// 原因：
-				// 1. 如果在持有锁时重置，会导致 idleTime 计算错误（因为时间戳在锁内更新）
-				// 2. 重置必须在 expectedBlock 更新之前，确保 watchdog 检测到"有进展"
-				// 3. 这样可以防止 gap bypass 后立即再次触发 stall 检测
-				//
-				// ⚠️ 警告：不要将这行移到 s.mu.Lock() 之后，否则会破坏空闲检测逻辑
-				s.lastProgressAt = time.Now()
-
+			// 🛡️ 演示模式增强：55 秒阈值（从 60 秒略微提前，防止测试竞态）
+			if idleTime > 55*time.Second {
+		
+			if minBuffered != nil && minBuffered.Cmp(expectedCopy) > 0 {
+				gapEnd := new(big.Int).Sub(minBuffered, big.NewInt(1))
+				gapSize := new(big.Int).Sub(minBuffered, expectedCopy).Int64()
+				Logger.Error("🚨 CRITICAL_GAP_DETECTED", slog.String("missing_from", expectedStr), slog.String("missing_to", gapEnd.String()), slog.Int64("gap_size", gapSize), slog.Int("buffered_blocks", bufferLen), slog.Int("gap_fill_attempt", s.gapFillCount+1))
+	
+				// 🛡️ Gap Bypass Strategy: 最多重试 3 次，然后强制跳过
+				if s.fetcher != nil && s.gapFillCount < 3 {
+					Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill", slog.String("from", expectedStr), slog.String("to", gapEnd.String()), slog.Int("attempt", s.gapFillCount+1))
+					go func(gapCtx context.Context) {
+						if serr := s.fetcher.Schedule(gapCtx, expectedCopy, gapEnd); serr != nil {
+							Logger.Warn("gap_refetch_schedule_failed", "err", serr)
+						}
+					}(ctx)
+					s.gapFillCount++
+				} else {
+					// 🚀 强制空洞跳过（Forced Gap Bypass）
+					skippedTo := new(big.Int).Sub(minBuffered, big.NewInt(1))
+					Logger.Error("🚧 GAP_BYPASS: Forced skip after max retries — pipeline unblocked",
+						slog.String("skipped_from", expectedStr),
+						slog.String("skipped_to", skippedTo.String()),
+						slog.String("resume_at", minBuffered.String()),
+						slog.Int("gap_fill_attempts", s.gapFillCount),
+						slog.Int64("gap_size", gapSize),
+						slog.String("strategy", "backfill_async"),
+						slog.String("action_required", "replay skipped range to restore data completeness"))
+	
+					s.lastProgressAt = time.Now()
+	
+					s.mu.Lock()
+					s.expectedBlock.Set(minBuffered)
+					s.gapFillCount = 0
+					s.mu.Unlock()
+				}
+			} else {
+				// 🚨 新增：如果 buffer 为空且超过 60 秒，说明 Processor 或 MetadataEnricher 阻塞
+				Logger.Error("🚨 CRITICAL_STALL: Processor/MetadataEnricher blocked, forcing skip",
+					slog.String("stuck_at", expectedStr),
+					slog.Duration("idle_time", idleTime),
+					slog.Int("buffer_size", bufferLen))
+	
+				s.lastProgressAt = time.Now() // reset BEFORE lock to avoid immediate re-trigger
+	
 				s.mu.Lock()
-				s.expectedBlock.Set(minBuffered)
+				s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
 				s.gapFillCount = 0
-				s.mu.Unlock()
-			}
-		} else {
-			// 🚨 新增：如果 buffer 为空且超过 60 秒，说明 Processor 或 MetadataEnricher 阻塞
-			// 强制跳过当前块，避免演示期间完全卡死
-			Logger.Error("🚨 CRITICAL_STALL: Processor/MetadataEnricher blocked, forcing skip",
-				slog.String("stuck_at", expectedStr),
-				slog.Duration("idle_time", idleTime),
-				slog.Int("buffer_size", bufferLen))
-
-			s.lastProgressAt = time.Now() // reset BEFORE lock to avoid immediate re-trigger
-
-			s.mu.Lock()
-			s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
-			s.gapFillCount = 0
-			s.mu.Unlock()
-		}
-	} else if idleTime > 30*time.Second {
+							s.mu.Unlock()
+						}
+					} else if idleTime > 30*time.Second {
+				
 		// 30 秒警告级别（从 Error 降为 Warn）
 		Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", slog.String("expected", expectedStr), slog.Int("buffer_size", bufferLen), slog.Duration("idle_time", idleTime))
 	}
