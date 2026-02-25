@@ -160,7 +160,7 @@ func (m *Metrics) UpdateSyncLag(lag int64) {
 func (m *Metrics) recalculateLag() {
 	chain := m.lastChainHeight.Load()
 	sync := m.lastSyncHeight.Load()
-	
+
 	// 🚀 G115 安全计算
 	lag := SafeInt64Diff(uint64(chain), uint64(sync))
 	if lag < 0 {

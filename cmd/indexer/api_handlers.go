@@ -152,14 +152,14 @@ func handleGetDebugSnapshot(w http.ResponseWriter, r *http.Request, db *sqlx.DB,
 
 	// 1. Engine Status
 	engineStatus := map[string]interface{}{
-		"mode":           orchestrator.GetSyncLag() < 10 && snap.IsEcoMode, // Simplified
-		"is_healthy":     rpcPool.GetHealthyNodeCount() > 0,
-		"reality_gap":    snap.LatestHeight - snap.SyncedCursor,
-		"bps_ema":        engine.GetMetrics().GetWindowBPS(),
-		"system_state":   snap.SystemState.String(),
-		"safety_buffer":  snap.SafetyBuffer,
-		"jobs_depth":     snap.JobsDepth,
-		"results_depth":  snap.ResultsDepth,
+		"mode":          orchestrator.GetSyncLag() < 10 && snap.IsEcoMode, // Simplified
+		"is_healthy":    rpcPool.GetHealthyNodeCount() > 0,
+		"reality_gap":   snap.LatestHeight - snap.SyncedCursor,
+		"bps_ema":       engine.GetMetrics().GetWindowBPS(),
+		"system_state":  snap.SystemState.String(),
+		"safety_buffer": snap.SafetyBuffer,
+		"jobs_depth":    snap.JobsDepth,
+		"results_depth": snap.ResultsDepth,
 	}
 
 	if snap.IsEcoMode {

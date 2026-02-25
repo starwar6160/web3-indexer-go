@@ -12,13 +12,13 @@ type HeatStrategy struct {
 	mu sync.RWMutex
 
 	// 滑动窗口：存储过去 60 秒的 TPS
-	tpsWindow []float64
+	tpsWindow  []float64
 	windowSize int
 
 	// 阈值配置
-	wakeThreshold      float64 // 唤醒阈值：平均 TPS > 此值时唤醒
-	racingThreshold    float64 // 竞速阈值：进入全速模式
-	coolingThreshold   float64 // 冷却阈值：低于此值进入节能模式
+	wakeThreshold    float64 // 唤醒阈值：平均 TPS > 此值时唤醒
+	racingThreshold  float64 // 竞速阈值：进入全速模式
+	coolingThreshold float64 // 冷却阈值：低于此值进入节能模式
 
 	// 状态
 	isExhausted bool // Quota 耗尽强制休眠
@@ -31,9 +31,9 @@ func NewHeatStrategy() *HeatStrategy {
 	return &HeatStrategy{
 		tpsWindow:        make([]float64, 0, 60),
 		windowSize:       60,
-		wakeThreshold:    2.0,  // 平均 TPS > 2.0 时唤醒
-		racingThreshold:  5.0,  // TPS > 5.0 时全速
-		coolingThreshold: 0.5,  // TPS < 0.5 时冷却
+		wakeThreshold:    2.0, // 平均 TPS > 2.0 时唤醒
+		racingThreshold:  5.0, // TPS > 5.0 时全速
+		coolingThreshold: 0.5, // TPS < 0.5 时冷却
 		lastUpdate:       time.Now(),
 	}
 }
