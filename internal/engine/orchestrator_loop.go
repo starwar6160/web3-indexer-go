@@ -156,6 +156,8 @@ func (o *Orchestrator) updateProgressAndSnapshot() {
 	select {
 	case o.broadcastCh <- o.snapshot:
 	default:
+		// 📊 记录广播消息丢弃，用于监控 channel 满载情况
+		GetMetrics().BroadcastDropped.Add(1)
 	}
 }
 

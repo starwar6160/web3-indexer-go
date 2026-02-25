@@ -34,6 +34,7 @@ type Metrics struct {
 	// Sequencer metrics
 	SequencerBufferSize prometheus.Gauge
 	SequencerBufferFull prometheus.Counter
+	BroadcastDropped     prometheus.Counter // 📊 新增：广播消息丢弃计数
 
 	// RPC Pool metrics
 	RPCRequestsTotal  *prometheus.CounterVec
@@ -172,6 +173,10 @@ func NewMetrics() *Metrics {
 		SequencerBufferFull: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "indexer_sequencer_buffer_full_total",
 			Help: "Total number of times sequencer buffer was full",
+		}),
+		BroadcastDropped: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "indexer_broadcast_dropped_total",
+			Help: "Total number of broadcast messages dropped due to full channel",
 		}),
 
 		RPCRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
