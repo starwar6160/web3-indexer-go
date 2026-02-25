@@ -115,10 +115,22 @@ func handleGetTransfersFromHotBuffer(w http.ResponseWriter, processor *engine.Pr
 
 func handleInitialStatus(w http.ResponseWriter, title string) {
 	w.Header().Set("Content-Type", "application/json")
+
+	// 🔧 尝试获取真实系统状态，而不是硬编码 "initializing"
+	state := "initializing"
+	msg := "Database or RPC not ready yet"
+
+	// 安全地获取 Orchestrator 状态
+	if orchestrator := engine.GetOrchestrator(); orchestrator != nil {
+		snap := orchestrator.GetSnapshot()
+		state = snap.SystemState.String()
+		msg = "System initializing"
+	}
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"state": "initializing",
+		"state": state,
 		"title": title,
-		"msg":   "Database or RPC not ready yet",
+		"msg":   msg,
 	}); err != nil {
 		slog.Error("failed_to_encode_init_status", "err", err)
 	}
