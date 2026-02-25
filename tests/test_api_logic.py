@@ -116,3 +116,33 @@ def test_transfer_data_sanity():
             
         assert tx['tx_hash'].strip().startswith('0x')
         assert len(tx['tx_hash'].strip()) == 66
+
+def test_debug_snapshot_integrity():
+    """
+    逻辑守卫 5: 检查调试快照聚合接口的数据完整性
+    """
+    resp = requests.get(f"{BASE_URL}/debug/snapshot")
+    assert resp.status_code == 200
+    data = resp.json()
+    
+    # 1. 结构完整性
+    assert 'engine_status' in data
+    assert 'data_integrity' in data
+    assert 'recent_data_samples' in data
+    
+    # 2. 引擎状态自洽
+    engine = data['engine_status']
+    assert 'mode' in engine
+    assert 'reality_gap' in engine
+    assert 'is_healthy' in engine
+    
+    # 3. 数据一致性校验
+    integrity = data['data_integrity']
+    assert integrity['latest_rpc_block'] >= integrity['latest_db_block'], \
+        f"🔥 逻辑矛盾！RPC 高度({integrity['latest_rpc_block']}) < DB 高度({integrity['latest_db_block']})"
+    
+    # 4. 样本可用性
+    samples = data['recent_data_samples']
+    assert 'latest_blocks' in samples
+    assert 'latest_txs' in samples
+    print(f"\n[Info] Debug Snapshot validated: Gap={engine['reality_gap']}, RPC={integrity['latest_rpc_block']}")
