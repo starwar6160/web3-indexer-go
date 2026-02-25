@@ -26,8 +26,9 @@ type Config struct {
 	MaxGasPrice        int64         // 模拟器允许的最大 Gas Price (单位: Gwei)
 	GasSafetyMargin    int           // Gas Limit 的安全裕度百分比 (默认 20)
 	CheckpointBatch    int           // 多少个区块更新一次数据库检查点 (默认 100)
-	RetryQueueSize     int           // 失败任务重试队列的大小 (默认 500)
-	DemoMode           bool          // 是否开启演示模式
+	RetryQueueSize       int           // 失败任务重试队列的大小 (默认 500)
+	FetcherResultsSize  int           // Fetcher Results channel 容量 (默认 15000)
+	DemoMode             bool          // 是否开启演示模式
 	EnableSimulator    bool          // 是否开启模拟交易生成器
 	NetworkMode        string        // 网络模式: anvil, sepolia, mainnet
 	IsTestnet          bool          // 是否为测试网模式
@@ -107,6 +108,7 @@ func Load() *Config {
 	gasSafetyMargin := int(getEnvAsInt64("GAS_SAFETY_MARGIN", 20))
 	checkpointBatch := int(getEnvAsInt64("CHECKPOINT_BATCH", 100))
 	retryQueueSize := int(getEnvAsInt64("RETRY_QUEUE_SIZE", 500))
+	fetcherResultsSize := int(getEnvAsInt64("FETCHER_RESULTS_SIZE", 15000)) // 16G RAM 环境适中配置
 	maxSyncBatch := int(getEnvAsInt64("MAX_SYNC_BATCH", 20)) // 提高至 20 块，对抗 1.0 TPS 限制
 
 	// 🛡️ Deadlock watchdog 配置
@@ -163,9 +165,10 @@ func Load() *Config {
 		FetchBatchSize:     fetchBatchSize,
 		MaxGasPrice:        maxGasPrice,
 		GasSafetyMargin:    gasSafetyMargin,
-		CheckpointBatch:    checkpointBatch,
-		RetryQueueSize:     retryQueueSize,
-		DemoMode:           demoMode,
+		CheckpointBatch:     checkpointBatch,
+		RetryQueueSize:      retryQueueSize,
+		FetcherResultsSize:  fetcherResultsSize,
+		DemoMode:            demoMode,
 		EnableSimulator:    enableSimulator,
 		NetworkMode:        networkMode,
 		IsTestnet:          isTestnet,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"math/big"
+	"os"
+	"strconv"
 	"sync"
 
 	"web3-indexer-go/internal/limiter"
@@ -109,8 +111,8 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 		concurrency: concurrency,
 		// 🔥 横滨实验室：Jobs channel 也扩容 (concurrency * 10)
 		jobs: make(chan FetchJob, concurrency*10),
-		// 🔥 16G RAM 调优：提升至 15,000，给予消费端更多缓冲空间
-		Results:  make(chan BlockData, 15000),
+		// 🔥 16G RAM 调优：提升至可配置容量，给予消费端更多缓冲空间
+		Results:  make(chan BlockData, getFetcherResultsChannelSize()),
 		limiter:  limiter,
 		recorder: recorder,
 		stopCh:   make(chan struct{}),
@@ -119,6 +121,32 @@ func NewFetcher(pool RPCClient, concurrency int) *Fetcher {
 	}
 	f.pauseCond = sync.NewCond(&f.pauseMu)
 	return f
+}
+
+// getFetcherResultsChannelSize 从环境变量读取 Results channel 容量
+// 默认 15000，适合 16G RAM 环境
+func getFetcherResultsChannelSize() int {
+	const defaultCapacity = 15000
+	const envKey = "FETCHER_RESULTS_SIZE"
+
+	val := os.Getenv(envKey)
+	if val == "" {
+		return defaultCapacity
+	}
+
+	size, err := strconv.Atoi(val)
+	if err != nil || size <= 0 {
+		slog.Warn("⚠️ [Fetcher] Invalid FETCHER_RESULTS_SIZE, using default",
+			"value", val,
+			"default", defaultCapacity,
+			"error", err)
+		return defaultCapacity
+	}
+
+	slog.Info("📊 [Fetcher] Results channel capacity configured",
+		"capacity", size,
+		"env", envKey)
+	return size
 }
 
 func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher {
@@ -162,7 +190,7 @@ func NewFetcherWithLimiter(pool RPCClient, concurrency, rps, burst int) *Fetcher
 
 		jobs: make(chan FetchJob, concurrency*10), // 扩容 10 倍
 
-		Results: make(chan BlockData, 15000), // 16G RAM 环境适中配置
+		Results: make(chan BlockData, getFetcherResultsChannelSize()), // 16G RAM 环境适中配置（可调）
 
 		limiter: rateLimiter.Limiter(),
 
