@@ -1,5 +1,14 @@
 package engine
 
+// Health Module
+// This module provides health check endpoints for the indexer service.
+// The implementation is split across multiple files for better maintainability:
+// - health_core.go: Core HealthServer struct and main handlers
+// - health_handlers.go: HTTP handler methods
+// - health_checks.go: Individual health check methods
+//
+// This allows for better organization and easier maintenance of the codebase.
+
 import (
 	"context"
 	"encoding/json"

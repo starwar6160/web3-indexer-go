@@ -1,5 +1,14 @@
 package engine
 
+// Processor Block Module
+// The processor_block.go functionality has been split into multiple files for better organization:
+// - processor_block_part1.go: Main ProcessBlock function and core logic
+// - processor_checkpoint.go: Database checkpoint management
+// - processor_core.go: Repository adapter and metadata enrichment
+//
+// This modular structure improves maintainability and keeps individual files under 200 lines.
+// The original processor_block.go was split during refactoring to meet code organization standards.
+
 import (
 	"context"
 	"fmt"

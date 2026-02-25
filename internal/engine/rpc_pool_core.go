@@ -105,6 +105,12 @@ func NewEnhancedRPCClientPoolWithTimeout(urls []string, isTestnet bool, maxSyncB
 
 	// #nosec G115 - Number of RPC nodes is very small
 	pool.size = int32(len(pool.clients))
+
+	// 🔧 检查是否至少有一个可用的 RPC 节点
+	if pool.size == 0 {
+		return nil, fmt.Errorf("no healthy RPC nodes available (tried %d URLs, all failed)", len(urls))
+	}
+
 	return pool, nil
 }
 
