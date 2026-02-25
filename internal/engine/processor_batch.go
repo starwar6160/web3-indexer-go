@@ -195,7 +195,7 @@ func (p *Processor) updateBatchMetrics(blocks []BlockData) {
 			p.metrics.UpdateCurrentSyncHeight(bNum.Int64())
 		} else {
 			// 防御性截断，确保指标系统不会因为大高度而崩溃
-			p.metrics.UpdateCurrentSyncHeight(int64(bNum.Uint64() & uint64(math.MaxInt64)))
+			p.metrics.UpdateCurrentSyncHeight(SafeUint64ToInt64(bNum.Uint64() & uint64(math.MaxInt64)))
 		}
 	}
 }

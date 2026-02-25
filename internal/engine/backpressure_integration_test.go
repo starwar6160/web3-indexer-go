@@ -32,7 +32,7 @@ func TestIntegration_BackpressureFlow(t *testing.T) {
 	fillCount := capacity * 85 / 100
 
 	t.Logf("🚀 Filling task channel with %d tasks to trigger pressure limit", fillCount)
-	for i := uint64(1); i <= uint64(fillCount); i++ {
+	for i := uint64(1); i <= uint64(uint(fillCount)); i++ {
 		writer.taskChan <- PersistTask{
 			Height: i,
 			Block: models.Block{
@@ -43,7 +43,7 @@ func TestIntegration_BackpressureFlow(t *testing.T) {
 	}
 
 	// 🚀 模拟背压感知：手动同步深度到 GlobalState (模拟 evaluateSystemState 的动作)
-	GetGlobalState().UpdatePipelineDepth(0, int32(fillCount), 0)
+	GetGlobalState().UpdatePipelineDepth(0, int32(uint32(fillCount)&0x7FFFFFFF), 0)
 
 	// 验证状态
 	status := orchestrator.GetUIStatus(context.Background(), db, "test-v1")
@@ -109,7 +109,7 @@ func TestIntegration_ReliefValve(t *testing.T) {
 
 	for i := 1; i <= fillCount; i++ {
 		writer.taskChan <- PersistTask{
-			Height: uint64(i),
+			Height: uint64(uint(i)),
 			Block: models.Block{
 				Number: models.NewBigInt(int64(i)),
 				Hash:   fmt.Sprintf("0x%d", i),
@@ -132,6 +132,6 @@ func TestIntegration_ReliefValve(t *testing.T) {
 	// lastHeight 是在循环中记录的最后一个被弹出的高度
 	// 由于我们填充了 1..fillCount，弹出了 (fillCount - targetDepth) 个元素
 	// 所以最后一个被弹出元素的高度应该是 (fillCount - targetDepth)
-	expectedHeight := uint64(fillCount - currentDepth)
+	expectedHeight := uint64(uint(fillCount - currentDepth))
 	assert.GreaterOrEqual(t, snap.SyncedCursor, expectedHeight, "游标应跳跃至最后丢弃的高度")
 }
