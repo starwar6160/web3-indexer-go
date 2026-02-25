@@ -216,18 +216,32 @@ collect_loop:
 		}
 	}
 
-	sort.Slice(batch, func(i, j int) bool {
-		n1 := getBlockNum(batch[i])
-		n2 := getBlockNum(batch[j])
-		if n1 == nil {
+	// 🚀 优化排序性能：预处理提取所有 block number，避免在比较函数中重复调用 getBlockNum
+	type sortableBlock struct {
+		idx int
+		num *big.Int
+	}
+	nums := make([]sortableBlock, len(batch))
+	for i, data := range batch {
+		nums[i] = sortableBlock{idx: i, num: getBlockNum(data)}
+	}
+
+	sort.Slice(nums, func(i, j int) bool {
+		if nums[i].num == nil {
 			return true
 		}
-		if n2 == nil {
+		if nums[j].num == nil {
 			return false
 		}
-		return n1.Cmp(n2) < 0
+		return nums[i].num.Cmp(nums[j].num) < 0
 	})
-	return batch
+
+	// 根据排序后的索引重建切片
+	sorted := make([]BlockData, len(batch))
+	for i, nb := range nums {
+		sorted[i] = batch[nb.idx]
+	}
+	return sorted
 }
 
 func getBlockNum(data BlockData) *big.Int {

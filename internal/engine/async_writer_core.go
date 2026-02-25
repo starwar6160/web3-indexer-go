@@ -11,7 +11,7 @@ import (
 // NewAsyncWriter 初始化
 func NewAsyncWriter(db *sqlx.DB, o *Orchestrator, ephemeral bool, chainID int64) *AsyncWriter {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &AsyncWriter{
+	w := &AsyncWriter{
 		taskChan:      make(chan PersistTask, 15000),
 		db:            db,
 		orchestrator:  o,
@@ -22,6 +22,8 @@ func NewAsyncWriter(db *sqlx.DB, o *Orchestrator, ephemeral bool, chainID int64)
 		ctx:           ctx,
 		cancel:        cancel,
 	}
+	w.emergencyDrainCooldown.Store(false) // 🚀 初始化冷却标志
+	return w
 }
 
 // Start 启动写入主循环
@@ -47,9 +49,19 @@ func (w *AsyncWriter) run() {
 			}
 			return
 		case task := <-w.taskChan:
-			if len(w.taskChan) > cap(w.taskChan)*90/100 {
+			// 🚀 将阈值从 90% 降低到 75%，减少高负载下的频繁触发
+			drainThreshold := cap(w.taskChan) * 75 / 100
+			if len(w.taskChan) > drainThreshold && !w.emergencyDrainCooldown.Load() {
 				w.emergencyDrain()
 				batch = batch[:0]
+
+				// 设置 30 秒冷却时间，防止频繁触发
+				w.emergencyDrainCooldown.Store(true)
+				go func() {
+					time.Sleep(30 * time.Second)
+					w.emergencyDrainCooldown.Store(false)
+				}()
+
 				continue
 			}
 			batch = append(batch, task)
