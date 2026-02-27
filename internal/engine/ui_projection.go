@@ -64,6 +64,11 @@ func (o *Orchestrator) GetUIStatus(ctx context.Context, db *sqlx.DB, version str
 		}
 	}
 
+	// 🚀 🔥 影子修正：如果 DB 统计为 0 或失败，回退到 Orchestrator 内存统计
+	if totalTransfers == 0 && snap.Transfers > 0 {
+		totalTransfers = int64(snap.Transfers)
+	}
+
 	// 2. 逻辑自洽
 	syncLag := SafeInt64Diff(latest, snap.SyncedCursor)
 	if syncLag < 0 {

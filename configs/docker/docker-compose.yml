@@ -16,7 +16,9 @@ services:
       - START_BLOCK=${START_BLOCK}
       - DEMO_MODE=${DEMO_MODE}
       - IS_TESTNET=${IS_TESTNET}
+      - NETWORK_MODE=${NETWORK_MODE:-anvil}
       - ENABLE_ENERGY_SAVING=${ENABLE_ENERGY_SAVING}
+      - ENABLE_SIMULATOR=${ENABLE_SIMULATOR:-true}
       - APP_TITLE=${APP_TITLE:-🚀 Web3 Indexer (Default)}
       - PORT=${PORT:-8080}  # 使用环境变量中的端口
     healthcheck:
