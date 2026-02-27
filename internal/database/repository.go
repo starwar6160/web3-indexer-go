@@ -58,9 +58,9 @@ func (r *Repository) SaveBlock(ctx context.Context, block *models.Block) error {
 func (r *Repository) SaveTransfer(ctx context.Context, transfer *models.Transfer) error {
 	query := `
 		INSERT INTO transfers 
-		(block_number, tx_hash, log_index, from_address, to_address, amount, token_address)
+		(block_number, tx_hash, log_index, from_address, to_address, amount, token_address, symbol, activity_type)
 		VALUES 
-		(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address)
+		(:block_number, :tx_hash, :log_index, :from_address, :to_address, :amount, :token_address, :symbol, :activity_type)
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
 	_, err := r.db.NamedExecContext(ctx, query, transfer)

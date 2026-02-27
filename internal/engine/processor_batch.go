@@ -149,10 +149,36 @@ func (p *Processor) processBatchSynthetic(block *types.Block, chainID int64, val
 		}
 		selectedToken := mockTokens[blockNum.Uint64()%uint64(len(mockTokens))]
 
-		mockFrom := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Anvil Account #0
-		mockTo := "0x70997970C51812dc3A010C7d01b50e0d17dc79ee"   // Anvil Account #1
-		// #nosec G115 - block number is safe in this context
-		mockAmount := big.NewInt(blockNum.Int64() % 1000000000)
+		// 🎭 Dynamic Entities: Cycle through different Anvil accounts
+		anvilAccounts := []string{
+			"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", // Account #0
+			"0x70997970C51812dc3A010C7d01b50e0d17dc79ee", // Account #1
+			"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", // Account #2
+			"0x90F79bf6EB2c4f870365E785982E1f101E93b906", // Account #3
+			"0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65", // Account #4
+		}
+
+		fromIdx := blockNum.Uint64() % uint64(len(anvilAccounts))
+		toIdx := (blockNum.Uint64() + 1) % uint64(len(anvilAccounts))
+		mockFrom := anvilAccounts[fromIdx]
+		mockTo := anvilAccounts[toIdx]
+
+		// 💰 Varied Amounts: Multi-scale amounts for realistic visual variety
+		baseAmount := blockNum.Int64() % 1000
+		multiplier := int64(1)
+		switch blockNum.Uint64() % 4 {
+		case 0:
+			multiplier = 1000000 // 1M
+		case 1:
+			multiplier = 1000000000 // 1B
+		case 2:
+			multiplier = 1 // Units
+		}
+		mockAmount := big.NewInt(baseAmount * multiplier)
+
+		// 🎨 Diversity: Randomize Activity Types for UI richness
+		activityTypes := []string{"TRANSFER", "SWAP", "MINT", "FAUCET_CLAIM", "APPROVE", "LIQUIDITY", "BURN"}
+		selectedType := activityTypes[blockNum.Uint64()%uint64(len(activityTypes))]
 
 		anvilTransfer := models.Transfer{
 			BlockNumber:  models.BigInt{Int: blockNum},
@@ -163,7 +189,7 @@ func (p *Processor) processBatchSynthetic(block *types.Block, chainID int64, val
 			Amount:       models.NewUint256FromBigInt(mockAmount),
 			TokenAddress: strings.ToLower(selectedToken.addr.Hex()),
 			Symbol:       selectedToken.symbol,
-			Type:         "TRANSFER",
+			Type:         selectedType,
 		}
 		*validTransfers = append(*validTransfers, anvilTransfer)
 
