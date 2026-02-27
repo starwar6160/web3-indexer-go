@@ -227,6 +227,8 @@ func (o *Orchestrator) evaluateSystemState() {
 		resultsDepth = o.fetcher.ResultsDepth()
 		o.state.JobsDepth = jobsDepth
 		o.state.ResultsDepth = resultsDepth
+		GetMetrics().FetcherJobsQueueDepth.Set(float64(jobsDepth))
+		GetMetrics().FetcherResultsDepth.Set(float64(resultsDepth))
 	}
 
 	GetGlobalState().UpdatePipelineDepth(int32(uint32(jobsDepth)&0x7FFFFFFF), int32(uint32(resultsDepth)&0x7FFFFFFF), 0)
@@ -243,6 +245,8 @@ func (o *Orchestrator) evaluateSystemState() {
 	if o.state.SystemState == SystemStateOptimizing || o.state.SystemState == SystemStateThrottled || o.state.SystemState == SystemStateUnknown {
 		o.state.SystemState = SystemStateRunning
 	}
+
+	GetMetrics().UpdateSystemState(o.state.SystemState)
 }
 
 // evaluateEcoMode 评估休眠模式

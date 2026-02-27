@@ -128,6 +128,11 @@ func (m *Metrics) RecordCheckpointUpdate() {
 	m.CheckpointUpdates.Inc()
 }
 
+// UpdateSystemState 更新系统状态码
+func (m *Metrics) UpdateSystemState(state SystemStateEnum) {
+	m.SystemState.Set(float64(state))
+}
+
 // RecordStartTime records the indexer start time
 func (m *Metrics) RecordStartTime() {
 	m.StartTime.SetToCurrentTime()

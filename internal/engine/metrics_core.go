@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -25,16 +26,18 @@ type Metrics struct {
 	TransfersFailed    prometheus.Counter
 
 	// Fetcher metrics
-	FetcherJobsQueued   prometheus.Counter
-	FetcherJobsComplete prometheus.Counter
-	FetcherJobsFailed   prometheus.Counter
-	FetcherRateLimited  prometheus.Counter
-	FetchTime           prometheus.Histogram
+	FetcherJobsQueued     prometheus.Counter
+	FetcherJobsComplete   prometheus.Counter
+	FetcherJobsFailed     prometheus.Counter
+	FetcherRateLimited    prometheus.Counter
+	FetcherJobsQueueDepth prometheus.Gauge // 📊 当前任务队列深度
+	FetcherResultsDepth   prometheus.Gauge // 📊 当前结果队列深度
+	FetchTime             prometheus.Histogram
 
 	// Sequencer metrics
 	SequencerBufferSize prometheus.Gauge
 	SequencerBufferFull prometheus.Counter
-	BroadcastDropped    prometheus.Counter // 📊 新增：广播消息丢弃计数
+	BroadcastDropped    prometheus.Counter // 📊 广播消息丢弃计数
 
 	// RPC Pool metrics
 	RPCRequestsTotal  *prometheus.CounterVec
@@ -47,27 +50,28 @@ type Metrics struct {
 	DBQueriesTotal      *prometheus.CounterVec
 	DBQueryLatency      *prometheus.HistogramVec
 	DBErrors            *prometheus.CounterVec
-	DBPoolMaxConns      prometheus.Gauge // 🔥 新增：数据库连接池最大连接数
-	DBPoolIdleConns     prometheus.Gauge // 🔥 新增：数据库连接池空闲连接数
-	DBPoolInUse         prometheus.Gauge // 🔥 新增：数据库连接池使用中连接数
+	DBPoolMaxConns      prometheus.Gauge // 🔥 数据库连接池最大连接数
+	DBPoolIdleConns     prometheus.Gauge // 🔥 数据库连接池空闲连接数
+	DBPoolInUse         prometheus.Gauge // 🔥 数据库连接池使用中连接数
 
 	// 🔥 Anvil Lab Mode metrics
-	LabModeEnabled prometheus.Gauge // 新增：Lab Mode 是否启用
+	LabModeEnabled prometheus.Gauge // Lab Mode 是否启用
 
 	// System metrics
 	CheckpointUpdates  prometheus.Counter
 	StartTime          prometheus.Gauge
+	SystemState        prometheus.Gauge // 📊 系统状态码 (1=idle, 2=active, ...)
 	CurrentSyncHeight  prometheus.Gauge
-	CurrentChainHeight prometheus.Gauge // 新增：链头高度
-	SyncLag            prometheus.Gauge // 新增：同步滞后
-	E2ELatency         prometheus.Gauge // 新增：秒级 E2E 延迟
-	RealtimeTPS        prometheus.Gauge // 新增：实时 TPS
-	RealtimeBPS        prometheus.Gauge // 🔥 新增：实时 BPS (Blocks Per Second)
-	DiskFree           prometheus.Gauge // 🚀 新增：磁盘剩余空间百分比
+	CurrentChainHeight prometheus.Gauge // 链头高度
+	SyncLag            prometheus.Gauge // 同步滞后
+	E2ELatency         prometheus.Gauge // 秒级 E2E 延迟
+	RealtimeTPS        prometheus.Gauge // 实时 TPS
+	RealtimeBPS        prometheus.Gauge // 实时 BPS
+	DiskFree           prometheus.Gauge // 磁盘剩余空间百分比
 
 	// 📊 Deterministic Telemetry
 	tpsMonitor *monitor.TPSMonitor
-	bpsMonitor *monitor.TPSMonitor // 🔥 新增：块速率监控
+	bpsMonitor *monitor.TPSMonitor // 块速率监控
 
 	// 📊 交易类型分布
 	TransactionTypesTotal *prometheus.CounterVec
@@ -108,6 +112,7 @@ func GetMetrics() *Metrics {
 
 // NewMetrics creates a new Metrics instance
 func NewMetrics() *Metrics {
+	slog.Info("📊 Initializing Prometheus Metrics (V3)")
 	return &Metrics{
 		BlocksProcessed: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "indexer_blocks_processed_total",
@@ -159,6 +164,14 @@ func NewMetrics() *Metrics {
 		FetcherRateLimited: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "indexer_fetcher_rate_limited_total",
 			Help: "Total number of times fetcher was rate limited",
+		}),
+		FetcherJobsQueueDepth: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_fetcher_jobs_queue_depth",
+			Help: "Current number of jobs in the fetcher queue",
+		}),
+		FetcherResultsDepth: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_fetcher_results_depth",
+			Help: "Current number of results waiting in the fetcher queue",
 		}),
 		FetchTime: promauto.NewHistogram(prometheus.HistogramOpts{
 			Name:    "indexer_fetch_duration_seconds",
@@ -240,6 +253,10 @@ func NewMetrics() *Metrics {
 			Name: "indexer_start_time_seconds",
 			Help: "Unix timestamp when indexer started",
 		}),
+		SystemState: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_system_state_code",
+			Help: "Current system state code (1:idle, 2:active, 3:catching_up, 4:stalled, 5:healing, 6:degraded, 7:running, 8:optimizing, 9:throttled)",
+		}),
 		CurrentSyncHeight: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "indexer_current_sync_height",
 			Help: "Current block height being synced",
@@ -263,6 +280,10 @@ func NewMetrics() *Metrics {
 		RealtimeBPS: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "indexer_realtime_bps",
 			Help: "Real-time blocks per second",
+		}),
+		DiskFree: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "indexer_disk_free_percent",
+			Help: "Percentage of free disk space",
 		}),
 
 		tpsMonitor: monitor.NewTPSMonitor(),

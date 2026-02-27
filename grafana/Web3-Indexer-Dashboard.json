@@ -110,6 +110,182 @@
           "color": {
             "mode": "thresholds"
           },
+          "mappings": [
+            {
+              "options": {
+                "1": { "color": "blue", "text": "Idle" },
+                "2": { "color": "green", "text": "Active" },
+                "3": { "color": "yellow", "text": "CatchingUp" },
+                "4": { "color": "red", "text": "Stalled" },
+                "5": { "color": "purple", "text": "Healing" },
+                "6": { "color": "orange", "text": "Degraded" },
+                "7": { "color": "green", "text": "Running" },
+                "8": { "color": "cyan", "text": "Optimizing" },
+                "9": { "color": "red", "text": "Throttled" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "id": 103,
+      "options": {
+        "colorMode": "background",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "targets": [
+        { "expr": "indexer_system_state_code", "refId": "A" }
+      ],
+      "title": "System SSOT State",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 4 },
+      "id": 104,
+      "options": {
+        "colorMode": "value",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "indexer_sync_lag_blocks", "refId": "A" }
+      ],
+      "title": "Chain Drift",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Memory (MB)",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "decbytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 101,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "go_memstats_alloc_bytes",
+          "legendFormat": "Allocated",
+          "refId": "A"
+        },
+        {
+          "expr": "go_memstats_heap_alloc_bytes",
+          "legendFormat": "Heap",
+          "refId": "B"
+        },
+        {
+          "expr": "go_memstats_sys_bytes",
+          "legendFormat": "System",
+          "refId": "C"
+        }
+      ],
+      "title": "Runtime Health - Memory Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Depth",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 102,
+      "options": {
+        "legend": {
+          "calcs": ["max", "last"],
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "indexer_fetcher_jobs_queue_depth",
+          "legendFormat": "Fetcher Jobs Queue",
+          "refId": "A"
+        },
+        {
+          "expr": "indexer_fetcher_results_depth",
+          "legendFormat": "Fetcher Results Buffer",
+          "refId": "B"
+        },
+        {
+          "expr": "indexer_sequencer_buffer_size",
+          "legendFormat": "Sequencer Buffer",
+          "refId": "C"
+        }
+      ],
+      "title": "Internal Pipeline - Queue Depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -283,91 +459,43 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL",
-      "description": "Real-time verification of the blockchain link structure.",
+      "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "palette-classic" },
           "custom": {
-            "align": "auto",
-            "displayMode": "auto"
+            "axisLabel": "Blocks/Sec",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
           },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "hash"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 280
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "parent_hash"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 280
-              }
-            ]
-          }
-        ]
+          "unit": "ops"
+        }
       },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 16
-      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
       "id": 11,
       "options": {
-        "showHeader": true,
-        "sortBy": []
+        "legend": {
+          "calcs": ["mean", "max", "last"],
+          "displayMode": "table",
+          "placement": "bottom"
+        }
       },
-      "pluginVersion": "8.0.0",
       "targets": [
         {
-          "format": "table",
-          "group": [],
-          "metricColumn": "none",
-          "rawQuery": true,
-          "rawSql": "SELECT number, hash, parent_hash, timestamp, processed_at FROM blocks ORDER BY number DESC LIMIT 10;",
-          "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "number"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "timeColumn": "processed_at",
-          "where": []
+          "expr": "rate(indexer_blocks_processed_total[1m])",
+          "legendFormat": "Processed BPS",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(indexer_transfers_processed_total[1m])",
+          "legendFormat": "Transfers TPS",
+          "refId": "B"
         }
       ],
-      "title": "Latest Blocks (Chain Link Verification)",
-      "type": "table"
+      "title": "Engine Performance Throughput",
+      "type": "timeseries"
     },
     {
       "datasource": "Prometheus",
