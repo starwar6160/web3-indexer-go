@@ -14,7 +14,7 @@ services:
       # RPC URLs（优先使用商业节点）
       - RPC_URLS=${RPC_URLS:-https://rpc.sepolia.org,https://sepolia.publicnode.com,https://ethereum-sepolia.blockpi.network/v1/rpc/public}
       # 连接到宿主机基础设施数据库 (隔离的 debug 库)
-      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_debug?sslmode=disable}
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:uWNZugjBqixf8dxC@localhost:5432/web3_debug?sslmode=disable}
       - CHAIN_ID=${CHAIN_ID:-11155111}
       - START_BLOCK=${START_BLOCK:-latest}
       - PORT=8080  # 容器内部端口

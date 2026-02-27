@@ -156,7 +156,7 @@ func setupRPC() (engine.RPCClient, error) {
 
 func verifyNetworkWithRetry() error {
 	var verifyErr error
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 15; i++ {
 		if ethClient, err := ethclient.Dial(cfg.RPCURLs[0]); err == nil {
 			verifyErr = networkpkg.VerifyNetwork(ethClient, cfg.ChainID)
 			ethClient.Close()

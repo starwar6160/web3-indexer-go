@@ -11,7 +11,7 @@ services:
     network_mode: host
     environment:
       # Connect to the infrastructure Postgres on 15432
-      - DATABASE_URL=postgres://postgres:W3b3_Idx_Secur3_2026_Sec@localhost:15432/web3_sepolia?sslmode=disable
+      - DATABASE_URL=postgres://postgres:uWNZugjBqixf8dxC@localhost:5432/web3_sepolia?sslmode=disable
       - RPC_URLS=${RPC_URLS}
       - CHAIN_ID=11155111
       - START_BLOCK=${START_BLOCK:-latest}

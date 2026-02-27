@@ -1,23 +1,4 @@
 services:
-  # PostgreSQL 数据库
-  postgres:
-    image: postgres:15-alpine
-    container_name: web3-indexer-db
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    restart: always
-    network_mode: host
-    command: ["postgres", "-p", "15432", "-c", "synchronous_commit=off"]
-    environment:
-      POSTGRES_DB: web3_indexer
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: W3b3_Idx_Secur3_2026_Sec
-    volumes:
-      - indexer_db_data:/var/lib/postgresql/data
-      - ../../scripts/db/create_databases.sql:/docker-entrypoint-initdb.d/01-create-databases.sql:ro
-
   # Grafana
   grafana:
     image: grafana/grafana-oss:11.5.0
@@ -33,7 +14,7 @@ services:
       - ../grafana/provisioning:/etc/grafana/provisioning
     environment:
       - GF_SERVER_HTTP_PORT=4000
-      - GF_SECURITY_ADMIN_PASSWORD=W3b3_Idx_Secur3_2026_Sec
+      - GF_SECURITY_ADMIN_PASSWORD=uWNZugjBqixf8dxC
       - GF_SERVER_ROOT_URL=https://grafana-demo2.st6160.click/
       - GF_SERVER_DOMAIN=grafana-demo2.st6160.click
       - GF_SERVER_SERVE_FROM_SUB_PATH=false
@@ -57,7 +38,3 @@ services:
       - '--web.listen-address=:9091'
     volumes:
       - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-
-
-volumes:
-  indexer_db_data:

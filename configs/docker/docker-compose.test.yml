@@ -1,14 +1,6 @@
 # Test-specific compose file with isolated environment
 # Uses dynamic port mapping and no fixed container names
 services:
-  db:
-    image: postgres:15-alpine
-    # No container_name - let Docker auto-generate based on project name
-    environment:
-      POSTGRES_DB: web3_indexer_test
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql

@@ -4,11 +4,11 @@ datasources:
   - name: Web3-sepolia-DB
     type: postgres
     uid: uid_sepolia_stable
-    url: 127.0.0.1:15432
-    database: web3_sepolia
+    url: 127.0.0.1:5432
+    database: web3_indexer
     user: postgres
     secureJsonData:
-      password: W3b3_Idx_Secur3_2026_Sec
+      password: uWNZugjBqixf8dxC
     jsonData:
       sslmode: 'disable'
       maxOpenConns: 50
@@ -20,11 +20,11 @@ datasources:
   - name: Web3-demo-DB
     type: postgres
     uid: uid_demo_stable
-    url: 127.0.0.1:15432
+    url: 127.0.0.1:5432
     database: web3_demo
     user: postgres
     secureJsonData:
-      password: W3b3_Idx_Secur3_2026_Sec
+      password: uWNZugjBqixf8dxC
     jsonData:
       sslmode: 'disable'
       maxOpenConns: 50
