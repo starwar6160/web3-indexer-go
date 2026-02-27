@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - WebSocket 事件字段格式统一对齐
 
+## [2026-02-27] - Stable Version Release
+
+### Added
+- **Internal Metrics**: Added `indexer_system_state_code`, `indexer_fetcher_jobs_queue_depth`, and `indexer_fetcher_results_depth` for Prometheus monitoring.
+- **Grafana Dashboard**: Full migration to Prometheus datasource; added Runtime Health (Memory/Goroutines) and Pipeline Depth monitoring.
+- **Data Variety**: Randomized activity types (SWAP, MINT, etc.) and varied entities for Anvil simulation mode.
+
+### Fixed
+- **Infrastructure**: Fixed `DATABASE_URL` port and credentials in `config.demo.golden.env`.
+- **UI Persistence**: Fixed `SaveTransfer` to persist `activity_type` and `symbol` columns.
+- **UI Stats**: Added memory fallback for `Total Transfers` count when database is unavailable.
+- **Networking**: Enforced host mode in docker-compose to resolve cross-container communication issues.
+
 ## [2026-02-19]
 
 ### Added
