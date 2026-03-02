@@ -149,6 +149,11 @@ func (g *ConsistencyGuard) PerformLinearityCheck(ctx context.Context) error {
 			return fmt.Errorf("leap-sync failed: %w", err)
 		}
 
+		// 🚀 重置 Orchestrator 内存游标，防止内部状态不一致
+		if orch := GetOrchestrator(); orch != nil {
+			orch.ForceSetCursors(chainHead.Uint64() - 1)
+		}
+
 		g.logger.Info("✅ [Linearity] Leap-Sync complete. System teleported to chain head.")
 	}
 

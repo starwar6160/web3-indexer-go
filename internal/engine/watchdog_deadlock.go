@@ -240,6 +240,8 @@ func (dw *DeadlockWatchdog) checkAndHeal(ctx context.Context) error {
 	orchestrator := GetOrchestrator()
 	if orchestrator != nil {
 		orchestrator.SetSystemState(SystemStateHealing)
+		// 强制重置内存游标，防止时空撕裂导致 Orchestrator 缓存旧游标
+		orchestrator.ForceSetCursors(uint64(newCursorHeight))
 	}
 
 	// 🔧 Step 4/3 (补充): 重新调度 [dbHeight+1, rpcHeight] 范围的抓取任务。

@@ -120,6 +120,24 @@ func (o *Orchestrator) SnapToReality(rpcHeight uint64) {
 	}
 }
 
+// ForceSetCursors 强制设置所有游标到指定高度（用于 Leap-Sync 和死锁看门狗）
+func (o *Orchestrator) ForceSetCursors(height uint64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	slog.Warn("🎼 Orchestrator: Force setting cursors", "new_height", height)
+	o.state.LatestHeight = height
+	o.state.FetchedHeight = height
+	o.state.SyncedCursor = height
+	o.state.TargetHeight = height
+	o.snapshot = o.state
+	
+	// 如果配置了 Fetcher，也必须清空任务队列并重置
+	if o.fetcher != nil {
+		o.fetcher.ClearJobs()
+	}
+}
+
 // ResetToZero 强制归零游标 (用于全内存模式或 Anvil 重置)
 func (o *Orchestrator) ResetToZero() {
 	o.mu.Lock()
