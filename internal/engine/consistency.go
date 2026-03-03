@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 	"web3-indexer-go/internal/models"
 
 	"github.com/jmoiron/sqlx"
@@ -137,9 +138,10 @@ func (g *ConsistencyGuard) PerformLinearityCheck(ctx context.Context) error {
 	}
 
 	// 🚀 4. 深度断层判定 (Leap-Sync): 如果链头远超数据库
-	if g.demoMode && chainHead.Int64() > dbMax+1000 {
+	gap := chainHead.Int64() - dbMax
+	if g.demoMode && gap > 1000 {
 		g.logger.Warn("🚧 [Linearity] Large gap detected in Demo Mode! Executing State Collapse (Leap-Sync).",
-			"gap", chainHead.Int64()-dbMax)
+			"gap", gap)
 
 		if g.OnStatus != nil {
 			g.OnStatus("LEAPING", "Collapsing state to chain head...", 75)
@@ -155,6 +157,26 @@ func (g *ConsistencyGuard) PerformLinearityCheck(ctx context.Context) error {
 		}
 
 		g.logger.Info("✅ [Linearity] Leap-Sync complete. System teleported to chain head.")
+
+		// 🚨 新增：检测异常大gap（>100,000），表明数据库被清理，需要重启引擎
+		if gap > 100000 {
+			g.logger.Error("🚨 Demo Mode: Abnormal gap detected, triggering system reset",
+				"gap", gap,
+				"rpc_height", chainHead.Int64(),
+				"db_height", dbMax,
+				"indication", "database_cleared")
+
+			if g.OnStatus != nil {
+				g.OnStatus("RESET_REQUIRED", "Database cleared detected. System will restart...", 100)
+			}
+
+			// 给UI回调留出时间
+			time.Sleep(2 * time.Second)
+
+			// 触发容器重启以清除引擎内存状态
+			g.logger.Error("🔄 Triggering container restart to reset engine state")
+			panic("DATABASE_CLEARED: Abnormal gap > 100,000 detected. Triggering system reset.")
+		}
 	}
 
 	if g.OnStatus != nil {
