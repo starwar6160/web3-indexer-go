@@ -49,11 +49,16 @@ func (w *AsyncWriter) run() {
 			}
 			return
 		case task := <-w.taskChan:
-			// 🚀 将阈值从 90% 降低到 75%，减少高负载下的频繁触发
+			// 🚀 紧急排水检查：如果队列深度超过 75%，先保存当前 task 再排水
 			drainThreshold := cap(w.taskChan) * 75 / 100
 			if len(w.taskChan) > drainThreshold {
-				w.emergencyDrain()
+				// 🔥 FINDING-5 修复：不丢弃当前 task，先 flush 已积累的 batch + 当前 task
+				batch = append(batch, task)
+				if len(batch) > 0 {
+					w.flush(batch)
+				}
 				batch = batch[:0]
+				w.emergencyDrain()
 				continue
 			}
 			batch = append(batch, task)

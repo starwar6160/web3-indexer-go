@@ -20,6 +20,10 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		return
 	}
 
+	// 🔥 FINDING-9 修复：在事务开始前捕获快照，保证 latestHeight 与批次数据一致
+	snap := w.orchestrator.GetSnapshot()
+	latestHeight := snap.LatestHeight
+
 	tx, err := w.db.BeginTxx(w.ctx, nil)
 	if err != nil {
 		slog.Error("📝 AsyncWriter: BeginTx failed", "err", err)
@@ -58,7 +62,7 @@ func (w *AsyncWriter) flush(batch []PersistTask) {
 		}
 	}
 
-	w.updateCheckpointsTx(tx, maxHeight)
+	w.updateCheckpointsTx(tx, maxHeight, latestHeight)
 
 	if err := tx.Commit(); err != nil {
 		slog.Error("📝 AsyncWriter: Commit failed", "err", err)
@@ -82,7 +86,7 @@ func (w *AsyncWriter) handleEphemeralFlush(batch []PersistTask) {
 	w.orchestrator.AdvanceDBCursor(maxHeight)
 }
 
-func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64) {
+func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64, latestHeight uint64) {
 	maxHeightStr := fmt.Sprintf("%d", maxHeight)
 	_, err := tx.ExecContext(w.ctx, `
 		INSERT INTO sync_checkpoints (chain_id, last_synced_block)
@@ -93,11 +97,9 @@ func (w *AsyncWriter) updateCheckpointsTx(tx execer, maxHeight uint64) {
 	}
 
 	// 🛡️ 防御性位掩码：确保 uint64 → int64 转换时不会溢出
-	// math.MaxInt64 是正 int64 的最大值，用于截断溢出的高位
-	// 这在处理超大区块号或异常数据时提供安全保护
 	syncedBlock := SafeUint64ToInt64(maxHeight & uint64(math.MaxInt64))
-	snap := w.orchestrator.GetSnapshot()
-	latestBlock := SafeUint64ToInt64(snap.LatestHeight & uint64(math.MaxInt64))
+	// 🔥 FINDING-9 修复：latestBlock 从 flush 入口处的快照获取，保证与事务原子性一致
+	latestBlock := SafeUint64ToInt64(latestHeight & uint64(math.MaxInt64))
 	_, err = tx.ExecContext(w.ctx, `
 		INSERT INTO sync_status (chain_id, last_synced_block, latest_block, sync_lag, status, last_processed_block, last_processed_timestamp)
 		VALUES ($1, $2, $3, $4, 'syncing', $5, NOW())
@@ -118,24 +120,25 @@ func (w *AsyncWriter) emergencyDrain() {
 		w.emergencyDrainCooldown.Store(false)
 	}()
 
-	capacity := cap(w.taskChan)
 	w.orchestrator.SetSystemState(SystemStateDegraded)
-	var lastHeight uint64
-	targetDepth := capacity * 50 / 100
+
+	// 🔥 FINDING-5 修复：收集所有排出的任务并批量写入 DB，而非丢弃
+	// 旧代码只推进游标不写入数据，导致永久性数据空洞
+	targetDepth := cap(w.taskChan) * 50 / 100
+	megaBatch := make([]PersistTask, 0, cap(w.taskChan)-targetDepth)
 	for len(w.taskChan) > targetDepth {
 		select {
 		case task := <-w.taskChan:
-			if task.Height > lastHeight {
-				lastHeight = task.Height
-			}
-			GetMetrics().RecordBlockActivity(1)
+			megaBatch = append(megaBatch, task)
 		default:
-			goto done
+			goto flushAll
 		}
 	}
-done:
-	if lastHeight > 0 {
-		w.orchestrator.AdvanceDBCursor(lastHeight)
+flushAll:
+	if len(megaBatch) > 0 {
+		slog.Warn("📝 AsyncWriter: Emergency drain → flushing to DB",
+			"drained_tasks", len(megaBatch))
+		w.flush(megaBatch)
 	}
 	w.orchestrator.SetSystemState(SystemStateRunning)
 }
