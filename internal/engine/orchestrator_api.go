@@ -67,29 +67,15 @@ func (o *Orchestrator) Subscribe() <-chan CoordinatorState {
 }
 
 // UpdateChainHead 更新链头高度
+// 🔥 FINDING-1 修复：通过 Actor 通道路由，消除与 loop() 协程的 data race
 func (o *Orchestrator) UpdateChainHead(height uint64) {
-	o.mu.Lock()
-	if height > o.state.LatestHeight {
-		o.state.LatestHeight = height
-		if height > o.state.SafetyBuffer {
-			o.state.TargetHeight = height - o.state.SafetyBuffer
-		} else {
-			o.state.TargetHeight = 0
-		}
-		o.snapshot = o.state
-		o.state.UpdatedAt = time.Now()
-	}
-	o.mu.Unlock()
+	o.Dispatch(CmdUpdateChainHeight, height)
 }
 
 // AdvanceDBCursor 前进数据库游标
+// 🔥 FINDING-1 修复：通过 Actor 通道路由，复用 CmdCommitDisk 处理逻辑
 func (o *Orchestrator) AdvanceDBCursor(height uint64) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if height > o.state.SyncedCursor {
-		o.state.SyncedCursor = height
-		slog.Info("🎼 Orchestrator: Synced cursor advanced", "height", height)
-	}
+	o.Dispatch(CmdCommitDisk, height)
 }
 
 // SetSystemState 设置系统状态

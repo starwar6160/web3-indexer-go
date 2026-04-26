@@ -91,6 +91,13 @@ func (o *Orchestrator) SetAsyncWriter(writer *AsyncWriter) {
 	slog.Info("🎼 Orchestrator: AsyncWriter linked")
 }
 
+// GetAsyncWriter 返回当前的异步写入器
+func (o *Orchestrator) GetAsyncWriter() *AsyncWriter {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.asyncWriter
+}
+
 // RestoreState 恢复状态（用于检查点热启动）
 func (o *Orchestrator) RestoreState(state CoordinatorState) {
 	o.mu.Lock()
