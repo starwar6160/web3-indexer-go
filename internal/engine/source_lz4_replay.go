@@ -106,17 +106,24 @@ func (s *Lz4ReplaySource) FetchLogs(ctx context.Context, start, end *big.Int) ([
 	targetStart := start.Uint64()
 	targetEnd := end.Uint64()
 
+	// 🔥 FINDING-8 修复：使用 json.RawMessage 延迟 Data 字段解析
+	// 避免 interface{} → json.Marshal → json.Unmarshal 的 GC 往返
+	type replayEntry struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+
 	for s.scanner.Scan() {
 		line := s.scanner.Bytes()
-		var entry RecordEntry
+		var entry replayEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
 		}
 
 		if entry.Type == "block_data" {
-			// 🔧 修复：手动解析 BlockData，因为 *big.Int 需要特殊处理
-			dataMap, ok := entry.Data.(map[string]interface{})
-			if !ok {
+			// 🔥 FINDING-8 修复：Data 已是 json.RawMessage，直接解析成 map
+			var dataMap map[string]interface{}
+			if err := json.Unmarshal(entry.Data, &dataMap); err != nil {
 				continue
 			}
 
@@ -132,20 +139,14 @@ func (s *Lz4ReplaySource) FetchLogs(ctx context.Context, start, end *big.Int) ([
 				bd.RangeEnd = parseBigInt(rangeVal)
 			}
 
-			// 其他字段使用标准 JSON 解析
-			tempJSON, err := json.Marshal(entry.Data)
-			if err != nil {
-				continue
-			}
-
-			// 创建一个临时结构来接收其他字段
+			// 🔥 FINDING-8 修复：直接从 RawMessage 解析，避免 Marshal 往返
 			var tempStruct struct {
 				Block interface{}            `json:"Block"`
 				Err   map[string]interface{} `json:"Err"`
 				Logs  []interface{}          `json:"Logs"`
 			}
 
-			if err := json.Unmarshal(tempJSON, &tempStruct); err != nil {
+			if err := json.Unmarshal(entry.Data, &tempStruct); err != nil {
 				continue
 			}
 
@@ -253,4 +254,108 @@ func (s *Lz4ReplaySource) Reset() error {
 	buf := make([]byte, 0, 1024*1024)
 	s.scanner.Buffer(buf, 10*1024*1024)
 	return nil
+}
+
+// StreamBlocks 推送模式：由 Source 驱动逐块推送到 channel
+// 🔥 FINDING-6 修复：解决 Pull 模式下 scanner 前进导致稀疏数据漏失的问题
+// 调用方只需从 channel 读取，不需要管理区块范围
+func (s *Lz4ReplaySource) StreamBlocks(ctx context.Context, out chan<- BlockData) error {
+	for s.scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		line := s.scanner.Bytes()
+		var entry RecordEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if entry.Type != "block_data" {
+			continue
+		}
+
+		// 解析 BlockData
+		dataMap, ok := entry.Data.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		var bd BlockData
+		if numVal, ok := dataMap["Number"]; ok {
+			bd.Number = parseBigInt(numVal)
+		}
+		if bd.Number == nil {
+			continue
+		}
+		if rangeVal, ok := dataMap["RangeEnd"]; ok {
+			bd.RangeEnd = parseBigInt(rangeVal)
+		}
+
+		// 解析 Block、Logs 等字段
+		tempJSON, err := json.Marshal(entry.Data)
+		if err != nil {
+			continue
+		}
+		var tempStruct struct {
+			Block interface{}           `json:"Block"`
+			Logs  []interface{}         `json:"Logs"`
+		}
+		if err := json.Unmarshal(tempJSON, &tempStruct); err != nil {
+			continue
+		}
+		if tempStruct.Block != nil {
+			blockMap, ok := tempStruct.Block.(map[string]interface{})
+			if ok && len(blockMap) == 2 {
+				continue // 不完整的 Block 元数据
+			}
+			blockJSON, err := json.Marshal(tempStruct.Block)
+			if err == nil {
+				bd.Block = new(types.Block)
+				if err := json.Unmarshal(blockJSON, bd.Block); err != nil {
+					bd.Block = nil
+				}
+			}
+		}
+		if tempStruct.Logs != nil {
+			logsJSON, err := json.Marshal(tempStruct.Logs)
+			if err == nil {
+				if err := json.Unmarshal(logsJSON, &bd.Logs); err != nil {
+					bd.Logs = nil
+				}
+			}
+		}
+
+		// 倍速控制
+		if s.speedFactor > 0 && s.lastTime > 0 && bd.Block != nil {
+			currentTime := bd.Block.Time()
+			if currentTime > s.lastTime {
+				diff := currentTime - s.lastTime
+				sleepDur := time.Duration(float64(diff)/s.speedFactor) * time.Second
+				if sleepDur > 2*time.Second {
+					sleepDur = 200 * time.Millisecond
+				}
+				select {
+				case <-time.After(sleepDur):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		}
+		if bd.Block != nil {
+			s.lastTime = bd.Block.Time()
+		}
+
+		s.lastNum = bd.Number.Uint64()
+
+		// 推送到 channel
+		select {
+		case out <- bd:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	return s.scanner.Err()
 }
