@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -130,13 +131,35 @@ func connectDB(ctx context.Context, isLocalAnvil bool) (*sqlx.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	maxConns := 25
 	if isLocalAnvil {
-		db.SetMaxOpenConns(100)
-		db.SetMaxIdleConns(20)
-	} else {
-		db.SetMaxOpenConns(25)
-		db.SetMaxIdleConns(10)
+		maxConns = 100
 	}
+	db.SetMaxOpenConns(maxConns)
+	// 🔥 FINDING-4 修复：MaxIdleConns = MaxOpenConns，防止空闲连接被关闭后重建
+	db.SetMaxIdleConns(maxConns)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
+
+	// 🔥 FINDING-4 修复：连接池预热 — 启动时立即建立所有连接
+	// Go 的 database/sql 使用懒连接策略，首次高并发请求会触发 connectionOpener 瓶颈
+	warmupCtx, warmupCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer warmupCancel()
+	conns := make([]*sql.Conn, 0, maxConns)
+	for i := 0; i < maxConns; i++ {
+		conn, err := db.Conn(warmupCtx)
+		if err != nil {
+			slog.Warn("⚠️ DB pool warmup partial", "established", i, "target", maxConns, "err", err)
+			break
+		}
+		conns = append(conns, conn)
+	}
+	for _, conn := range conns {
+		conn.Close() // 归还到 idle pool
+	}
+	slog.Info("✅ DB connection pool warmed up", "connections", len(conns), "max", maxConns)
+
 	return db, nil
 }
 

@@ -21,10 +21,9 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	}
 
 	var wg sync.WaitGroup
-	sm.fetcher.Start(ctx, &wg)
-	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 100), nil, engine.GetMetrics())
-	sm.fetcher.SetSequencer(sequencer)
 
+	// 🔥 FINDING-2 修复：先创建所有组件并连接依赖，再启动 goroutine
+	// Phase 1: 创建组件（不启动 goroutine）
 	strategy := engine.GetStrategy(cfg.ChainID)
 	orchestrator := engine.GetOrchestrator()
 	orchestrator.Init(ctx, sm.fetcher, strategy)
@@ -32,9 +31,13 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 		slog.Error("❌ Strategy startup failed", "err", err)
 	}
 
+	// AsyncWriter 必须在 Fetcher 启动前就绑定到 Orchestrator
 	asyncWriter := engine.NewAsyncWriter(sm.Processor.GetDB(), orchestrator, !strategy.ShouldPersist(), cfg.ChainID)
 	orchestrator.SetAsyncWriter(asyncWriter)
 	asyncWriter.Start()
+
+	sequencer := engine.NewSequencerWithFetcher(sm.Processor, sm.fetcher, startBlock, cfg.ChainID, sm.fetcher.Results, make(chan error, 100), nil, engine.GetMetrics())
+	sm.fetcher.SetSequencer(sequencer)
 
 	healer := engine.NewSelfHealer(orchestrator)
 	go healer.Start(ctx)
@@ -47,9 +50,20 @@ func initServices(ctx context.Context, sm *ServiceManager, startBlock *big.Int, 
 	}
 	watchdog.Start(ctx)
 
+	// Phase 2: 启动消费端（Sequencer 先于 Fetcher/TailFollow）
+	sequencerReady := make(chan struct{})
 	wg.Add(1)
-	go runSequencerWithSelfHealing(ctx, sequencer, &wg)
-	go recovery.WithRecoveryNamed("tail_follow", func() { sm.StartTailFollow(ctx, startBlock) })
+	go func() {
+		close(sequencerReady) // 通知 TailFollow 可以开始调度
+		runSequencerWithSelfHealing(ctx, sequencer, &wg)
+	}()
+
+	// Phase 3: 启动生产端（等待 Sequencer 就绪后再调度）
+	sm.fetcher.Start(ctx, &wg)
+	go recovery.WithRecoveryNamed("tail_follow", func() {
+		<-sequencerReady // 等待 Sequencer 就绪
+		sm.StartTailFollow(ctx, startBlock)
+	})
 
 	if cfg.EnableSimulator {
 		wg.Add(1)

@@ -25,6 +25,7 @@ type Server struct {
 	signer      *engine.SignerMachine
 	chainID     int64
 	mu          sync.RWMutex
+	srv         *http.Server
 }
 
 func NewServer(db *sqlx.DB, wsHub *web.Hub, port, title string) *Server {
@@ -133,7 +134,8 @@ func (s *Server) Start() error {
 	mux.Handle("/metrics", promhttp.Handler())
 
 	slog.Info("🌐 Server listening", "port", s.port)
-	srv := &http.Server{
+	s.mu.Lock()
+	s.srv = &http.Server{
 		Addr: ":" + s.port,
 		Handler: VisitorStatsMiddleware(func() *sqlx.DB {
 			s.mu.RLock()
@@ -145,5 +147,19 @@ func (s *Server) Start() error {
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	return srv.ListenAndServe()
+	s.mu.Unlock()
+	return s.srv.ListenAndServe()
+}
+
+// Shutdown 优雅关闭 API 服务
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.RLock()
+	srv := s.srv
+	s.mu.RUnlock()
+
+	if srv != nil {
+		slog.Info("🌐 API Server shutting down...")
+		return srv.Shutdown(ctx)
+	}
+	return nil
 }

@@ -57,8 +57,33 @@ func run() error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	slog.Info("🏁 System Operational.")
-	<-sigCh
+	slog.Info("🏁 System Operational. Press Ctrl+C to stop.")
+	sig := <-sigCh
+	slog.Info("🛑 Signal received, initiating graceful shutdown...", "signal", sig)
+
+	// 1. 创建 15 秒超时 context 用于关闭流程
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
+
+	// 2. 首先关闭 API Server（停止接收新连接）
+	if err := apiServer.Shutdown(shutdownCtx); err != nil {
+		slog.Error("🛑 API Server shutdown error", "err", err)
+	} else {
+		slog.Info("✅ API Server shut down gracefully")
+	}
+
+	// 3. 取消全局 Context，通知 Sequencer, Fetcher 等组件停止
+	cancel()
+
+	// 4. 关闭 Orchestrator（会触发 AsyncWriter 的 Flush 和 Shutdown）
+	orchestrator := engine.GetOrchestrator()
+	if orchestrator != nil {
+		slog.Info("🎼 Shutting down Orchestrator and Flushing DB...")
+		orchestrator.Shutdown()
+		slog.Info("✅ Orchestrator and AsyncWriter shut down")
+	}
+
+	slog.Info("🏁 Graceful shutdown complete. Goodbye!")
 	return nil
 }
 
