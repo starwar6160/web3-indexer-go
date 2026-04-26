@@ -79,6 +79,7 @@ func (s *Sequencer) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			s.drainBuffer(ctx)
 			return
 
 		case <-stallTicker.C:
@@ -134,60 +135,71 @@ func (s *Sequencer) handleStall(ctx context.Context) {
 	}
 	s.mu.RUnlock()
 
-			// 🛡️ 演示模式增强：55 秒阈值（从 60 秒略微提前，防止测试竞态）
-			if idleTime > 55*time.Second {
-		
-			if minBuffered != nil && minBuffered.Cmp(expectedCopy) > 0 {
-				gapEnd := new(big.Int).Sub(minBuffered, big.NewInt(1))
-				gapSize := new(big.Int).Sub(minBuffered, expectedCopy).Int64()
-				Logger.Error("🚨 CRITICAL_GAP_DETECTED", slog.String("missing_from", expectedStr), slog.String("missing_to", gapEnd.String()), slog.Int64("gap_size", gapSize), slog.Int("buffered_blocks", bufferLen), slog.Int("gap_fill_attempt", s.gapFillCount+1))
-	
-				// 🛡️ Gap Bypass Strategy: 最多重试 3 次，然后强制跳过
-				if s.fetcher != nil && s.gapFillCount < 3 {
-					Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill", slog.String("from", expectedStr), slog.String("to", gapEnd.String()), slog.Int("attempt", s.gapFillCount+1))
-					go func(gapCtx context.Context) {
-						if serr := s.fetcher.Schedule(gapCtx, expectedCopy, gapEnd); serr != nil {
-							Logger.Warn("gap_refetch_schedule_failed", "err", serr)
-						}
-					}(ctx)
-					s.gapFillCount++
-				} else {
-					// 🚀 强制空洞跳过（Forced Gap Bypass）
-					skippedTo := new(big.Int).Sub(minBuffered, big.NewInt(1))
-					Logger.Error("🚧 GAP_BYPASS: Forced skip after max retries — pipeline unblocked",
-						slog.String("skipped_from", expectedStr),
-						slog.String("skipped_to", skippedTo.String()),
-						slog.String("resume_at", minBuffered.String()),
-						slog.Int("gap_fill_attempts", s.gapFillCount),
-						slog.Int64("gap_size", gapSize),
-						slog.String("strategy", "backfill_async"),
-						slog.String("action_required", "replay skipped range to restore data completeness"))
-	
-					s.lastProgressAt = time.Now()
-	
-					s.mu.Lock()
-					s.expectedBlock.Set(minBuffered)
-					s.gapFillCount = 0
-					s.mu.Unlock()
-				}
+	if idleTime > 55*time.Second {
+		if minBuffered != nil && minBuffered.Cmp(expectedCopy) > 0 {
+			gapEnd := new(big.Int).Sub(minBuffered, big.NewInt(1))
+			gapSize := new(big.Int).Sub(minBuffered, expectedCopy).Int64()
+			Logger.Error("🚨 CRITICAL_GAP_DETECTED",
+				slog.String("missing_from", expectedStr),
+				slog.String("missing_to", gapEnd.String()),
+				slog.Int64("gap_size", gapSize),
+				slog.Int("buffered_blocks", bufferLen),
+				slog.Int("gap_fill_attempt", s.gapFillCount+1))
+
+			if s.fetcher != nil && s.gapFillCount < 3 {
+				Logger.Info("🛡️ SELF_HEALING: Triggering batch gap-fill",
+					slog.String("from", expectedStr),
+					slog.String("to", gapEnd.String()),
+					slog.Int("attempt", s.gapFillCount+1))
+				go func(gapCtx context.Context) {
+					if serr := s.fetcher.Schedule(gapCtx, expectedCopy, gapEnd); serr != nil {
+						Logger.Warn("gap_refetch_schedule_failed", "err", serr)
+					}
+				}(ctx)
+				s.gapFillCount++
 			} else {
-				// 🚨 新增：如果 buffer 为空且超过 60 秒，说明 Processor 或 MetadataEnricher 阻塞
-				Logger.Error("🚨 CRITICAL_STALL: Processor/MetadataEnricher blocked, forcing skip",
-					slog.String("stuck_at", expectedStr),
-					slog.Duration("idle_time", idleTime),
-					slog.Int("buffer_size", bufferLen))
-	
-				s.lastProgressAt = time.Now() // reset BEFORE lock to avoid immediate re-trigger
-	
+				skippedTo := new(big.Int).Sub(minBuffered, big.NewInt(1))
+				Logger.Error("🚧 GAP_BYPASS: Forced skip after max retries",
+					slog.String("skipped_from", expectedStr),
+					slog.String("skipped_to", skippedTo.String()),
+					slog.String("resume_at", minBuffered.String()),
+					slog.Int("gap_fill_attempts", s.gapFillCount),
+					slog.Int64("gap_size", gapSize))
+
+				// 🔥 FINDING-7: 通过 Orchestrator 持久化 gap 审计记录
+				GetOrchestrator().DispatchLog("AUDIT", "GAP_BYPASS",
+					"skipped_from", expectedStr,
+					"skipped_to", skippedTo.String(),
+					"resume_at", minBuffered.String(),
+					"gap_size", gapSize,
+					"gap_fill_attempts", s.gapFillCount)
+				if s.metrics != nil && s.metrics.SelfHealingTriggered != nil {
+					s.metrics.SelfHealingTriggered.Inc()
+				}
+
+				s.lastProgressAt = time.Now()
 				s.mu.Lock()
-				s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
+				s.expectedBlock.Set(minBuffered)
 				s.gapFillCount = 0
-							s.mu.Unlock()
-						}
-					} else if idleTime > 30*time.Second {
-				
-		// 30 秒警告级别（从 Error 降为 Warn）
-		Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED", slog.String("expected", expectedStr), slog.Int("buffer_size", bufferLen), slog.Duration("idle_time", idleTime))
+				s.mu.Unlock()
+			}
+		} else {
+			Logger.Error("🚨 CRITICAL_STALL: Processor blocked, forcing skip",
+				slog.String("stuck_at", expectedStr),
+				slog.Duration("idle_time", idleTime),
+				slog.Int("buffer_size", bufferLen))
+
+			s.lastProgressAt = time.Now()
+			s.mu.Lock()
+			s.expectedBlock.Add(s.expectedBlock, big.NewInt(1))
+			s.gapFillCount = 0
+			s.mu.Unlock()
+		}
+	} else if idleTime > 30*time.Second {
+		Logger.Warn("⚠️ SEQUENCER_STALLED_DETECTED",
+			slog.String("expected", expectedStr),
+			slog.Int("buffer_size", bufferLen),
+			slog.Duration("idle_time", idleTime))
 	}
 }
 

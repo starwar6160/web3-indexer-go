@@ -12,9 +12,6 @@ import (
 )
 
 func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	start := time.Now()
 	defer func() {
 		dur := time.Since(start)
@@ -25,11 +22,23 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 		}
 	}()
 
+	// 🔥 FINDING-3 修复：分三阶段处理，避免持锁执行 IO
+	//
+	// Phase 1: 分类（持锁，纯内存操作）
+	s.mu.Lock()
+
 	// 背压控制：如果缓冲区过大，暂停 Fetcher
 	if s.fetcher != nil && len(s.buffer) > 2000 && !s.fetcher.IsPaused() {
 		Logger.Warn("⚠️ sequencer_buffer_high_pausing_fetcher", slog.Int("buffer_size", len(s.buffer)))
 		s.fetcher.Pause()
 	}
+
+	// 收集顺序块用于批量处理
+	var sequentialBatch []BlockData
+	var nextExpected *big.Int
+	var bufferBlocks []BlockData // 乱序块，需要暂存
+	var singleBlocks []BlockData // 需要单条处理的块（含错误等）
+	batchConsumed := 0
 
 	i := 0
 	for i < len(batch) {
@@ -39,25 +48,21 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 			blockNum = data.Block.Number()
 		}
 
-		// 尝试批量顺序处理
-		// 只有当当前块没有错误时才尝试批量，否则走单条处理以触发重试逻辑
 		if blockNum != nil && blockNum.Cmp(s.expectedBlock) == 0 && data.Err == nil {
-			sequentialBatch := []BlockData{data}
-			nextExpected := new(big.Int).Add(s.expectedBlock, big.NewInt(1))
+			// 从当前 expectedBlock 开始的连续块
+			sequentialBatch = []BlockData{data}
+			nextExpected = new(big.Int).Add(s.expectedBlock, big.NewInt(1))
 
 			j := i + 1
 			for j < len(batch) {
 				nextData := batch[j]
-				// 如果发现错误，立即停止批次收集，确保错误块通过 handleBlockLocked 处理
 				if nextData.Err != nil {
 					break
 				}
-
 				nNum := nextData.Number
 				if nNum == nil && nextData.Block != nil {
 					nNum = nextData.Block.Number()
 				}
-
 				if nNum != nil && nNum.Cmp(nextExpected) == 0 {
 					sequentialBatch = append(sequentialBatch, nextData)
 					nextExpected.Add(nextExpected, big.NewInt(1))
@@ -66,31 +71,74 @@ func (s *Sequencer) handleBatch(ctx context.Context, batch []BlockData) error {
 					break
 				}
 			}
-
-			if len(sequentialBatch) > 1 {
-				Logger.Info("sequencer_processing_batch",
-					slog.Int("size", len(sequentialBatch)),
-					slog.String("from", sequentialBatch[0].Number.String()),
-					slog.String("to", sequentialBatch[len(sequentialBatch)-1].Number.String()),
-				)
-				if err := s.processor.ProcessBatch(ctx, sequentialBatch, s.chainID); err != nil {
-					return err
-				}
-				s.expectedBlock.Set(nextExpected)
-				i = j
-				s.processBufferContinuationsLocked(ctx)
-				continue
-			}
+			batchConsumed = j
+			break // 找到了顺序批次，离开分类阶段
 		}
 
-		if err := s.handleBlockLocked(ctx, data); err != nil {
-			// 如果返回错误，说明是真正的不可恢复错误
-			return err
-		}
-		// 即使 handleBlockLocked 返回 nil (临时抓取失败)，我们也继续处理批次中的其它块
-		// 该块会留在 buffer 中等待下次调度或自愈。
+		// 非顺序块：分类为 buffer 或 single
+		singleBlocks = append(singleBlocks, data)
 		i++
 	}
+
+	// 保存当前 expectedBlock 副本用于 IO 阶段
+	expectedCopy := new(big.Int).Set(s.expectedBlock)
+
+	s.mu.Unlock()
+
+	// Phase 2: IO 操作（无锁，不阻塞监控读取）
+	if len(sequentialBatch) > 1 {
+		Logger.Info("sequencer_processing_batch",
+			slog.Int("size", len(sequentialBatch)),
+			slog.String("from", sequentialBatch[0].Number.String()),
+			slog.String("to", sequentialBatch[len(sequentialBatch)-1].Number.String()),
+		)
+		if err := s.processor.ProcessBatch(ctx, sequentialBatch, s.chainID); err != nil {
+			return err
+		}
+
+		// Phase 3A: 提交顺序批次结果（持锁）
+		s.mu.Lock()
+		s.expectedBlock.Set(nextExpected)
+		s.lastProgressAt = time.Now()
+		s.gapFillCount = 0
+		s.processBufferContinuationsLocked(ctx)
+		s.mu.Unlock()
+
+		// 处理剩余的非顺序块
+		remaining := batch[batchConsumed:]
+		for _, data := range remaining {
+			if err := s.handleBlock(ctx, data); err != nil {
+				return err
+			}
+		}
+	} else if len(sequentialBatch) == 1 {
+		// 单条顺序块走 handleBlock 路径（内部会加锁并处理 IO）
+		if err := s.handleBlock(ctx, sequentialBatch[0]); err != nil {
+			return err
+		}
+		remaining := batch[batchConsumed:]
+		for _, data := range remaining {
+			if err := s.handleBlock(ctx, data); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Phase 3B: 处理非顺序块（每条独立加锁解锁，IO 在锁外）
+	for _, data := range singleBlocks {
+		if err := s.handleBlock(ctx, data); err != nil {
+			return err
+		}
+	}
+
+	// 处理 buffer 中待存的块
+	for _, data := range bufferBlocks {
+		if err := s.handleBlock(ctx, data); err != nil {
+			return err
+		}
+	}
+
+	_ = expectedCopy // used for potential rollback in future
 	return nil
 }
 
