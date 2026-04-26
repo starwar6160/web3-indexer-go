@@ -48,6 +48,43 @@
 *   **API 响应签名**：所有响应使用 **Ed25519** 签名，支持端到端完整性验证
 *   **物理隔离**：基于 Docker 的环境分离防止数据泄露
 
+### 数据校验与完整性流水线 (Data Validation Pipeline)
+
+```mermaid
+graph TD
+    subgraph 数据校验与完整性流水线
+        direction TB
+        
+        subgraph Phase 1: 启动期网络校验
+            Boot[系统启动] --> VerifyID{校验 ChainID<br>pkg/network/verify.go}
+            VerifyID -- 不匹配 --> Halt[FATAL: 阻止跨环境数据库污染]
+            VerifyID -- 匹配 --> Align
+        end
+
+        subgraph Phase 2: 基础设施对齐
+            Align{DB 与 RPC 高度对比<br>internal/engine/integrity.go}
+            Align -- DB > RPC --> Prune[物理剪枝 PruneFutureData<br>修复 Anvil 重置造成的时空穿越]
+            Align -- DB <= RPC --> Guard[线性度防线检查]
+        end
+        
+        Guard --> Engine[启动核心数据管道]
+
+        subgraph Phase 3: 端到端 API 完整性
+            Req[API 请求] --> Query[查询经验证数据]
+            Query --> Sign[Ed25519 签名机<br>internal/engine/signer.go]
+            Sign --> Envelope[信封封装 SignedPayload]
+            Envelope --> Verifier[客户端验证签名]
+        end
+        
+        Engine -.-> Req
+    end
+    
+    classDef secure fill:#e8f4f8,stroke:#2b6cb0,stroke-width:2px;
+    classDef alert fill:#fed7d7,stroke:#c53030,stroke-width:2px;
+    class VerifyID,Align,Sign secure;
+    class Halt,Prune alert;
+```
+
 ---
 
 *MIT 许可证 — 可直接用于商业生产环境*

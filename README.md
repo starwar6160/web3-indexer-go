@@ -51,6 +51,43 @@ Staging-to-Production workflow ensures stable releases:
 *   **API Response Signing**: All responses signed with **Ed25519** for end-to-end integrity verification
 *   **Physical Isolation**: Docker-based environment separation prevents data leakage
 
+### Data Validation & Integrity Pipeline
+
+```mermaid
+graph TD
+    subgraph Data Validation & Integrity Pipeline
+        direction TB
+        
+        subgraph Phase 1: Network Verification
+            Boot[System Boot] --> VerifyID{Verify ChainID<br>pkg/network/verify.go}
+            VerifyID -- Mismatch --> Halt[FATAL: Prevent DB Contamination]
+            VerifyID -- Match --> Align
+        end
+
+        subgraph Phase 2: State Alignment
+            Align{DB vs RPC Height<br>internal/engine/integrity.go}
+            Align -- DB > RPC --> Prune[PruneFutureData<br>Recover from Anvil Reset]
+            Align -- DB <= RPC --> Guard[Linearity Guard Check]
+        end
+        
+        Guard --> Engine[Start Data Pipeline]
+
+        subgraph Phase 3: E2E API Integrity
+            Req[API Request] --> Query[Query DB]
+            Query --> Sign[Ed25519 Signer<br>internal/engine/signer.go]
+            Sign --> Envelope[SignedPayload]
+            Envelope --> Verifier[Client Signature Verifier]
+        end
+        
+        Engine -.-> Req
+    end
+    
+    classDef secure fill:#e8f4f8,stroke:#2b6cb0,stroke-width:2px;
+    classDef alert fill:#fed7d7,stroke:#c53030,stroke-width:2px;
+    class VerifyID,Align,Sign secure;
+    class Halt,Prune alert;
+```
+
 ---
 
 *MIT License — Production-ready for commercial deployments*
